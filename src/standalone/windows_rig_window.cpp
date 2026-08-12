@@ -317,6 +317,7 @@ void Win32RigWindow::Destroy() noexcept {
     midi_timer_enabled_ = false;
     if (midi_session_ != nullptr) {
         midi_session_->Close();
+        midi_session_ = nullptr;
     }
     if (open_button_ != nullptr) {
         DestroyWindow(open_button_);
@@ -364,6 +365,10 @@ void Win32RigWindow::SetFileDialogProvider(FileDialogProvider provider) {
 }
 
 void Win32RigWindow::SetMidiControlSession(StandaloneMidiControlSession* session) {
+    if (midi_session_ != nullptr && midi_session_ != session) {
+        midi_session_->Close();
+        midi_session_ = nullptr;
+    }
     midi_session_ = session;
     if (window_ != nullptr) {
         KillTimer(window_, 1U);

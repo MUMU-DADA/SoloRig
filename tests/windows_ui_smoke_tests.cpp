@@ -224,7 +224,39 @@ TEST_CASE("Win32 standalone editor controls MIDI session by messages without a s
     REQUIRE(window.Handle() != nullptr);
     REQUIRE(window.TriggerMidiOpen());
     REQUIRE(source->open);
+    const auto close_count_before_destroy = source->close_count;
     window.Destroy();
     REQUIRE(window.Handle() == nullptr);
     REQUIRE(!source->open);
+    REQUIRE(source->close_count > close_count_before_destroy);
+    REQUIRE(!window.MidiDrainTimerEnabled());
+}
+
+TEST_CASE("Win32 standalone editor closes a replaced MIDI session before rebinding") {
+    const auto instance = GetModuleHandleW(nullptr);
+    REQUIRE(instance != nullptr);
+    solo_rig::RigEditorViewModel editor;
+    auto first_fake = std::make_unique<FakeWindowMidiSource>();
+    auto* first_source = first_fake.get();
+    auto second_fake = std::make_unique<FakeWindowMidiSource>();
+    auto* second_source = second_fake.get();
+    solo_rig::standalone::StandaloneMidiControlSession first_session(editor, std::move(first_fake));
+    solo_rig::standalone::StandaloneMidiControlSession second_session(editor, std::move(second_fake));
+
+    solo_rig::standalone::Win32RigWindow window;
+    REQUIRE(window.Create(instance, editor, false));
+    window.SetMidiControlSession(&first_session);
+    REQUIRE(window.TriggerMidiRefresh());
+    REQUIRE(window.TriggerMidiOpen());
+    REQUIRE(first_source->open);
+    const auto close_count_before_replace = first_source->close_count;
+
+    window.SetMidiControlSession(&second_session);
+    REQUIRE(first_source->close_count > close_count_before_replace);
+    REQUIRE(!first_session.IsOpen());
+    REQUIRE(!first_source->open);
+    REQUIRE(!second_session.IsOpen());
+    REQUIRE(!second_source->open);
+    REQUIRE(!window.MidiDrainTimerEnabled());
+    window.Destroy();
 }
