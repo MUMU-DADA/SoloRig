@@ -52,6 +52,7 @@ add_library(solo_rig_core STATIC
     src/core/effect_descriptor.cpp
     src/core/quality_policy.cpp
     src/core/realtime_load_meter.cpp
+    src/core/rig_runtime.cpp
     src/dsp/diode_clipper.cpp
     src/dsp/digital_delay.cpp
     src/dsp/impulse_response.cpp
@@ -154,6 +155,7 @@ if(BUILD_TESTING)
         tests/json_tests.cpp
         tests/module_package_tests.cpp
         tests/module_runtime_tests.cpp
+        tests/rig_runtime_tests.cpp
         tests/preset_tests.cpp
         tests/preset_controller_tests.cpp
         tests/theme_tests.cpp

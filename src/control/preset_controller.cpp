@@ -1,7 +1,10 @@
 #include "control/preset_controller.hpp"
 
+#include "core/rig_runtime.hpp"
+
 #include <algorithm>
 #include <cmath>
+#include <new>
 #include <numbers>
 #include <set>
 #include <string_view>
@@ -106,19 +109,97 @@ std::variant<PreparedPreset, PresetPreparationError> PresetPreparationService::P
 }
 
 void RealtimePresetMailbox::Submit(const PreparedPreset& preset) noexcept {
-    pending_.store(&preset, std::memory_order_release);
+    if (preset.slot_state == nullptr) {
+        pending_.store(&preset, std::memory_order_release);
+        return;
+    }
+    static_cast<void>(Publish(preset));
+}
+
+bool RealtimePresetMailbox::Publish(const PreparedPreset& preset) noexcept {
+    if (preset.slot_state == nullptr) {
+        const PreparedPreset* expected = nullptr;
+        return pending_.compare_exchange_strong(expected, &preset, std::memory_order_release,
+                                                std::memory_order_relaxed);
+    }
+    auto expected_state = PreparedSlotState::Published;
+    if (!preset.slot_state->compare_exchange_strong(expected_state,
+                                                    PreparedSlotState::Pending,
+                                                    std::memory_order_acq_rel,
+                                                    std::memory_order_acquire)) {
+        return false;
+    }
+    const PreparedPreset* expected_pending = nullptr;
+    if (!pending_.compare_exchange_strong(expected_pending, &preset, std::memory_order_release,
+                                          std::memory_order_relaxed)) {
+        preset.slot_state->store(PreparedSlotState::Published, std::memory_order_release);
+        return false;
+    }
+    return true;
+}
+
+const PreparedPreset* RealtimePresetMailbox::BeginPendingAtControlPoint() noexcept {
+    const auto* pending = pending_.exchange(nullptr, std::memory_order_acq_rel);
+    if (pending != nullptr && pending->slot_state != nullptr) {
+        auto expected = PreparedSlotState::Pending;
+        if (!pending->slot_state->compare_exchange_strong(expected,
+                                                          PreparedSlotState::Transition,
+                                                          std::memory_order_acq_rel,
+                                                          std::memory_order_acquire)) {
+            return nullptr;
+        }
+    }
+    return pending;
+}
+
+void RealtimePresetMailbox::CommitActiveAtControlPoint(const PreparedPreset* preset) noexcept {
+    if (preset == nullptr) {
+        return;
+    }
+    if (preset->slot_state != nullptr) {
+        auto expected = PreparedSlotState::Transition;
+        static_cast<void>(preset->slot_state->compare_exchange_strong(expected,
+                                                                       PreparedSlotState::Active,
+                                                                       std::memory_order_acq_rel,
+                                                                       std::memory_order_acquire));
+    }
+    const auto* previous = active_.exchange(preset, std::memory_order_acq_rel);
+    if (previous != nullptr && previous != preset) {
+        RetireAtControlPoint(previous);
+    }
+}
+
+void RealtimePresetMailbox::RetireAtControlPoint(const PreparedPreset* preset) noexcept {
+    if (preset == nullptr || preset->slot_state == nullptr) {
+        return;
+    }
+    auto expected = PreparedSlotState::Active;
+    if (!preset->slot_state->compare_exchange_strong(expected,
+                                                     PreparedSlotState::Retired,
+                                                     std::memory_order_release,
+                                                     std::memory_order_acquire)) {
+        expected = PreparedSlotState::Transition;
+        static_cast<void>(preset->slot_state->compare_exchange_strong(expected,
+                                                                       PreparedSlotState::Retired,
+                                                                       std::memory_order_release,
+                                                                       std::memory_order_acquire));
+    }
 }
 
 const PreparedPreset* RealtimePresetMailbox::ApplyPendingAtControlPoint() noexcept {
-    const auto* pending = pending_.exchange(nullptr, std::memory_order_acq_rel);
+    const auto* pending = BeginPendingAtControlPoint();
     if (pending != nullptr) {
-        active_.store(pending, std::memory_order_release);
+        CommitActiveAtControlPoint(pending);
     }
     return active_.load(std::memory_order_acquire);
 }
 
 const PreparedPreset* RealtimePresetMailbox::Active() const noexcept {
     return active_.load(std::memory_order_acquire);
+}
+
+const PreparedPreset* RealtimePresetMailbox::Pending() const noexcept {
+    return pending_.load(std::memory_order_acquire);
 }
 
 bool RealtimePresetMailbox::IsLockFree() const noexcept {
@@ -157,6 +238,9 @@ std::optional<PresetControlError> PresetController::RegisterPreset(std::string p
     }
     return RegisterPrepared(std::get<PreparedPreset>(prepared));
 }
+
+PresetController::PresetController(RigModuleRegistry* registry, AudioFormat format)
+    : runtime_registry_(registry), runtime_format_(format) {}
 
 std::optional<PresetControlError> PresetController::RegisterPresetFile(std::string preset_id,
                                                                         const std::filesystem::path& source) {
@@ -200,8 +284,7 @@ std::optional<PresetControlError> PresetController::QueuePresetActivation(std::s
     if (std::holds_alternative<PresetPreparationError>(prepared)) {
         return ToControlError(std::get<PresetPreparationError>(prepared));
     }
-    static_cast<void>(StoreAndSubmit(std::get<PreparedPreset>(prepared)));
-    return std::nullopt;
+    return StoreAndSubmit(std::get<PreparedPreset>(prepared));
 }
 
 PresetControlDispatch PresetController::Dispatch(const std::vector<MidiMessage>& messages,
@@ -279,7 +362,9 @@ PresetControlDispatch PresetController::Dispatch(const std::vector<MidiMessage>&
             return {.kind = PresetControlDispatchKind::Rejected,
                     .error = ToControlError(std::get<PresetPreparationError>(prepared))};
         }
-        static_cast<void>(StoreAndSubmit(std::get<PreparedPreset>(prepared)));
+        if (const auto error = StoreAndSubmit(std::get<PreparedPreset>(prepared)); error.has_value()) {
+            return {.kind = PresetControlDispatchKind::Rejected, .error = *error};
+        }
         return {.kind = PresetControlDispatchKind::Queued, .preset_id = *selected_target};
     }
 
@@ -302,7 +387,9 @@ PresetControlDispatch PresetController::Dispatch(const std::vector<MidiMessage>&
         return {.kind = PresetControlDispatchKind::Rejected,
                 .error = ToControlError(std::get<PresetPreparationError>(prepared))};
     }
-    static_cast<void>(StoreAndSubmit(std::get<PreparedPreset>(prepared)));
+    if (const auto error = StoreAndSubmit(std::get<PreparedPreset>(prepared)); error.has_value()) {
+        return {.kind = PresetControlDispatchKind::Rejected, .error = *error};
+    }
     return {.kind = PresetControlDispatchKind::Queued, .preset_id = base->preset_id};
 }
 
@@ -314,12 +401,59 @@ const PreparedPreset* PresetController::ActivePreset() const noexcept {
     return mailbox_.Active();
 }
 
-const PreparedPreset* PresetController::StoreAndSubmit(PreparedPreset prepared) {
-    submitted_history_.push_back(std::make_unique<PreparedPreset>(std::move(prepared)));
-    const auto* stored = submitted_history_.back().get();
-    mailbox_.Submit(*stored);
-    staged_preset_ = stored;
-    return stored;
+RealtimePresetMailbox& PresetController::MailboxForControl() noexcept {
+    return mailbox_;
 }
+
+std::optional<PresetControlError> PresetController::StoreAndSubmit(PreparedPreset prepared) {
+    if (runtime_registry_ != nullptr) {
+        const auto built = RigRuntimeBuilder{}.Build(prepared, *runtime_registry_, runtime_format_);
+        if (std::holds_alternative<RigBuildError>(built)) {
+            return PresetControlError::RuntimeBuildFailed;
+        }
+        prepared = std::get<PreparedPreset>(built);
+    }
+
+    for (std::size_t offset = 0; offset < submitted_slots_.size(); ++offset) {
+        const auto index = (next_slot_ + offset) % submitted_slots_.size();
+        auto& slot = submitted_slots_[index];
+        auto state = slot.state.load(std::memory_order_acquire);
+        if (state == PreparedSlotState::Retired) {
+            slot.preset.reset();
+            slot.state.store(PreparedSlotState::Free, std::memory_order_release);
+            state = PreparedSlotState::Free;
+        }
+        if (state == PreparedSlotState::Free) {
+            try {
+                prepared.slot_state = &slot.state;
+                slot.preset = std::make_unique<PreparedPreset>(std::move(prepared));
+            } catch (const std::bad_alloc&) {
+                return PresetControlError::RuntimeStorageExhausted;
+            }
+            slot.state.store(PreparedSlotState::Published, std::memory_order_release);
+            next_slot_ = (index + 1U) % submitted_slots_.size();
+            const auto* stored = slot.preset.get();
+            if (!mailbox_.Publish(*stored)) {
+                slot.preset.reset();
+                slot.state.store(PreparedSlotState::Free, std::memory_order_release);
+                return PresetControlError::RuntimeStorageExhausted;
+            }
+            staged_preset_ = stored;
+            return std::nullopt;
+        }
+    }
+    return PresetControlError::RuntimeStorageExhausted;
+}
+
+std::size_t PresetController::SubmittedSlotCapacity() const noexcept {
+    return submitted_slots_.size();
+}
+
+/*
+ * The mailbox owns only raw hand-off pointers; submitted_slots_ owns every
+ * object. Slots are recycled only when no active/pending pointer references
+ * them. RigRuntime additionally marks both graphs participating in a
+ * crossfade, so a graph cannot be reclaimed while audio still renders it.
+ */
 
 } // namespace solo_rig

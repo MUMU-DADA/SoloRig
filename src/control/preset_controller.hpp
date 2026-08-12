@@ -3,8 +3,10 @@
 #include "content/preset.hpp"
 #include "control/midi_mapping.hpp"
 #include "control/shortcut_registry.hpp"
+#include "core/audio_format.hpp"
 
 #include <atomic>
+#include <array>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -14,6 +16,19 @@
 #include <vector>
 
 namespace solo_rig {
+
+class AudioGraph;
+class RigModuleRegistry;
+
+enum class PreparedSlotState : std::uint8_t {
+    Detached,
+    Free,
+    Published,
+    Pending,
+    Active,
+    Transition,
+    Retired,
+};
 
 enum class PresetPreparationError {
     EmptyPresetId,
@@ -29,6 +44,13 @@ enum class PresetPreparationError {
 struct PreparedPreset {
     std::string preset_id;
     RigPreset preset;
+    // Set only by the non-real-time RigRuntime builder. The graph structure
+    // is immutable after preparation; its preallocated DSP state is mutable
+    // only from the audio thread.
+    std::shared_ptr<AudioGraph> runtime_graph;
+    // Points to the owning controller slot's single ownership state. It is
+    // never dereferenced by the real-time path except for atomic state CAS.
+    std::atomic<PreparedSlotState>* slot_state{};
 };
 
 class PresetPreparationService {
@@ -47,8 +69,13 @@ public:
 class RealtimePresetMailbox {
 public:
     void Submit(const PreparedPreset& preset) noexcept;
+    [[nodiscard]] bool Publish(const PreparedPreset& preset) noexcept;
+    [[nodiscard]] const PreparedPreset* BeginPendingAtControlPoint() noexcept;
+    void CommitActiveAtControlPoint(const PreparedPreset* preset) noexcept;
+    void RetireAtControlPoint(const PreparedPreset* preset) noexcept;
     [[nodiscard]] const PreparedPreset* ApplyPendingAtControlPoint() noexcept;
     [[nodiscard]] const PreparedPreset* Active() const noexcept;
+    [[nodiscard]] const PreparedPreset* Pending() const noexcept;
     [[nodiscard]] bool IsLockFree() const noexcept;
 
 private:
@@ -56,9 +83,8 @@ private:
     std::atomic<const PreparedPreset*> active_{nullptr};
 };
 
-// The graph integration will render both prepared graphs for this short
-// interval. This policy is already deterministic and testable, but the actual
-// sample-by-sample crossfade belongs to the future audio-graph integration.
+// RigRuntime renders both prepared graphs for this short interval using these
+// deterministic sample-level equal-power gains.
 enum class PresetTransitionError {
     InvalidCrossfadeDuration,
 };
@@ -90,6 +116,8 @@ enum class PresetControlError {
     InvalidParameterTarget,
     UnknownParameterTarget,
     AmbiguousParameterUpdate,
+    RuntimeBuildFailed,
+    RuntimeStorageExhausted,
 };
 
 enum class PresetControlDispatchKind {
@@ -109,6 +137,8 @@ struct PresetControlDispatch {
 // then submits that copy to RealtimePresetMailbox for the audio control point.
 class PresetController {
 public:
+    explicit PresetController(RigModuleRegistry* registry = nullptr,
+                               AudioFormat format = {.sample_rate_hz = 192000.0, .max_block_size = 1024, .channel_count = 2});
     [[nodiscard]] std::optional<PresetControlError> RegisterPreset(std::string preset_id, RigPreset preset);
     [[nodiscard]] std::optional<PresetControlError> RegisterPresetFile(std::string preset_id,
                                                                         const std::filesystem::path& source);
@@ -124,18 +154,28 @@ public:
 
     [[nodiscard]] const PreparedPreset* ApplyPendingAtControlPoint() noexcept;
     [[nodiscard]] const PreparedPreset* ActivePreset() const noexcept;
+    [[nodiscard]] RealtimePresetMailbox& MailboxForControl() noexcept;
+    [[nodiscard]] std::size_t SubmittedSlotCapacity() const noexcept;
 
 private:
+    struct PreparedSlot {
+        std::unique_ptr<PreparedPreset> preset;
+        std::atomic<PreparedSlotState> state{PreparedSlotState::Free};
+    };
+
     [[nodiscard]] std::optional<PresetControlError> RegisterPrepared(PreparedPreset prepared);
-    [[nodiscard]] const PreparedPreset* StoreAndSubmit(PreparedPreset prepared);
+    [[nodiscard]] std::optional<PresetControlError> StoreAndSubmit(PreparedPreset prepared);
 
     PresetPreparationService preparation_;
     RealtimePresetMailbox mailbox_;
     std::map<std::string, RigPreset, std::less<>> registered_presets_;
     std::vector<MidiBinding> midi_bindings_;
     ShortcutRegistry shortcuts_;
-    std::vector<std::unique_ptr<PreparedPreset>> submitted_history_;
+    std::array<PreparedSlot, 8> submitted_slots_;
+    std::size_t next_slot_{};
     const PreparedPreset* staged_preset_{};
+    RigModuleRegistry* runtime_registry_{};
+    AudioFormat runtime_format_{};
 };
 
 } // namespace solo_rig
