@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 #include <unordered_map>
 
 namespace solo_rig {
@@ -19,6 +20,7 @@ public:
     [[nodiscard]] bool Add(std::string module_instance_id, PedalPosition position);
     [[nodiscard]] bool Move(std::string_view module_instance_id, PedalPosition position, bool snap_to_grid);
     [[nodiscard]] std::optional<PedalPosition> Find(std::string_view module_instance_id) const;
+    [[nodiscard]] std::vector<std::pair<std::string, PedalPosition>> Entries() const;
 
 private:
     [[nodiscard]] double Snap(double value) const noexcept;

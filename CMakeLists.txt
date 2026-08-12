@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 
 option(SOLO_RIG_BUILD_VST3 "Build the SoloRig VST3 plug-in" ON)
+option(SOLO_RIG_BUILD_STANDALONE "Build the SoloRig Windows standalone editor" ON)
 
 set(NAM_CORE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/NeuralAmpModelerCore")
 file(GLOB NAM_CORE_SOURCES CONFIGURE_DEPENDS
@@ -68,6 +69,7 @@ add_library(solo_rig_core STATIC
     src/control/shortcut_registry.cpp
     src/standalone/audio_routing.cpp
     src/ui/pedal_layout.cpp
+    src/ui/rig_editor.cpp
 )
 if(WIN32)
     target_sources(solo_rig_core PRIVATE src/control/midi_input.cpp)
@@ -76,6 +78,37 @@ endif()
 target_include_directories(solo_rig_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(solo_rig_core PUBLIC neural_amp_modeler_core)
 enable_solo_rig_warnings(solo_rig_core)
+
+if(WIN32 AND SOLO_RIG_BUILD_STANDALONE)
+    add_executable(SoloRigStandalone WIN32
+        src/standalone/main.cpp
+        src/standalone/windows_rig_window.cpp
+    )
+    target_include_directories(SoloRigStandalone PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_compile_definitions(SoloRigStandalone PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(SoloRigStandalone PRIVATE solo_rig_core d2d1 dwrite windowscodecs user32 gdi32)
+    set_target_properties(SoloRigStandalone PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        OUTPUT_NAME "SoloRigStandalone"
+    )
+    add_custom_command(TARGET SoloRigStandalone POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+            "$<TARGET_FILE_DIR:SoloRigStandalone>/resources"
+    )
+
+    if(BUILD_TESTING)
+        add_executable(solo_rig_windows_ui_tests
+            tests/test_main.cpp
+            tests/windows_ui_smoke_tests.cpp
+            src/standalone/windows_rig_window.cpp
+        )
+        target_include_directories(solo_rig_windows_ui_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_compile_definitions(solo_rig_windows_ui_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+        target_link_libraries(solo_rig_windows_ui_tests PRIVATE solo_rig_core d2d1 dwrite windowscodecs user32 gdi32)
+        add_test(NAME solo_rig_windows_ui_tests COMMAND solo_rig_windows_ui_tests)
+    endif()
+endif()
 
 if(SOLO_RIG_BUILD_VST3)
     set(SOLO_RIG_VST3_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vst3sdk")
@@ -176,6 +209,7 @@ if(BUILD_TESTING)
         tests/shortcut_registry_tests.cpp
         tests/audio_routing_tests.cpp
         tests/pedal_layout_tests.cpp
+        tests/rig_editor_tests.cpp
     )
     target_link_libraries(solo_rig_tests PRIVATE solo_rig_core)
     target_compile_definitions(solo_rig_tests PRIVATE SOLO_RIG_SOURCE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}")

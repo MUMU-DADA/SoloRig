@@ -27,6 +27,15 @@ std::optional<PedalPosition> PedalLayout::Find(std::string_view module_instance_
     return iterator == positions_.end() ? std::nullopt : std::optional<PedalPosition>(iterator->second);
 }
 
+std::vector<std::pair<std::string, PedalPosition>> PedalLayout::Entries() const {
+    std::vector<std::pair<std::string, PedalPosition>> result;
+    result.reserve(positions_.size());
+    for (const auto& [instance_id, position] : positions_) {
+        result.emplace_back(instance_id, position);
+    }
+    return result;
+}
+
 double PedalLayout::Snap(double value) const noexcept {
     return std::round(value / grid_size_) * grid_size_;
 }
