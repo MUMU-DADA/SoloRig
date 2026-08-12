@@ -63,6 +63,7 @@ add_library(solo_rig_core STATIC
     src/content/theme.cpp
     src/control/midi_mapping.cpp
     src/control/shortcut_registry.cpp
+    src/standalone/audio_routing.cpp
     src/ui/pedal_layout.cpp
 )
 if(WIN32)
@@ -154,6 +155,7 @@ if(BUILD_TESTING)
         tests/theme_tests.cpp
         tests/midi_mapping_tests.cpp
         tests/shortcut_registry_tests.cpp
+        tests/audio_routing_tests.cpp
         tests/pedal_layout_tests.cpp
     )
     target_link_libraries(solo_rig_tests PRIVATE solo_rig_core)
