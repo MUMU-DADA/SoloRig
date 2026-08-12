@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <iterator>
+#include <unordered_set>
 
 namespace solo_rig {
 
@@ -30,6 +31,32 @@ std::optional<std::uint32_t> ReadUnsigned(const JsonValue::Object& object, std::
         return std::nullopt;
     }
     return static_cast<std::uint32_t>(*value->AsNumber());
+}
+
+std::optional<double> ReadFiniteNumber(const JsonValue::Object& object, std::string_view key) {
+    const auto* value = Find(object, key);
+    if (value == nullptr || value->AsNumber() == nullptr || !std::isfinite(*value->AsNumber())) {
+        return std::nullopt;
+    }
+    return *value->AsNumber();
+}
+
+std::optional<std::vector<std::string>> ReadStringArray(const JsonValue::Object& object, std::string_view key) {
+    const auto* value = Find(object, key);
+    if (value == nullptr || value->AsArray() == nullptr) {
+        return std::nullopt;
+    }
+
+    std::vector<std::string> result;
+    result.reserve(value->AsArray()->size());
+    for (const auto& item : *value->AsArray()) {
+        const auto* text = item.AsString();
+        if (text == nullptr || text->empty()) {
+            return std::nullopt;
+        }
+        result.push_back(*text);
+    }
+    return result;
 }
 
 std::optional<EffectCategory> ParseCategory(const std::string& text) {
@@ -58,6 +85,222 @@ std::optional<PortDirection> ParseDirection(const std::string& text) {
     if (text == "output") {
         return PortDirection::Output;
     }
+    return std::nullopt;
+}
+
+std::optional<AnalogComponentType> ParseAnalogComponentType(const std::string& text) {
+    if (text == "resistor") {
+        return AnalogComponentType::Resistor;
+    }
+    if (text == "capacitor") {
+        return AnalogComponentType::Capacitor;
+    }
+    if (text == "inductor") {
+        return AnalogComponentType::Inductor;
+    }
+    if (text == "diode") {
+        return AnalogComponentType::Diode;
+    }
+    if (text == "potentiometer") {
+        return AnalogComponentType::Potentiometer;
+    }
+    if (text == "op-amp") {
+        return AnalogComponentType::OperationalAmplifier;
+    }
+    if (text == "transistor") {
+        return AnalogComponentType::Transistor;
+    }
+    if (text == "voltage-source") {
+        return AnalogComponentType::VoltageSource;
+    }
+    return std::nullopt;
+}
+
+bool RequiresPositiveValue(AnalogComponentType type) {
+    return type == AnalogComponentType::Resistor || type == AnalogComponentType::Capacitor ||
+        type == AnalogComponentType::Inductor || type == AnalogComponentType::Potentiometer;
+}
+
+std::optional<DigitalOperationType> ParseDigitalOperationType(const std::string& text) {
+    if (text == "gain") {
+        return DigitalOperationType::Gain;
+    }
+    if (text == "delay") {
+        return DigitalOperationType::Delay;
+    }
+    if (text == "feedback") {
+        return DigitalOperationType::Feedback;
+    }
+    if (text == "mix") {
+        return DigitalOperationType::Mix;
+    }
+    if (text == "filter") {
+        return DigitalOperationType::Filter;
+    }
+    if (text == "waveshaper") {
+        return DigitalOperationType::Waveshaper;
+    }
+    if (text == "dynamics") {
+        return DigitalOperationType::Dynamics;
+    }
+    if (text == "pitch-shift") {
+        return DigitalOperationType::PitchShift;
+    }
+    if (text == "bypass") {
+        return DigitalOperationType::Bypass;
+    }
+    return std::nullopt;
+}
+
+bool HasParameter(const EffectDescriptor& descriptor, const std::string& id) {
+    for (const auto& parameter : descriptor.parameters) {
+        if (parameter.id == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::optional<AnalogCircuitLogic> ParseAnalogCircuitLogic(const JsonValue::Object& object) {
+    const auto solver = ReadString(object, "solver");
+    const auto* component_values = Find(object, "components");
+    if (!solver.has_value() || *solver != "modified-nodal-analysis" || component_values == nullptr ||
+        component_values->AsArray() == nullptr || component_values->AsArray()->empty()) {
+        return std::nullopt;
+    }
+
+    AnalogCircuitLogic circuit;
+    std::unordered_set<std::string> component_ids;
+    for (const auto& component_value : *component_values->AsArray()) {
+        const auto* component = component_value.AsObject();
+        if (component == nullptr) {
+            return std::nullopt;
+        }
+        const auto id = ReadString(*component, "id");
+        const auto type_text = ReadString(*component, "type");
+        const auto nodes = ReadStringArray(*component, "nodes");
+        const auto type = type_text.has_value() ? ParseAnalogComponentType(*type_text) : std::nullopt;
+        if (!id.has_value() || id->empty() || !type.has_value() || !nodes.has_value() || nodes->size() < 2U ||
+            !component_ids.insert(*id).second) {
+            return std::nullopt;
+        }
+
+        const auto* raw_value = Find(*component, "value");
+        std::optional<double> value;
+        if (raw_value != nullptr) {
+            value = ReadFiniteNumber(*component, "value");
+            if (!value.has_value()) {
+                return std::nullopt;
+            }
+        }
+        if (RequiresPositiveValue(*type) && (!value.has_value() || *value <= 0.0)) {
+            return std::nullopt;
+        }
+
+        std::optional<std::string> model;
+        if (Find(*component, "model") != nullptr) {
+            model = ReadString(*component, "model");
+            if (!model.has_value() || model->empty()) {
+                return std::nullopt;
+            }
+        }
+        circuit.components.push_back({.id = *id, .type = *type, .nodes = *nodes, .value = value, .model = model});
+    }
+    return circuit;
+}
+
+std::optional<DigitalAlgorithmLogic> ParseDigitalAlgorithmLogic(const JsonValue::Object& object,
+                                                                 const EffectDescriptor& descriptor,
+                                                                 bool& unknown_parameter) {
+    unknown_parameter = false;
+    const auto algorithm_id = ReadString(object, "algorithm");
+    const auto* operation_values = Find(object, "operations");
+    if (!algorithm_id.has_value() || algorithm_id->empty() || operation_values == nullptr ||
+        operation_values->AsArray() == nullptr || operation_values->AsArray()->empty()) {
+        return std::nullopt;
+    }
+
+    DigitalAlgorithmLogic algorithm{.algorithm_id = *algorithm_id};
+    for (const auto& operation_value : *operation_values->AsArray()) {
+        const auto* operation = operation_value.AsObject();
+        if (operation == nullptr) {
+            return std::nullopt;
+        }
+        const auto type_text = ReadString(*operation, "type");
+        const auto type = type_text.has_value() ? ParseDigitalOperationType(*type_text) : std::nullopt;
+        if (!type.has_value()) {
+            return std::nullopt;
+        }
+
+        std::optional<std::string> parameter_id;
+        if (Find(*operation, "parameter") != nullptr) {
+            parameter_id = ReadString(*operation, "parameter");
+            if (!parameter_id.has_value() || parameter_id->empty()) {
+                return std::nullopt;
+            }
+            if (!HasParameter(descriptor, *parameter_id)) {
+                unknown_parameter = true;
+                return std::nullopt;
+            }
+        }
+        algorithm.operations.push_back({.type = *type, .parameter_id = std::move(parameter_id)});
+    }
+    return algorithm;
+}
+
+std::optional<ModulePackageLoadError> ParseModuleLogic(const std::filesystem::path& logic_path,
+                                                       const EffectDescriptor& descriptor,
+                                                       ModuleLogic& logic) {
+    if (descriptor.category != EffectCategory::AnalogCircuit && descriptor.category != EffectCategory::DigitalAlgorithm) {
+        logic = std::monostate{};
+        return std::nullopt;
+    }
+    if (!std::filesystem::is_regular_file(logic_path)) {
+        return ModulePackageLoadError::MissingLogicFile;
+    }
+
+    std::ifstream logic_stream(logic_path, std::ios::binary);
+    if (!logic_stream) {
+        return ModulePackageLoadError::CannotReadLogicFile;
+    }
+    const std::string logic_source((std::istreambuf_iterator<char>(logic_stream)), std::istreambuf_iterator<char>());
+    const auto parsed = ParseJson(logic_source);
+    if (!parsed.value.has_value() || parsed.value->AsObject() == nullptr) {
+        return ModulePackageLoadError::InvalidLogicJson;
+    }
+
+    const auto& object = *parsed.value->AsObject();
+    const auto schema_version = ReadUnsigned(object, "schemaVersion");
+    const auto kind = ReadString(object, "kind");
+    if (!schema_version.has_value() || !kind.has_value()) {
+        return ModulePackageLoadError::InvalidLogicDefinition;
+    }
+    if (*schema_version != 1U) {
+        return ModulePackageLoadError::InvalidLogicSchema;
+    }
+
+    if (descriptor.category == EffectCategory::AnalogCircuit) {
+        if (*kind != "analog-circuit") {
+            return ModulePackageLoadError::LogicCategoryMismatch;
+        }
+        const auto circuit = ParseAnalogCircuitLogic(object);
+        if (!circuit.has_value()) {
+            return ModulePackageLoadError::InvalidLogicDefinition;
+        }
+        logic = *circuit;
+        return std::nullopt;
+    }
+
+    if (*kind != "digital-algorithm") {
+        return ModulePackageLoadError::LogicCategoryMismatch;
+    }
+    bool unknown_parameter = false;
+    const auto algorithm = ParseDigitalAlgorithmLogic(object, descriptor, unknown_parameter);
+    if (!algorithm.has_value()) {
+        return unknown_parameter ? ModulePackageLoadError::LogicParameterUnknown
+                                 : ModulePackageLoadError::InvalidLogicDefinition;
+    }
+    logic = *algorithm;
     return std::nullopt;
 }
 
@@ -178,6 +421,10 @@ ModulePackageLoadResult LoadModulePackage(const std::filesystem::path& root_dire
             return {.package = std::nullopt, .errors = {ModulePackageLoadError::UnsafeAssetPath}};
         }
         package.custom_skin_path = root_directory / *skin_file;
+    }
+    if (const auto logic_error = ParseModuleLogic(package.logic_path, package.descriptor, package.logic);
+        logic_error.has_value()) {
+        return {.package = std::nullopt, .errors = {*logic_error}};
     }
     return {.package = std::move(package), .errors = {}};
 }
