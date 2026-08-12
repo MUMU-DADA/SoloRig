@@ -3,7 +3,10 @@
 #include "core/audio_graph.hpp"
 
 #include <cstdint>
+#include <filesystem>
+#include <string>
 #include <span>
+#include <variant>
 #include <vector>
 
 namespace solo_rig {
@@ -13,6 +16,31 @@ enum class ImpulseResponseLoadError {
     TooLong,
     NonFiniteSample,
 };
+
+enum class ImpulseResponseFileLoadError {
+    MissingFile,
+    CannotReadFile,
+    InvalidWaveContainer,
+    MissingFormatChunk,
+    MissingDataChunk,
+    UnsupportedEncoding,
+    UnsupportedChannelCount,
+    UnsupportedBitDepth,
+    InvalidWaveData,
+    TooLong,
+    NonFiniteSample,
+};
+
+struct ImportedImpulseResponse {
+    double sample_rate_hz{};
+    std::vector<float> mono_samples;
+};
+
+// Decodes a RIFF/WAVE cabinet response outside the audio callback. PCM 16/24/32
+// and IEEE Float32 are supported; multi-channel files are averaged to mono.
+[[nodiscard]] std::variant<ImportedImpulseResponse, ImpulseResponseFileLoadError> LoadWaveImpulseResponse(
+    const std::filesystem::path& source,
+    std::uint32_t maximum_ir_length = 8192);
 
 class ImpulseResponseConvolver final : public EffectProcessor {
 public:
