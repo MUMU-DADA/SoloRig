@@ -8,6 +8,34 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
 
+set(NAM_CORE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/NeuralAmpModelerCore")
+file(GLOB NAM_CORE_SOURCES CONFIGURE_DEPENDS
+    "${NAM_CORE_ROOT}/NAM/*.cpp"
+    "${NAM_CORE_ROOT}/NAM/*.c"
+    "${NAM_CORE_ROOT}/NAM/*/*.cpp"
+)
+add_library(neural_amp_modeler_core STATIC ${NAM_CORE_SOURCES})
+target_compile_features(neural_amp_modeler_core PUBLIC cxx_std_20)
+target_compile_definitions(neural_amp_modeler_core PUBLIC
+    NAM_SAMPLE_FLOAT
+    NAM_ENABLE_A2_FAST
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+)
+target_include_directories(neural_amp_modeler_core SYSTEM PUBLIC
+    "${NAM_CORE_ROOT}"
+    "${NAM_CORE_ROOT}/Dependencies/eigen"
+    "${NAM_CORE_ROOT}/Dependencies/nlohmann"
+)
+if(MSVC)
+    # NAM factory registration uses translation-unit static initializers. Keep all
+    # Core object files when a host links the static library so every model type,
+    # including A2, remains registered at runtime.
+    target_link_options(neural_amp_modeler_core INTERFACE
+        "/WHOLEARCHIVE:$<TARGET_FILE:neural_amp_modeler_core>"
+    )
+endif()
+
 function(enable_solo_rig_warnings target)
     target_compile_options(${target} PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /permissive->
@@ -25,6 +53,7 @@ add_library(solo_rig_core STATIC
     src/dsp/diode_clipper.cpp
     src/dsp/digital_delay.cpp
     src/dsp/impulse_response.cpp
+    src/dsp/nam_processor.cpp
     src/dsp/tuner.cpp
     src/content/json.cpp
     src/content/module_package.cpp
@@ -35,6 +64,7 @@ add_library(solo_rig_core STATIC
     src/ui/pedal_layout.cpp
 )
 target_include_directories(solo_rig_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(solo_rig_core PUBLIC neural_amp_modeler_core)
 enable_solo_rig_warnings(solo_rig_core)
 
 if(BUILD_TESTING)
@@ -48,6 +78,7 @@ if(BUILD_TESTING)
         tests/diode_clipper_tests.cpp
         tests/digital_delay_tests.cpp
         tests/impulse_response_tests.cpp
+        tests/nam_processor_tests.cpp
         tests/quality_policy_tests.cpp
         tests/tuner_tests.cpp
         tests/json_tests.cpp
@@ -59,6 +90,7 @@ if(BUILD_TESTING)
         tests/pedal_layout_tests.cpp
     )
     target_link_libraries(solo_rig_tests PRIVATE solo_rig_core)
+    target_compile_definitions(solo_rig_tests PRIVATE SOLO_RIG_SOURCE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}")
     enable_solo_rig_warnings(solo_rig_tests)
     add_test(NAME solo_rig_tests COMMAND solo_rig_tests)
 endif()

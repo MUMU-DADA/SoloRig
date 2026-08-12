@@ -1,0 +1,2 @@
+# Preserve upstream formatting for unmodified vendored sources and licenses.
+third_party/NeuralAmpModelerCore/** -whitespace
