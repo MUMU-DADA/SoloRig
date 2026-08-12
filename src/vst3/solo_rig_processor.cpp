@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <type_traits>
+#include <utility>
 
 namespace solo_rig::vst3 {
 namespace {
@@ -20,10 +21,10 @@ void ProcessAudio(
     Steinberg::Vst::ProcessData& data,
     double gain,
     bool bypass,
-    DiodeClipper& drive_processor,
+    RigRuntime* runtime,
     AudioBuffer& processing_input,
     AudioBuffer& processing_output,
-    bool drive_processor_prepared) {
+    bool runtime_prepared) {
     if (data.numInputs < 1 || data.numOutputs < 1 || data.inputs == nullptr || data.outputs == nullptr) {
         return;
     }
@@ -31,7 +32,7 @@ void ProcessAudio(
     const auto& input_bus = data.inputs[0];
     auto& output_bus = data.outputs[0];
     const auto channels = std::min(input_bus.numChannels, output_bus.numChannels);
-    const auto can_apply_drive = !bypass && drive_processor_prepared &&
+    const auto can_apply_drive = !bypass && runtime != nullptr && runtime_prepared &&
         processing_input.ChannelCount() == static_cast<std::uint32_t>(channels) &&
         processing_input.Capacity() >= static_cast<std::uint32_t>(data.numSamples) &&
         processing_output.ChannelCount() == static_cast<std::uint32_t>(channels) &&
@@ -51,7 +52,9 @@ void ProcessAudio(
                 }
             }
         }
-        drive_processor.Process(processing_input, processing_output, data.numSamples);
+        if (!runtime->Process(processing_input, processing_output, static_cast<std::uint32_t>(data.numSamples))) {
+            return;
+        }
     }
 
     for (Steinberg::int32 channel = 0; channel < channels; ++channel) {
@@ -131,10 +134,13 @@ Steinberg::tresult PLUGIN_API SoloRigProcessor::setBusArrangements(
 }
 
 Steinberg::tresult PLUGIN_API SoloRigProcessor::setupProcessing(Steinberg::Vst::ProcessSetup& new_setup) {
+    // VST3 calls setupProcessing while the host has stopped the audio thread.
+    // Release the old graph before changing format so no slot remains owned by
+    // a stale current/target pointer.
+    ReleaseRuntime();
     const auto result = AudioEffect::setupProcessing(new_setup);
     if (result != Steinberg::kResultOk || new_setup.maxSamplesPerBlock <= 0 || new_setup.sampleRate <= 0.0 ||
         channel_count_ <= 0) {
-        drive_processor_prepared_ = false;
         return result == Steinberg::kResultOk ? Steinberg::kResultFalse : result;
     }
 
@@ -145,35 +151,36 @@ Steinberg::tresult PLUGIN_API SoloRigProcessor::setupProcessing(Steinberg::Vst::
     };
     processing_input_ = AudioBuffer(format.channel_count, format.max_block_size);
     processing_output_ = AudioBuffer(format.channel_count, format.max_block_size);
-    drive_processor_prepared_ = drive_processor_.Prepare(format);
-    return drive_processor_prepared_ ? Steinberg::kResultOk : Steinberg::kResultFalse;
+    return BuildRuntime(format) ? Steinberg::kResultOk : Steinberg::kResultFalse;
 }
 
 Steinberg::tresult PLUGIN_API SoloRigProcessor::process(Steinberg::Vst::ProcessData& data) {
+    static_cast<void>(ApplyPendingState());
     ApplyParameterChanges(data);
     if (data.numSamples <= 0) {
         return Steinberg::kResultOk;
     }
 
-    const auto gain = GainFromNormalizedValue(output_gain_);
+    const auto gain = GainFromNormalizedValue(audio_state_.output_gain);
+    const auto bypass = audio_state_.bypass;
     if (data.symbolicSampleSize == Steinberg::Vst::kSample32) {
         ProcessAudio<float>(data,
                             gain,
-                            bypass_,
-                            drive_processor_,
+                            bypass,
+                            rig_runtime_.has_value() ? &*rig_runtime_ : nullptr,
                             processing_input_,
                             processing_output_,
-                            drive_processor_prepared_);
+                            rig_runtime_.has_value() && rig_runtime_->IsPrepared());
         return Steinberg::kResultOk;
     }
     if (data.symbolicSampleSize == Steinberg::Vst::kSample64) {
         ProcessAudio<double>(data,
                              gain,
-                             bypass_,
-                             drive_processor_,
+                             bypass,
+                             rig_runtime_.has_value() ? &*rig_runtime_ : nullptr,
                              processing_input_,
                              processing_output_,
-                             drive_processor_prepared_);
+                             rig_runtime_.has_value() && rig_runtime_->IsPrepared());
         return Steinberg::kResultOk;
     }
     return Steinberg::kInvalidArgument;
@@ -198,10 +205,31 @@ Steinberg::tresult PLUGIN_API SoloRigProcessor::setState(Steinberg::IBStream* st
         return Steinberg::kResultFalse;
     }
 
-    output_gain_ = std::clamp(static_cast<Steinberg::Vst::ParamValue>(output_gain), 0.0, 1.0);
-    bypass_ = bypass != 0;
-    drive_ = std::clamp(static_cast<Steinberg::Vst::ParamValue>(drive), 0.0, 1.0);
-    ConfigureDrive();
+    // Both setState and the audio automation publisher acquire the odd
+    // generation with CAS, so two writers cannot manufacture a false-even
+    // snapshot. The control-side writer may wait briefly for the audio writer.
+    auto generation = std::uint64_t{};
+    for (;;) {
+        generation = state_generation_.load(std::memory_order_acquire);
+        if ((generation & 1U) != 0U) {
+            continue;
+        }
+        if (state_generation_.compare_exchange_weak(generation,
+                                                    generation + 1U,
+                                                    std::memory_order_acq_rel,
+                                                    std::memory_order_acquire)) {
+            break;
+        }
+    }
+    output_gain_bits_.store(EncodeParam(std::clamp(static_cast<Steinberg::Vst::ParamValue>(output_gain), 0.0, 1.0)),
+                            std::memory_order_relaxed);
+    bypass_.store(bypass != 0, std::memory_order_relaxed);
+    drive_bits_.store(EncodeParam(std::clamp(static_cast<Steinberg::Vst::ParamValue>(drive), 0.0, 1.0)),
+                      std::memory_order_relaxed);
+    state_generation_.fetch_add(1, std::memory_order_release);
+    // State restoration may run on a non-audio thread. The even generation is
+    // the hand-off; the audio callback applies it to current/target/pending
+    // graphs at its control point without rebuilding or allocating.
     return Steinberg::kResultOk;
 }
 
@@ -210,13 +238,56 @@ Steinberg::tresult PLUGIN_API SoloRigProcessor::getState(Steinberg::IBStream* st
         return Steinberg::kInvalidArgument;
     }
 
+    const auto snapshot = ReadStateSnapshot();
     Steinberg::IBStreamer stream(state, kLittleEndian);
     if (!stream.writeInt32u(kStateMagic) || !stream.writeInt32(kStateVersion) ||
-        !stream.writeFloat(static_cast<float>(output_gain_)) ||
-        !stream.writeInt32(bypass_ ? 1 : 0) || !stream.writeFloat(static_cast<float>(drive_))) {
+        !stream.writeFloat(static_cast<float>(snapshot.output_gain)) ||
+        !stream.writeInt32(snapshot.bypass ? 1 : 0) ||
+        !stream.writeFloat(static_cast<float>(snapshot.drive))) {
         return Steinberg::kResultFalse;
     }
     return Steinberg::kResultOk;
+}
+
+bool SoloRigProcessor::ApplyPendingState() noexcept {
+    const auto first_generation = state_generation_.load(std::memory_order_acquire);
+    if ((first_generation & 1U) != 0U) {
+        return false;
+    }
+    const ParameterSnapshot snapshot{
+        .output_gain = DecodeParam(output_gain_bits_.load(std::memory_order_relaxed)),
+        .drive = DecodeParam(drive_bits_.load(std::memory_order_relaxed)),
+        .bypass = bypass_.load(std::memory_order_relaxed),
+    };
+    const auto final_generation = state_generation_.load(std::memory_order_acquire);
+    if (first_generation != final_generation || (final_generation & 1U) != 0U) {
+        return false;
+    }
+    if (first_generation == audio_applied_generation_) {
+        return false;
+    }
+    audio_state_ = snapshot;
+    audio_applied_generation_ = first_generation;
+    ConfigureDrive();
+    return true;
+}
+
+SoloRigProcessor::ParameterSnapshot SoloRigProcessor::ReadStateSnapshot() const noexcept {
+    for (;;) {
+        const auto first_generation = state_generation_.load(std::memory_order_acquire);
+        if ((first_generation & 1U) != 0U) {
+            continue;
+        }
+        const ParameterSnapshot snapshot{
+            .output_gain = DecodeParam(output_gain_bits_.load(std::memory_order_relaxed)),
+            .drive = DecodeParam(drive_bits_.load(std::memory_order_relaxed)),
+            .bypass = bypass_.load(std::memory_order_relaxed),
+        };
+        const auto final_generation = state_generation_.load(std::memory_order_acquire);
+        if (first_generation == final_generation && (final_generation & 1U) == 0U) {
+            return snapshot;
+        }
+    }
 }
 
 void SoloRigProcessor::ApplyParameterChanges(Steinberg::Vst::ProcessData& data) {
@@ -236,20 +307,78 @@ void SoloRigProcessor::ApplyParameterChanges(Steinberg::Vst::ProcessData& data) 
             continue;
         }
         if (queue->getParameterId() == kOutputGainId) {
-            output_gain_ = std::clamp(value, 0.0, 1.0);
+            audio_state_.output_gain = std::clamp(value, 0.0, 1.0);
         } else if (queue->getParameterId() == kBypassId) {
-            bypass_ = value >= 0.5;
+            audio_state_.bypass = value >= 0.5;
         } else if (queue->getParameterId() == kDriveId) {
-            drive_ = std::clamp(value, 0.0, 1.0);
+            audio_state_.drive = std::clamp(value, 0.0, 1.0);
             ConfigureDrive();
         }
+        PublishAudioState();
     }
 }
 
+void SoloRigProcessor::PublishAudioState() noexcept {
+    auto generation = state_generation_.load(std::memory_order_acquire);
+    if ((generation & 1U) != 0U ||
+        !state_generation_.compare_exchange_strong(generation,
+                                                   generation + 1U,
+                                                   std::memory_order_acq_rel,
+                                                   std::memory_order_acquire)) {
+        return;
+    }
+    output_gain_bits_.store(EncodeParam(audio_state_.output_gain), std::memory_order_relaxed);
+    bypass_.store(audio_state_.bypass, std::memory_order_relaxed);
+    drive_bits_.store(EncodeParam(audio_state_.drive), std::memory_order_relaxed);
+    audio_applied_generation_ = state_generation_.fetch_add(1, std::memory_order_release) + 1U;
+}
+
 void SoloRigProcessor::ConfigureDrive() noexcept {
-    auto settings = drive_processor_.Settings();
-    settings.drive = 1.0F + static_cast<float>(drive_) * 15.0F;
-    static_cast<void>(drive_processor_.SetSettings(settings));
+    if (rig_runtime_.has_value() && rig_runtime_->IsPrepared()) {
+        static_cast<void>(rig_runtime_->SetParameter("drive-1", "drive", 1.0F + static_cast<float>(audio_state_.drive) * 15.0F));
+    }
+}
+
+void SoloRigProcessor::ReleaseRuntime() noexcept {
+    if (rig_runtime_.has_value()) {
+        rig_runtime_->Shutdown();
+        rig_runtime_.reset();
+    } else {
+        mailbox_.ResetForReconfigure();
+    }
+    prepared_runtime_.reset();
+}
+
+bool SoloRigProcessor::BuildRuntime(const AudioFormat& format) noexcept {
+    try {
+        const auto drive = ReadStateSnapshot().drive;
+        RigPreset preset{
+            .preset_id = "vst3-default",
+            .name = "VST3 Default",
+            .nodes = {PresetNode{.instance_id = "drive-1",
+                                 .module_id = "org.mumu-dada.solorig.drive",
+                                 .parameter_values = {{"drive", 1.0F + static_cast<float>(drive) * 15.0F},
+                                                      {"outputGain", 1.0F},
+                                                      {"diodeThreshold", 0.35F}}}},
+            .connections = {},
+        };
+        PreparedPreset prepared{.preset_id = preset.preset_id, .preset = std::move(preset)};
+        const auto built = RigRuntimeBuilder{}.Build(prepared, module_registry_, format);
+        if (std::holds_alternative<RigBuildError>(built)) {
+            return false;
+        }
+        prepared_runtime_.emplace(std::get<PreparedPreset>(built));
+        rig_runtime_.emplace(mailbox_, format);
+        if (!rig_runtime_->Prepare()) {
+            ReleaseRuntime();
+            return false;
+        }
+        mailbox_.Submit(*prepared_runtime_);
+        return true;
+    } catch (...) {
+        ReleaseRuntime();
+        return false;
+    }
 }
 
 double SoloRigProcessor::GainFromNormalizedValue(Steinberg::Vst::ParamValue normalized_value) {

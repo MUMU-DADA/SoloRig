@@ -320,3 +320,30 @@ TEST_CASE("RigRuntime reuses retired slots across one thousand completed transit
         REQUIRE(controller.ActivePreset() != nullptr);
     }
 }
+
+TEST_CASE("RigRuntime shutdown retires pending and active slots for repeated reconfiguration") {
+    solo_rig::RigModuleRegistry registry;
+    REQUIRE(!registry.Register("test.gain", GainFactory()).has_value());
+    solo_rig::PresetController controller(&registry, TestFormat());
+    REQUIRE(!controller.RegisterPreset("one", MakeGainPreset("One", 1.0F)).has_value());
+    solo_rig::RigRuntime runtime(controller.MailboxForControl(), TestFormat());
+    REQUIRE(runtime.Prepare());
+    solo_rig::AudioBuffer input(1, 64);
+    solo_rig::AudioBuffer output(1, 64);
+    input.ChannelData(0)[0] = 1.0F;
+
+    for (std::size_t cycle = 0; cycle < 32U; ++cycle) {
+        REQUIRE(!controller.QueuePresetActivation("one").has_value());
+        REQUIRE(runtime.Process(input, output, 1));
+        REQUIRE(controller.MailboxForControl().Active() != nullptr);
+        // A pending slot is intentionally left unconsumed on alternating
+        // iterations; Shutdown must retire both ownership paths.
+        if ((cycle % 2U) == 0U) {
+            REQUIRE(!controller.QueuePresetActivation("one").has_value());
+        }
+        runtime.Shutdown();
+        REQUIRE(controller.MailboxForControl().Active() == nullptr);
+        REQUIRE(controller.MailboxForControl().Pending() == nullptr);
+        REQUIRE(runtime.Prepare());
+    }
+}

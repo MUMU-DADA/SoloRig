@@ -1,5 +1,7 @@
 #include "core/audio_graph.hpp"
 
+#include "content/module_runtime.hpp"
+
 #include <algorithm>
 #include <deque>
 #include <limits>
@@ -178,6 +180,15 @@ bool AudioGraph::Process(const AudioBuffer& input, AudioBuffer& output, std::uin
         route.compensation.AddFrom(FindNode(route.source)->output_buffer, output, sample_count);
     }
     return true;
+}
+
+bool AudioGraph::SetParameter(NodeId node_id, std::string_view parameter_id, float value) noexcept {
+    auto* node = FindNode(node_id);
+    if (node == nullptr || node->processor == nullptr) {
+        return false;
+    }
+    auto* parameterized = dynamic_cast<ModuleRuntimeProcessor*>(node->processor.get());
+    return parameterized != nullptr && parameterized->SetParameter(parameter_id, value);
 }
 
 std::uint32_t AudioGraph::DeclaredLatencySamples() const noexcept {

@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 namespace solo_rig {
@@ -40,6 +41,7 @@ public:
     [[nodiscard]] bool Connect(NodeId source, NodeId destination);
     [[nodiscard]] std::vector<GraphPreparationError> Prepare(const AudioFormat& format);
     [[nodiscard]] bool Process(const AudioBuffer& input, AudioBuffer& output, std::uint32_t sample_count) noexcept;
+    [[nodiscard]] bool SetParameter(NodeId node_id, std::string_view parameter_id, float value) noexcept;
     [[nodiscard]] std::uint32_t DeclaredLatencySamples() const noexcept;
 
 private:

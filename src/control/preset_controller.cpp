@@ -146,6 +146,13 @@ const PreparedPreset* RealtimePresetMailbox::BeginPendingAtControlPoint() noexce
                                                           PreparedSlotState::Transition,
                                                           std::memory_order_acq_rel,
                                                           std::memory_order_acquire)) {
+            // Preserve the hand-off if a caller observes an unexpected state;
+            // losing this pointer would make its slot permanently unreachable.
+            const PreparedPreset* empty = nullptr;
+            static_cast<void>(pending_.compare_exchange_strong(empty,
+                                                               pending,
+                                                               std::memory_order_release,
+                                                               std::memory_order_relaxed));
             return nullptr;
         }
     }
@@ -158,10 +165,12 @@ void RealtimePresetMailbox::CommitActiveAtControlPoint(const PreparedPreset* pre
     }
     if (preset->slot_state != nullptr) {
         auto expected = PreparedSlotState::Transition;
-        static_cast<void>(preset->slot_state->compare_exchange_strong(expected,
-                                                                       PreparedSlotState::Active,
-                                                                       std::memory_order_acq_rel,
-                                                                       std::memory_order_acquire));
+        if (!preset->slot_state->compare_exchange_strong(expected,
+                                                         PreparedSlotState::Active,
+                                                         std::memory_order_acq_rel,
+                                                         std::memory_order_acquire)) {
+            return;
+        }
     }
     const auto* previous = active_.exchange(preset, std::memory_order_acq_rel);
     if (previous != nullptr && previous != preset) {
@@ -200,6 +209,29 @@ const PreparedPreset* RealtimePresetMailbox::Active() const noexcept {
 
 const PreparedPreset* RealtimePresetMailbox::Pending() const noexcept {
     return pending_.load(std::memory_order_acquire);
+}
+
+void RealtimePresetMailbox::ResetForReconfigure() noexcept {
+    // Host stopped: no audio access can race these exchanges. Retire pointed
+    // slots before clearing the mailbox so the controller may acquire and
+    // rebuild them on its next submission.
+    const auto retire = [](const PreparedPreset* preset) noexcept {
+        if (preset == nullptr || preset->slot_state == nullptr) {
+            return;
+        }
+        auto state = preset->slot_state->load(std::memory_order_acquire);
+        while (state == PreparedSlotState::Published || state == PreparedSlotState::Pending ||
+               state == PreparedSlotState::Active || state == PreparedSlotState::Transition) {
+            if (preset->slot_state->compare_exchange_weak(state,
+                                                          PreparedSlotState::Retired,
+                                                          std::memory_order_acq_rel,
+                                                          std::memory_order_acquire)) {
+                break;
+            }
+        }
+    };
+    retire(pending_.exchange(nullptr, std::memory_order_acq_rel));
+    retire(active_.exchange(nullptr, std::memory_order_acq_rel));
 }
 
 bool RealtimePresetMailbox::IsLockFree() const noexcept {

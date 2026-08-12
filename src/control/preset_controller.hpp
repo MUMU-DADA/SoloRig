@@ -48,6 +48,9 @@ struct PreparedPreset {
     // is immutable after preparation; its preallocated DSP state is mutable
     // only from the audio thread.
     std::shared_ptr<AudioGraph> runtime_graph;
+    // Built once by RigRuntimeBuilder. The audio thread uses this immutable
+    // index to locate a module without scanning or allocating.
+    std::map<std::string, std::uint32_t, std::less<>> runtime_node_indices;
     // Points to the owning controller slot's single ownership state. It is
     // never dereferenced by the real-time path except for atomic state CAS.
     std::atomic<PreparedSlotState>* slot_state{};
@@ -76,6 +79,10 @@ public:
     [[nodiscard]] const PreparedPreset* ApplyPendingAtControlPoint() noexcept;
     [[nodiscard]] const PreparedPreset* Active() const noexcept;
     [[nodiscard]] const PreparedPreset* Pending() const noexcept;
+    // Called only while the host has stopped processing, before replacing a
+    // plugin's prepared runtime during setupProcessing. Any pointed-to slot
+    // is retired before the atomics are cleared.
+    void ResetForReconfigure() noexcept;
     [[nodiscard]] bool IsLockFree() const noexcept;
 
 private:

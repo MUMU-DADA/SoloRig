@@ -130,6 +130,19 @@ if(SOLO_RIG_BUILD_VST3)
     # here would turn warnings in unmodified SDK templates into local failures.
 
     if(BUILD_TESTING)
+        add_executable(solo_rig_vst3_tests
+            tests/test_main.cpp
+            tests/vst3_processor_tests.cpp
+            src/vst3/solo_rig_processor.cpp
+            "${SDK_ROOT}/public.sdk/source/common/memorystream.cpp"
+        )
+        target_include_directories(solo_rig_vst3_tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${SDK_ROOT}"
+            "${SDK_ROOT}/public.sdk"
+        )
+        target_link_libraries(solo_rig_vst3_tests PRIVATE sdk sdk_hosting solo_rig_core)
+        add_test(NAME solo_rig_vst3_tests COMMAND solo_rig_vst3_tests)
         add_test(
             NAME solo_rig_vst3_validator
             COMMAND $<TARGET_FILE:validator>

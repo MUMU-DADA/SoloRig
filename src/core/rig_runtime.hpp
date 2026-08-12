@@ -55,7 +55,13 @@ public:
     // Allocates all graph-independent transition buffers. Call off the audio
     // thread before Process; Process itself is noexcept and allocation-free.
     [[nodiscard]] bool Prepare();
+    // Must be called only after the host has stopped invoking Process. Retires
+    // current, target, and pending ownership before the runtime is rebuilt.
+    void Shutdown() noexcept;
     [[nodiscard]] bool Process(const AudioBuffer& input, AudioBuffer& output, std::uint32_t sample_count) noexcept;
+    [[nodiscard]] bool SetParameter(std::string_view instance_id,
+                                    std::string_view parameter_id,
+                                    float value) noexcept;
     [[nodiscard]] bool IsPrepared() const noexcept;
     [[nodiscard]] std::uint32_t TransitionSamples() const noexcept;
     [[nodiscard]] bool InTransition() const noexcept;

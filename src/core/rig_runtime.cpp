@@ -220,6 +220,7 @@ std::variant<PreparedPreset, RigBuildError> RigRuntimeBuilder::Build(const Prepa
     }
     if (prepared.preset.nodes.empty()) {
         auto result = prepared;
+        result.runtime_node_indices.clear();
         result.runtime_graph.reset();
         return result;
     }
@@ -267,6 +268,11 @@ std::variant<PreparedPreset, RigBuildError> RigRuntimeBuilder::Build(const Prepa
         return RigBuildError::GraphPreparationFailed;
     }
     auto result = prepared;
+    result.runtime_node_indices.clear();
+    for (std::size_t index = 0; index < result.preset.nodes.size(); ++index) {
+        result.runtime_node_indices.emplace(result.preset.nodes[index].instance_id,
+                                            static_cast<std::uint32_t>(index + 2U));
+    }
     result.runtime_graph = std::move(graph);
     return result;
 }
@@ -283,6 +289,30 @@ bool RigRuntime::Prepare() {
     current_ = nullptr;
     target_ = nullptr;
     return prepared_ && transition_total_samples_ > 0U;
+}
+
+void RigRuntime::Shutdown() noexcept {
+    // setupProcessing is a host-stop boundary. No Process call may race this
+    // routine, so the local target pointer is safe to retire before mailbox
+    // atomics are reset.
+    if (target_ != nullptr) {
+        mailbox_.RetireAtControlPoint(target_);
+    }
+    if (current_ != nullptr) {
+        mailbox_.RetireAtControlPoint(current_);
+    }
+    if (const auto* active = mailbox_.Active(); active != nullptr && active != current_ && active != target_) {
+        mailbox_.RetireAtControlPoint(active);
+    }
+    if (const auto* pending = mailbox_.BeginPendingAtControlPoint(); pending != nullptr) {
+        mailbox_.RetireAtControlPoint(pending);
+    }
+    mailbox_.ResetForReconfigure();
+    current_ = nullptr;
+    target_ = nullptr;
+    transition_total_samples_ = 0U;
+    transition_position_ = 0U;
+    prepared_ = false;
 }
 
 void RigRuntime::ObservePending() noexcept {
@@ -363,6 +393,26 @@ bool RigRuntime::Process(const AudioBuffer& input, AudioBuffer& output, std::uin
         FinishTransition();
     }
     return true;
+}
+
+bool RigRuntime::SetParameter(std::string_view instance_id, std::string_view parameter_id, float value) noexcept {
+    auto apply = [instance_id, parameter_id, value](const PreparedPreset* prepared) noexcept {
+        if (prepared == nullptr || prepared->runtime_graph == nullptr) {
+            return false;
+        }
+        const auto location = prepared->runtime_node_indices.find(instance_id);
+        if (location != prepared->runtime_node_indices.end()) {
+            return prepared->runtime_graph->SetParameter(location->second, parameter_id, value);
+        }
+        return false;
+    };
+
+    bool applied = apply(current_);
+    applied = apply(target_) || applied;
+    if (const auto* pending = mailbox_.Pending(); pending != nullptr) {
+        applied = apply(pending) || applied;
+    }
+    return applied;
 }
 
 bool RigRuntime::IsPrepared() const noexcept { return prepared_; }
