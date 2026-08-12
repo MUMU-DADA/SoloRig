@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <deque>
 #include <limits>
+#include <new>
 
 namespace solo_rig {
 
@@ -44,6 +45,7 @@ bool AudioGraph::Connect(NodeId source, NodeId destination) {
 std::vector<GraphPreparationError> AudioGraph::Prepare(const AudioFormat& format) {
     prepared_ = false;
     process_order_.clear();
+    output_routes_.clear();
     declared_latency_samples_ = 0;
 
     if (!format.Validate().empty()) {
@@ -112,6 +114,10 @@ std::vector<GraphPreparationError> AudioGraph::Prepare(const AudioFormat& format
                 incoming_latency = std::max(incoming_latency, FindNode(source)->cumulative_latency_samples);
             }
         }
+        if (node->processor->DeclaredLatencySamples() > std::numeric_limits<std::uint32_t>::max() - incoming_latency) {
+            return {GraphPreparationError::LatencyOverflow};
+        }
+        node->input_latency_samples = incoming_latency;
         node->cumulative_latency_samples = incoming_latency + node->processor->DeclaredLatencySamples();
     }
 
@@ -119,6 +125,33 @@ std::vector<GraphPreparationError> AudioGraph::Prepare(const AudioFormat& format
         if (source >= 2U) {
             declared_latency_samples_ = std::max(declared_latency_samples_, FindNode(source)->cumulative_latency_samples);
         }
+    }
+
+    for (const auto node_id : process_order_) {
+        auto* node = FindNode(node_id);
+        node->input_routes.clear();
+        node->input_routes.reserve(node->incoming.size());
+        for (const auto source : node->incoming) {
+            const auto source_latency = source >= 2U ? FindNode(source)->cumulative_latency_samples : 0U;
+            Route route{.source = source, .compensation = {.delay_samples = node->input_latency_samples - source_latency}};
+            if (!route.compensation.Prepare(format.channel_count)) {
+                return {GraphPreparationError::LatencyCompensationAllocationFailed};
+            }
+            node->input_routes.push_back(std::move(route));
+        }
+    }
+
+    output_routes_.reserve(output_incoming_.size());
+    for (const auto source : output_incoming_) {
+        if (source < 2U) {
+            continue;
+        }
+        Route route{.source = source,
+                    .compensation = {.delay_samples = declared_latency_samples_ - FindNode(source)->cumulative_latency_samples}};
+        if (!route.compensation.Prepare(format.channel_count)) {
+            return {GraphPreparationError::LatencyCompensationAllocationFailed};
+        }
+        output_routes_.push_back(std::move(route));
     }
     prepared_ = true;
     return {};
@@ -133,27 +166,58 @@ bool AudioGraph::Process(const AudioBuffer& input, AudioBuffer& output, std::uin
     for (const auto node_id : process_order_) {
         auto* node = FindNode(node_id);
         node->input_buffer.Clear(sample_count);
-        for (const auto source : node->incoming) {
-            if (source == InputNodeId) {
-                static_cast<void>(node->input_buffer.AddFrom(input, sample_count));
-            } else if (source >= 2U) {
-                static_cast<void>(node->input_buffer.AddFrom(FindNode(source)->output_buffer, sample_count));
-            }
+        for (auto& route : node->input_routes) {
+            const auto& source = route.source == InputNodeId ? input : FindNode(route.source)->output_buffer;
+            route.compensation.AddFrom(source, node->input_buffer, sample_count);
         }
         node->processor->Process(node->input_buffer, node->output_buffer, sample_count);
     }
 
     output.Clear(sample_count);
-    for (const auto source : output_incoming_) {
-        if (source >= 2U) {
-            static_cast<void>(output.AddFrom(FindNode(source)->output_buffer, sample_count));
-        }
+    for (auto& route : output_routes_) {
+        route.compensation.AddFrom(FindNode(route.source)->output_buffer, output, sample_count);
     }
     return true;
 }
 
 std::uint32_t AudioGraph::DeclaredLatencySamples() const noexcept {
     return declared_latency_samples_;
+}
+
+bool AudioGraph::DelayCompensator::Prepare(std::uint32_t channel_count) {
+    write_position = 0;
+    if (delay_samples == 0U) {
+        delay_line.clear();
+        return true;
+    }
+    const auto line_size = static_cast<std::size_t>(channel_count) * delay_samples;
+    if (channel_count == 0U || line_size / channel_count != delay_samples) {
+        return false;
+    }
+    try {
+        delay_line.assign(line_size, 0.0F);
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    return true;
+}
+
+void AudioGraph::DelayCompensator::AddFrom(const AudioBuffer& source,
+                                           AudioBuffer& destination,
+                                           std::uint32_t sample_count) noexcept {
+    if (delay_samples == 0U) {
+        static_cast<void>(destination.AddFrom(source, sample_count));
+        return;
+    }
+
+    for (std::uint32_t sample = 0; sample < sample_count; ++sample) {
+        for (std::uint32_t channel = 0; channel < source.ChannelCount(); ++channel) {
+            const auto index = static_cast<std::size_t>(channel) * delay_samples + write_position;
+            destination.ChannelData(channel)[sample] += delay_line[index];
+            delay_line[index] = source.ChannelData(channel)[sample];
+        }
+        write_position = (write_position + 1U) % delay_samples;
+    }
 }
 
 AudioGraph::Node* AudioGraph::FindNode(NodeId id) noexcept {
