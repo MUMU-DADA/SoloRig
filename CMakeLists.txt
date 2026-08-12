@@ -17,8 +17,11 @@ endfunction()
 
 add_library(solo_rig_core STATIC
     src/core/audio_format.cpp
+    src/core/audio_buffer.cpp
+    src/core/audio_graph.cpp
     src/core/effect_descriptor.cpp
     src/core/quality_policy.cpp
+    src/core/realtime_load_meter.cpp
 )
 target_include_directories(solo_rig_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 enable_solo_rig_warnings(solo_rig_core)
@@ -27,7 +30,10 @@ if(BUILD_TESTING)
     add_executable(solo_rig_tests
         tests/test_main.cpp
         tests/audio_format_tests.cpp
+        tests/audio_buffer_tests.cpp
         tests/effect_descriptor_tests.cpp
+        tests/audio_graph_tests.cpp
+        tests/realtime_load_meter_tests.cpp
         tests/quality_policy_tests.cpp
     )
     target_link_libraries(solo_rig_tests PRIVATE solo_rig_core)
