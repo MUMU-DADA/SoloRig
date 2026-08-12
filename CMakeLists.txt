@@ -65,6 +65,10 @@ add_library(solo_rig_core STATIC
     src/control/shortcut_registry.cpp
     src/ui/pedal_layout.cpp
 )
+if(WIN32)
+    target_sources(solo_rig_core PRIVATE src/control/midi_input.cpp)
+    target_link_libraries(solo_rig_core PUBLIC winmm)
+endif()
 target_include_directories(solo_rig_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(solo_rig_core PUBLIC neural_amp_modeler_core)
 enable_solo_rig_warnings(solo_rig_core)

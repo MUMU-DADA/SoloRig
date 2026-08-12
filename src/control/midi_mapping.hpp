@@ -40,6 +40,19 @@ struct MidiAction {
     float normalized_value{};
 };
 
+// Decodes the channel-voice messages SoloRig exposes for control. It keeps no
+// dynamic storage so OS MIDI callbacks may feed bytes directly into it.
+class MidiStreamDecoder {
+public:
+    [[nodiscard]] std::optional<MidiMessage> PushByte(std::uint8_t byte) noexcept;
+    void Reset() noexcept;
+
+private:
+    std::uint8_t running_status_{};
+    std::uint8_t first_data_byte_{};
+    bool has_first_data_byte_{};
+};
+
 [[nodiscard]] bool IsValidMidiBinding(const MidiBinding& binding) noexcept;
 [[nodiscard]] std::optional<MidiAction> MapMidiMessage(const MidiBinding& binding,
                                                         const MidiMessage& message);
