@@ -22,6 +22,10 @@ add_library(solo_rig_core STATIC
     src/core/effect_descriptor.cpp
     src/core/quality_policy.cpp
     src/core/realtime_load_meter.cpp
+    src/dsp/diode_clipper.cpp
+    src/dsp/digital_delay.cpp
+    src/dsp/impulse_response.cpp
+    src/dsp/tuner.cpp
 )
 target_include_directories(solo_rig_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 enable_solo_rig_warnings(solo_rig_core)
@@ -34,7 +38,11 @@ if(BUILD_TESTING)
         tests/effect_descriptor_tests.cpp
         tests/audio_graph_tests.cpp
         tests/realtime_load_meter_tests.cpp
+        tests/diode_clipper_tests.cpp
+        tests/digital_delay_tests.cpp
+        tests/impulse_response_tests.cpp
         tests/quality_policy_tests.cpp
+        tests/tuner_tests.cpp
     )
     target_link_libraries(solo_rig_tests PRIVATE solo_rig_core)
     enable_solo_rig_warnings(solo_rig_tests)
