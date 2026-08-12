@@ -79,6 +79,11 @@ void RigEditorViewModel::ApplyPreset(RigPreset preset, std::optional<std::filesy
     if (preset_.theme.has_value()) {
         theme_ = *preset_.theme;
         dark_theme_ = theme_.id.find("dark") != std::string::npos;
+    } else {
+        // Legacy .srig files have no theme metadata. Do not inherit a theme
+        // from the previously open document; use the stable built-in fallback.
+        theme_ = DefaultDarkTheme();
+        dark_theme_ = true;
     }
     layout_ = PedalLayout(GridSize());
     unresolved_nodes_.clear();

@@ -181,6 +181,50 @@ TEST_CASE("RigEditor rejects failed loads without changing the current canvas") 
     }
 }
 
+TEST_CASE("RigEditor restores the built-in dark theme for legacy presets without theme metadata") {
+    const auto directory = std::filesystem::temp_directory_path();
+    const auto legacy_path = directory / "solorig-editor-legacy-v2.srig";
+    const auto corrupt_path = directory / "solorig-editor-legacy-corrupt.srig";
+    std::error_code cleanup_error;
+    std::filesystem::remove(legacy_path, cleanup_error);
+    std::filesystem::remove(corrupt_path, cleanup_error);
+
+    auto legacy = solo_rig::RigEditorViewModel::DefaultEditorPreset();
+    legacy.theme.reset();
+    REQUIRE(!solo_rig::SavePreset(legacy_path, legacy).has_value());
+    {
+        std::ofstream output(corrupt_path, std::ios::binary | std::ios::trunc);
+        output << "{not-json";
+    }
+
+    solo_rig::RigEditorViewModel editor;
+    editor.SetThemeMode(false);
+    REQUIRE(!editor.IsDarkTheme());
+    const auto loaded = editor.LoadFrom(legacy_path);
+    REQUIRE(loaded.success);
+    REQUIRE(!loaded.warning);
+    REQUIRE(editor.IsDarkTheme());
+    REQUIRE(editor.Scene().theme.id == "solorig.dark");
+    REQUIRE(!editor.IsDirty());
+
+    const auto before_failed_load = editor.ExportPreset();
+    const auto before_source = editor.SourcePath();
+    const auto before_dirty = editor.IsDirty();
+    const auto failed = editor.LoadFrom(corrupt_path);
+    REQUIRE(!failed.success);
+    REQUIRE(editor.ExportPreset().theme.has_value());
+    REQUIRE(before_failed_load.theme.has_value());
+    REQUIRE(editor.ExportPreset().theme->id == before_failed_load.theme->id);
+    REQUIRE(editor.ExportPreset().theme->colors == before_failed_load.theme->colors);
+    REQUIRE(editor.ExportPreset().theme->metrics == before_failed_load.theme->metrics);
+    REQUIRE(editor.SourcePath() == before_source);
+    REQUIRE(editor.IsDirty() == before_dirty);
+    REQUIRE(editor.Scene().theme.id == "solorig.dark");
+
+    std::filesystem::remove(legacy_path, cleanup_error);
+    std::filesystem::remove(corrupt_path, cleanup_error);
+}
+
 TEST_CASE("RigEditor loads missing modules as visible placeholder nodes with a warning") {
     const auto path = std::filesystem::temp_directory_path() / "solorig-editor-missing-module.srig";
     std::error_code cleanup_error;
