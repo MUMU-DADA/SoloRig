@@ -22,6 +22,13 @@ Steinberg::tresult PLUGIN_API SoloRigController::initialize(Steinberg::FUnknown*
         Steinberg::Vst::ParameterInfo::kCanAutomate,
         kOutputGainId);
     parameters.addParameter(
+        STR16("Drive"),
+        STR16("norm"),
+        0,
+        0.0,
+        Steinberg::Vst::ParameterInfo::kCanAutomate,
+        kDriveId);
+    parameters.addParameter(
         STR16("Bypass"),
         nullptr,
         1,
@@ -41,12 +48,17 @@ Steinberg::tresult PLUGIN_API SoloRigController::setComponentState(Steinberg::IB
     Steinberg::int32 version = 0;
     float output_gain = 0.0F;
     Steinberg::int32 bypass = 0;
+    float drive = 0.0F;
     if (!stream.readInt32u(magic) || !stream.readInt32(version) || !stream.readFloat(output_gain) ||
-        !stream.readInt32(bypass) || magic != kStateMagic || version != kStateVersion) {
+        !stream.readInt32(bypass) || magic != kStateMagic || (version != 1 && version != kStateVersion)) {
+        return Steinberg::kResultFalse;
+    }
+    if (version >= 2 && !stream.readFloat(drive)) {
         return Steinberg::kResultFalse;
     }
 
     setParamNormalized(kOutputGainId, std::clamp(static_cast<Steinberg::Vst::ParamValue>(output_gain), 0.0, 1.0));
+    setParamNormalized(kDriveId, std::clamp(static_cast<Steinberg::Vst::ParamValue>(drive), 0.0, 1.0));
     setParamNormalized(kBypassId, bypass == 0 ? 0.0 : 1.0);
     return Steinberg::kResultOk;
 }

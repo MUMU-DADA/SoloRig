@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <type_traits>
 
 namespace solo_rig::vst3 {
 namespace {
@@ -18,7 +19,11 @@ template <typename Sample>
 void ProcessAudio(
     Steinberg::Vst::ProcessData& data,
     double gain,
-    bool bypass) {
+    bool bypass,
+    DiodeClipper& drive_processor,
+    AudioBuffer& processing_input,
+    AudioBuffer& processing_output,
+    bool drive_processor_prepared) {
     if (data.numInputs < 1 || data.numOutputs < 1 || data.inputs == nullptr || data.outputs == nullptr) {
         return;
     }
@@ -26,9 +31,29 @@ void ProcessAudio(
     const auto& input_bus = data.inputs[0];
     auto& output_bus = data.outputs[0];
     const auto channels = std::min(input_bus.numChannels, output_bus.numChannels);
-    const auto effective_gain = bypass ? 1.0 : gain;
+    const auto can_apply_drive = !bypass && drive_processor_prepared &&
+        processing_input.ChannelCount() == static_cast<std::uint32_t>(channels) &&
+        processing_input.Capacity() >= static_cast<std::uint32_t>(data.numSamples) &&
+        processing_output.ChannelCount() == static_cast<std::uint32_t>(channels) &&
+        processing_output.Capacity() >= static_cast<std::uint32_t>(data.numSamples);
 
     output_bus.silenceFlags = input_bus.silenceFlags;
+    if (can_apply_drive) {
+        processing_input.Clear(data.numSamples);
+        for (Steinberg::int32 channel = 0; channel < channels; ++channel) {
+            const auto* input = std::is_same_v<Sample, float>
+                ? reinterpret_cast<const Sample*>(input_bus.channelBuffers32[channel])
+                : reinterpret_cast<const Sample*>(input_bus.channelBuffers64[channel]);
+            auto* destination = processing_input.ChannelData(static_cast<std::uint32_t>(channel));
+            if (input != nullptr) {
+                for (Steinberg::int32 sample = 0; sample < data.numSamples; ++sample) {
+                    destination[sample] = static_cast<float>(input[sample]);
+                }
+            }
+        }
+        drive_processor.Process(processing_input, processing_output, data.numSamples);
+    }
+
     for (Steinberg::int32 channel = 0; channel < channels; ++channel) {
         auto* input = std::is_same_v<Sample, float>
             ? reinterpret_cast<Sample*>(input_bus.channelBuffers32[channel])
@@ -45,6 +70,14 @@ void ProcessAudio(
             output_bus.silenceFlags |= static_cast<Steinberg::uint64>(1) << channel;
             continue;
         }
+        if (can_apply_drive) {
+            const auto* processed = processing_output.ChannelData(static_cast<std::uint32_t>(channel));
+            for (Steinberg::int32 sample = 0; sample < data.numSamples; ++sample) {
+                output[sample] = static_cast<Sample>(processed[sample] * gain);
+            }
+            continue;
+        }
+        const auto effective_gain = bypass ? 1.0 : gain;
         if (input == output && effective_gain == 1.0) {
             continue;
         }
@@ -90,7 +123,30 @@ Steinberg::tresult PLUGIN_API SoloRigProcessor::setBusArrangements(
         inputs[0] != outputs[0]) {
         return Steinberg::kResultFalse;
     }
-    return AudioEffect::setBusArrangements(inputs, num_inputs, outputs, num_outputs);
+    const auto result = AudioEffect::setBusArrangements(inputs, num_inputs, outputs, num_outputs);
+    if (result == Steinberg::kResultOk) {
+        channel_count_ = Steinberg::Vst::SpeakerArr::getChannelCount(outputs[0]);
+    }
+    return result;
+}
+
+Steinberg::tresult PLUGIN_API SoloRigProcessor::setupProcessing(Steinberg::Vst::ProcessSetup& new_setup) {
+    const auto result = AudioEffect::setupProcessing(new_setup);
+    if (result != Steinberg::kResultOk || new_setup.maxSamplesPerBlock <= 0 || new_setup.sampleRate <= 0.0 ||
+        channel_count_ <= 0) {
+        drive_processor_prepared_ = false;
+        return result == Steinberg::kResultOk ? Steinberg::kResultFalse : result;
+    }
+
+    const auto format = AudioFormat{
+        .sample_rate_hz = new_setup.sampleRate,
+        .max_block_size = static_cast<std::uint32_t>(new_setup.maxSamplesPerBlock),
+        .channel_count = static_cast<std::uint32_t>(channel_count_),
+    };
+    processing_input_ = AudioBuffer(format.channel_count, format.max_block_size);
+    processing_output_ = AudioBuffer(format.channel_count, format.max_block_size);
+    drive_processor_prepared_ = drive_processor_.Prepare(format);
+    return drive_processor_prepared_ ? Steinberg::kResultOk : Steinberg::kResultFalse;
 }
 
 Steinberg::tresult PLUGIN_API SoloRigProcessor::process(Steinberg::Vst::ProcessData& data) {
@@ -101,11 +157,23 @@ Steinberg::tresult PLUGIN_API SoloRigProcessor::process(Steinberg::Vst::ProcessD
 
     const auto gain = GainFromNormalizedValue(output_gain_);
     if (data.symbolicSampleSize == Steinberg::Vst::kSample32) {
-        ProcessAudio<float>(data, gain, bypass_);
+        ProcessAudio<float>(data,
+                            gain,
+                            bypass_,
+                            drive_processor_,
+                            processing_input_,
+                            processing_output_,
+                            drive_processor_prepared_);
         return Steinberg::kResultOk;
     }
     if (data.symbolicSampleSize == Steinberg::Vst::kSample64) {
-        ProcessAudio<double>(data, gain, bypass_);
+        ProcessAudio<double>(data,
+                             gain,
+                             bypass_,
+                             drive_processor_,
+                             processing_input_,
+                             processing_output_,
+                             drive_processor_prepared_);
         return Steinberg::kResultOk;
     }
     return Steinberg::kInvalidArgument;
@@ -121,13 +189,19 @@ Steinberg::tresult PLUGIN_API SoloRigProcessor::setState(Steinberg::IBStream* st
     Steinberg::int32 version = 0;
     float output_gain = 0.0F;
     Steinberg::int32 bypass = 0;
+    float drive = 0.0F;
     if (!stream.readInt32u(magic) || !stream.readInt32(version) || !stream.readFloat(output_gain) ||
-        !stream.readInt32(bypass) || magic != kStateMagic || version != kStateVersion) {
+        !stream.readInt32(bypass) || magic != kStateMagic || (version != 1 && version != kStateVersion)) {
+        return Steinberg::kResultFalse;
+    }
+    if (version >= 2 && !stream.readFloat(drive)) {
         return Steinberg::kResultFalse;
     }
 
     output_gain_ = std::clamp(static_cast<Steinberg::Vst::ParamValue>(output_gain), 0.0, 1.0);
     bypass_ = bypass != 0;
+    drive_ = std::clamp(static_cast<Steinberg::Vst::ParamValue>(drive), 0.0, 1.0);
+    ConfigureDrive();
     return Steinberg::kResultOk;
 }
 
@@ -139,7 +213,7 @@ Steinberg::tresult PLUGIN_API SoloRigProcessor::getState(Steinberg::IBStream* st
     Steinberg::IBStreamer stream(state, kLittleEndian);
     if (!stream.writeInt32u(kStateMagic) || !stream.writeInt32(kStateVersion) ||
         !stream.writeFloat(static_cast<float>(output_gain_)) ||
-        !stream.writeInt32(bypass_ ? 1 : 0)) {
+        !stream.writeInt32(bypass_ ? 1 : 0) || !stream.writeFloat(static_cast<float>(drive_))) {
         return Steinberg::kResultFalse;
     }
     return Steinberg::kResultOk;
@@ -165,8 +239,17 @@ void SoloRigProcessor::ApplyParameterChanges(Steinberg::Vst::ProcessData& data) 
             output_gain_ = std::clamp(value, 0.0, 1.0);
         } else if (queue->getParameterId() == kBypassId) {
             bypass_ = value >= 0.5;
+        } else if (queue->getParameterId() == kDriveId) {
+            drive_ = std::clamp(value, 0.0, 1.0);
+            ConfigureDrive();
         }
     }
+}
+
+void SoloRigProcessor::ConfigureDrive() noexcept {
+    auto settings = drive_processor_.Settings();
+    settings.drive = 1.0F + static_cast<float>(drive_) * 15.0F;
+    static_cast<void>(drive_processor_.SetSettings(settings));
 }
 
 double SoloRigProcessor::GainFromNormalizedValue(Steinberg::Vst::ParamValue normalized_value) {
