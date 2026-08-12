@@ -54,6 +54,38 @@ bool ParameterTargetExists(const RigPreset& preset, std::string_view target_id) 
     return node != preset.nodes.end() && node->parameter_values.contains(parameter_id);
 }
 
+MidiLearnTarget RangeForParameter(const PresetNode& node, std::string parameter_id) {
+    const auto target_id = node.instance_id + "." + parameter_id;
+    MidiLearnTarget target{.target_id = target_id,
+                           .display_name = target_id,
+                           .minimum = 0.0F,
+                           .maximum = 1.0F};
+    if (node.module_id == "org.mumu-dada.solorig.drive") {
+        if (parameter_id == "drive") {
+            target.minimum = 0.0F;
+            target.maximum = 16.0F;
+        } else if (parameter_id == "outputGain") {
+            target.minimum = 0.0F;
+            target.maximum = 2.0F;
+        } else if (parameter_id == "diodeThreshold") {
+            target.minimum = 0.01F;
+            target.maximum = 1.0F;
+        }
+    } else if (node.module_id == "org.mumu-dada.solorig.digital-delay") {
+        if (parameter_id == "time") {
+            target.minimum = 0.0F;
+            target.maximum = 2.0F;
+        } else if (parameter_id == "feedback") {
+            target.minimum = -0.99F;
+            target.maximum = 0.99F;
+        } else if (parameter_id == "mix") {
+            target.minimum = 0.0F;
+            target.maximum = 1.0F;
+        }
+    }
+    return target;
+}
+
 } // namespace
 
 std::vector<MidiInputDevice> WindowsMidiInputSource::EnumerateDevices() {
@@ -93,6 +125,10 @@ StandaloneMidiControlSession::~StandaloneMidiControlSession() {
 std::vector<MidiInputDevice> StandaloneMidiControlSession::RefreshDevices() {
     devices_ = source_->EnumerateDevices();
     if (devices_.empty()) {
+        learn_armed_ = false;
+        learn_target_.clear();
+        learn_minimum_ = 0.0F;
+        learn_maximum_ = 1.0F;
         status_.state = MidiSessionState::NoDevice;
         status_.device_name.clear();
         status_.message = "MIDI input: no devices available";
@@ -134,6 +170,10 @@ bool StandaloneMidiControlSession::Open(std::uint32_t device_index) {
     }
     if (!source_->Open(device_index)) {
         source_->Close();
+        learn_armed_ = false;
+        learn_target_.clear();
+        learn_minimum_ = 0.0F;
+        learn_maximum_ = 1.0F;
         SetError("MIDI device could not be opened");
         return false;
     }
@@ -148,6 +188,10 @@ void StandaloneMidiControlSession::Close() noexcept {
         source_->Close();
     }
     status_.state = MidiSessionState::Closed;
+    learn_armed_ = false;
+    learn_target_.clear();
+    learn_minimum_ = 0.0F;
+    learn_maximum_ = 1.0F;
     status_.device_name.clear();
     status_.message = "MIDI input closed";
 }
@@ -177,6 +221,12 @@ std::size_t StandaloneMidiControlSession::Drain() {
     if (overflowed) {
         observed_dropped_messages_ = dropped;
         status_.message = "MIDI queue overflow; dropped messages";
+        learn_armed_ = false;
+        learn_target_.clear();
+        learn_minimum_ = 0.0F;
+        learn_maximum_ = 1.0F;
+        status_.state = MidiSessionState::Error;
+        return messages.size();
     }
     if (messages.empty()) {
         if (dropped == 0U) {
@@ -184,7 +234,52 @@ std::size_t StandaloneMidiControlSession::Drain() {
         }
         return 0U;
     }
-    const auto dispatch = controller_->Dispatch(messages);
+    std::optional<MidiMessage> learned_message;
+    std::vector<MidiMessage> dispatch_messages;
+    dispatch_messages.reserve(messages.size());
+    for (const auto& message : messages) {
+        if (learn_armed_ && !learned_message.has_value() &&
+            message.type == MidiMessageType::ControlChange) {
+            learned_message = message;
+            continue;
+        }
+        dispatch_messages.push_back(message);
+    }
+
+    if (learned_message.has_value()) {
+        const auto target = learn_target_;
+        auto candidate = bindings_;
+        const auto old_size = candidate.size();
+        std::erase_if(candidate, [&learned_message](const MidiBinding& binding) {
+            return binding.message_type == MidiMessageType::ControlChange &&
+                   binding.channel == learned_message->channel && binding.number == learned_message->number;
+        });
+        const auto replaced = candidate.size() != old_size;
+        candidate.push_back({.message_type = MidiMessageType::ControlChange,
+                             .channel = learned_message->channel,
+                             .number = learned_message->number,
+                             .target_kind = MidiTargetKind::Parameter,
+                             .target_id = target,
+                             .minimum = learn_minimum_,
+                             .maximum = learn_maximum_});
+        if (!ConfigureBindings(std::move(candidate))) {
+            learn_armed_ = false;
+            learn_target_.clear();
+            SetError("MIDI learn binding could not be applied");
+            return messages.size();
+        }
+        learn_armed_ = false;
+        learn_target_.clear();
+        status_.state = MidiSessionState::Learned;
+        status_.message = "learned CC " + std::to_string(learned_message->number) +
+                          (replaced ? " (replaced existing mapping)" : "");
+    }
+
+    if (dispatch_messages.empty()) {
+        return messages.size();
+    }
+
+    const auto dispatch = controller_->Dispatch(dispatch_messages);
     if (dispatch.kind == PresetControlDispatchKind::Rejected) {
         SetError(dispatch.error.has_value() ? ControlErrorText(*dispatch.error)
                                             : "MIDI control request was rejected");
@@ -260,8 +355,97 @@ bool StandaloneMidiControlSession::ConfigureBindings(std::vector<MidiBinding> bi
 bool StandaloneMidiControlSession::SyncFromEditor() {
     const auto preset = editor_.ExportPreset();
     bindings_ = preset.midi_bindings.value_or(std::vector<MidiBinding>{});
+    learn_armed_ = false;
+    learn_target_.clear();
+    learn_minimum_ = 0.0F;
+    learn_maximum_ = 1.0F;
     UpdateBindingCount();
-    return RebuildController();
+    const auto rebuilt = RebuildController();
+    if (rebuilt) {
+        if (IsOpen()) {
+            status_.state = MidiSessionState::Open;
+            status_.message = "ready";
+        } else if (status_.state != MidiSessionState::NoDevice) {
+            status_.state = MidiSessionState::Closed;
+            status_.message = "MIDI input closed";
+        }
+    }
+    return rebuilt;
+}
+
+std::vector<MidiLearnTarget> StandaloneMidiControlSession::ParameterTargets() const {
+    std::vector<MidiLearnTarget> targets;
+    const auto preset = editor_.ExportPreset();
+    for (const auto& node : preset.nodes) {
+        for (const auto& [parameter_id, unused_value] : node.parameter_values) {
+            static_cast<void>(unused_value);
+            targets.push_back(RangeForParameter(node, parameter_id));
+        }
+    }
+    return targets;
+}
+
+std::vector<MidiBinding> StandaloneMidiControlSession::Bindings() const {
+    return bindings_;
+}
+
+bool StandaloneMidiControlSession::ArmLearn(std::string target_id) {
+    const auto targets = ParameterTargets();
+    const auto target = std::ranges::find_if(targets, [&target_id](const MidiLearnTarget& candidate) {
+        return candidate.target_id == target_id;
+    });
+    if (target == targets.end()) {
+        SetError("MIDI learn target is missing");
+        return false;
+    }
+    if (!IsOpen()) {
+        SetError("MIDI learn requires an open input");
+        return false;
+    }
+    learn_target_ = std::move(target_id);
+    learn_minimum_ = target->minimum;
+    learn_maximum_ = target->maximum;
+    learn_armed_ = true;
+    SetLearnMessage("learn armed for " + learn_target_ + "; waiting for CC", MidiSessionState::LearnArmed);
+    return true;
+}
+
+void StandaloneMidiControlSession::CancelLearn() noexcept {
+    learn_armed_ = false;
+    learn_target_.clear();
+    learn_minimum_ = 0.0F;
+    learn_maximum_ = 1.0F;
+    SetOpenMessage();
+}
+
+bool StandaloneMidiControlSession::IsLearnArmed() const noexcept {
+    return learn_armed_;
+}
+
+std::optional<std::string> StandaloneMidiControlSession::LearnTarget() const {
+    return learn_armed_ ? std::optional<std::string>(learn_target_) : std::nullopt;
+}
+
+bool StandaloneMidiControlSession::RemoveBinding(std::size_t index) {
+    if (index >= bindings_.size()) {
+        SetError("MIDI mapping selection is invalid");
+        return false;
+    }
+    auto candidate = bindings_;
+    candidate.erase(candidate.begin() + static_cast<std::ptrdiff_t>(index));
+    if (!ConfigureBindings(std::move(candidate))) {
+        return false;
+    }
+    status_.message = "MIDI binding removed";
+    return true;
+}
+
+bool StandaloneMidiControlSession::ClearBindings() {
+    if (!ConfigureBindings({})) {
+        return false;
+    }
+    status_.message = "MIDI bindings cleared";
+    return true;
 }
 
 bool StandaloneMidiControlSession::RegisterPresetBank(std::vector<std::pair<std::string, RigPreset>> presets) {
@@ -306,6 +490,10 @@ std::string StandaloneMidiControlSession::StatusText() const {
         }
     } else if (status_.state == MidiSessionState::NoDevice) {
         text += "no device";
+    } else if (status_.state == MidiSessionState::LearnArmed) {
+        text += "learn armed";
+    } else if (status_.state == MidiSessionState::Learned) {
+        text += "learned";
     } else if (status_.state == MidiSessionState::Error) {
         text += "error";
     } else {
@@ -350,18 +538,31 @@ bool StandaloneMidiControlSession::RebuildController() {
 }
 
 void StandaloneMidiControlSession::SetError(std::string message) {
+    learn_armed_ = false;
+    learn_target_.clear();
+    learn_minimum_ = 0.0F;
+    learn_maximum_ = 1.0F;
     status_.state = MidiSessionState::Error;
     status_.message = std::move(message);
 }
 
 void StandaloneMidiControlSession::SetOpenMessage() {
     if (IsOpen()) {
-        status_.state = MidiSessionState::Open;
-        status_.message = "ready";
+        if (learn_armed_) {
+            status_.state = MidiSessionState::LearnArmed;
+        } else if (status_.state != MidiSessionState::Learned) {
+            status_.state = MidiSessionState::Open;
+            status_.message = "ready";
+        }
     } else if (status_.state != MidiSessionState::NoDevice) {
         status_.state = MidiSessionState::Closed;
         status_.message = "MIDI input closed";
     }
+}
+
+void StandaloneMidiControlSession::SetLearnMessage(std::string message, MidiSessionState state) {
+    status_.state = state;
+    status_.message = std::move(message);
 }
 
 void StandaloneMidiControlSession::UpdateBindingCount() {

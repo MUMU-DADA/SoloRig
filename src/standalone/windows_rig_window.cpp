@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -79,6 +80,13 @@ D2D1_COLOR_F ColorFromHex(std::string_view value, D2D1_COLOR_F fallback) noexcep
 D2D1_COLOR_F ThemeColor(const ThemeDefinition& theme, std::string_view key, D2D1_COLOR_F fallback) noexcept {
     const auto iterator = theme.colors.find(key);
     return iterator == theme.colors.end() ? fallback : ColorFromHex(iterator->second, fallback);
+}
+
+std::wstring MidiBindingText(const MidiBinding& binding) {
+    const auto kind = binding.message_type == MidiMessageType::ControlChange ? "CC" : "PC";
+    return Widen(std::string(kind) + " ch" + std::to_string(binding.channel + 1U) +
+                 " #" + std::to_string(binding.number) + " -> " + binding.target_id +
+                 " [" + std::to_string(binding.minimum) + ".." + std::to_string(binding.maximum) + "]");
 }
 
 } // namespace
@@ -311,6 +319,35 @@ void Win32RigWindow::Destroy() noexcept {
         DestroyWindow(midi_refresh_button_);
         midi_refresh_button_ = nullptr;
     }
+    if (midi_target_combo_ != nullptr) {
+        DestroyWindow(midi_target_combo_);
+        midi_target_combo_ = nullptr;
+    }
+    if (midi_mapping_list_ != nullptr) {
+        DestroyWindow(midi_mapping_list_);
+        midi_mapping_list_ = nullptr;
+    }
+    if (midi_learn_button_ != nullptr) {
+        DestroyWindow(midi_learn_button_);
+        midi_learn_button_ = nullptr;
+    }
+    if (midi_cancel_learn_button_ != nullptr) {
+        DestroyWindow(midi_cancel_learn_button_);
+        midi_cancel_learn_button_ = nullptr;
+    }
+    if (midi_delete_button_ != nullptr) {
+        DestroyWindow(midi_delete_button_);
+        midi_delete_button_ = nullptr;
+    }
+    if (midi_clear_button_ != nullptr) {
+        DestroyWindow(midi_clear_button_);
+        midi_clear_button_ = nullptr;
+    }
+    if (midi_hint_label_ != nullptr) {
+        DestroyWindow(midi_hint_label_);
+        midi_hint_label_ = nullptr;
+    }
+    midi_target_ids_.clear();
     if (window_ != nullptr) {
         KillTimer(window_, 1U);
     }
@@ -375,6 +412,7 @@ void Win32RigWindow::SetMidiControlSession(StandaloneMidiControlSession* session
         midi_timer_enabled_ = false;
         InvalidateRect(window_, nullptr, FALSE);
     }
+    RefreshMidiMappingControls();
 }
 
 bool Win32RigWindow::TriggerMidiRefresh() {
@@ -382,6 +420,7 @@ bool Win32RigWindow::TriggerMidiRefresh() {
         return false;
     }
     const auto devices = midi_session_->RefreshDevices();
+    RefreshMidiMappingControls();
     InvalidateRect(window_, nullptr, FALSE);
     return !devices.empty();
 }
@@ -399,6 +438,7 @@ bool Win32RigWindow::TriggerMidiOpen() {
         midi_timer_enabled_ = false;
     }
     InvalidateRect(window_, nullptr, FALSE);
+    RefreshMidiMappingControls();
     return opened;
 }
 
@@ -411,6 +451,7 @@ bool Win32RigWindow::TriggerMidiClose() {
         KillTimer(window_, 1U);
     }
     midi_timer_enabled_ = false;
+    RefreshMidiMappingControls();
     InvalidateRect(window_, nullptr, FALSE);
     return true;
 }
@@ -420,8 +461,66 @@ std::size_t Win32RigWindow::DrainMidi() {
         return 0U;
     }
     const auto drained = midi_session_->Drain();
+    RefreshMidiMappingControls();
+    UpdateWindowTitle();
     InvalidateRect(window_, nullptr, FALSE);
     return drained;
+}
+
+bool Win32RigWindow::TriggerMidiLearn() {
+    if (midi_session_ == nullptr) {
+        return false;
+    }
+    const auto target = SelectedMidiTarget();
+    const auto armed = midi_session_->ArmLearn(target.value_or(std::string{}));
+    RefreshMidiMappingControls();
+    UpdateWindowTitle();
+    InvalidateRect(window_, nullptr, FALSE);
+    return armed;
+}
+
+bool Win32RigWindow::TriggerMidiCancelLearn() {
+    if (midi_session_ == nullptr) {
+        return false;
+    }
+    midi_session_->CancelLearn();
+    RefreshMidiMappingControls();
+    UpdateWindowTitle();
+    InvalidateRect(window_, nullptr, FALSE);
+    return true;
+}
+
+bool Win32RigWindow::TriggerMidiDeleteBinding() {
+    if (midi_session_ == nullptr || midi_mapping_list_ == nullptr) {
+        return false;
+    }
+    const auto selected = SendMessageW(midi_mapping_list_, LB_GETCURSEL, 0, 0);
+    if (selected < 0) {
+        static_cast<void>(midi_session_->RemoveBinding(std::numeric_limits<std::size_t>::max()));
+        RefreshMidiMappingControls();
+        InvalidateRect(window_, nullptr, FALSE);
+        return false;
+    }
+    const auto removed = midi_session_->RemoveBinding(static_cast<std::size_t>(selected));
+    RefreshMidiMappingControls();
+    UpdateWindowTitle();
+    InvalidateRect(window_, nullptr, FALSE);
+    return removed;
+}
+
+bool Win32RigWindow::TriggerMidiClearBindings() {
+    if (midi_session_ == nullptr) {
+        return false;
+    }
+    const auto cleared = midi_session_->ClearBindings();
+    RefreshMidiMappingControls();
+    UpdateWindowTitle();
+    InvalidateRect(window_, nullptr, FALSE);
+    return cleared;
+}
+
+bool Win32RigWindow::MidiLearnArmed() const noexcept {
+    return midi_session_ != nullptr && midi_session_->IsLearnArmed();
 }
 
 bool Win32RigWindow::MidiDrainTimerEnabled() const noexcept {
@@ -476,6 +575,7 @@ bool Win32RigWindow::TriggerOpen() {
     const auto result = editor_->LoadFrom(*source);
     if (result.success && midi_session_ != nullptr) {
         static_cast<void>(midi_session_->SyncFromEditor());
+        RefreshMidiMappingControls();
     }
     UpdateWindowTitle();
     InvalidateRect(window_, nullptr, FALSE);
@@ -593,7 +693,8 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
     case WM_ERASEBKGND:
         return 1;
     case WM_COMMAND:
-        if (HIWORD(w_param) == BN_CLICKED) {
+        if (HIWORD(w_param) == BN_CLICKED ||
+            (LOWORD(w_param) == 1007 && HIWORD(w_param) == CBN_SELCHANGE)) {
             if (LOWORD(w_param) == 1001) {
                 static_cast<void>(TriggerSave());
             } else if (LOWORD(w_param) == 1002) {
@@ -606,6 +707,17 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
                 static_cast<void>(TriggerMidiOpen());
             } else if (LOWORD(w_param) == 1006) {
                 static_cast<void>(TriggerMidiClose());
+            } else if (LOWORD(w_param) == 1008) {
+                static_cast<void>(TriggerMidiLearn());
+            } else if (LOWORD(w_param) == 1009) {
+                static_cast<void>(TriggerMidiCancelLearn());
+            } else if (LOWORD(w_param) == 1010) {
+                static_cast<void>(TriggerMidiDeleteBinding());
+            } else if (LOWORD(w_param) == 1011) {
+                static_cast<void>(TriggerMidiClearBindings());
+            }
+            if (LOWORD(w_param) == 1007) {
+                InvalidateRect(window_, nullptr, FALSE);
             }
             return 0;
         }
@@ -628,7 +740,26 @@ void Win32RigWindow::CreateToolbarButtons() {
                                         360, 16, 88, 30, window_, reinterpret_cast<HMENU>(1005), instance_, nullptr);
     midi_close_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Close", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                          454, 16, 92, 30, window_, reinterpret_cast<HMENU>(1006), instance_, nullptr);
+    midi_target_combo_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", nullptr,
+                                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+                                         560, 16, 220, 220, window_, reinterpret_cast<HMENU>(1007), instance_, nullptr);
+    midi_learn_button_ = CreateWindowExW(0, L"BUTTON", L"Learn CC", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                         788, 16, 78, 30, window_, reinterpret_cast<HMENU>(1008), instance_, nullptr);
+    midi_cancel_learn_button_ = CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                                870, 16, 72, 30, window_, reinterpret_cast<HMENU>(1009), instance_, nullptr);
+    midi_delete_button_ = CreateWindowExW(0, L"BUTTON", L"Delete", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                          946, 16, 72, 30, window_, reinterpret_cast<HMENU>(1010), instance_, nullptr);
+    midi_clear_button_ = CreateWindowExW(0, L"BUTTON", L"Clear", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                         1022, 16, 72, 30, window_, reinterpret_cast<HMENU>(1011), instance_, nullptr);
+    midi_mapping_list_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", nullptr,
+                                         WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+                                         560, 72, 520, 110, window_, reinterpret_cast<HMENU>(1012), instance_, nullptr);
+    midi_hint_label_ = CreateWindowExW(0, L"STATIC",
+                                       L"MIDI CC Learn only | Program Change bank remains session-controlled",
+                                       WS_CHILD | WS_VISIBLE | SS_LEFT,
+                                       560, 184, 520, 24, window_, reinterpret_cast<HMENU>(1013), instance_, nullptr);
     LayoutToolbarButtons();
+    RefreshMidiMappingControls();
 }
 
 void Win32RigWindow::LayoutToolbarButtons() {
@@ -646,6 +777,62 @@ void Win32RigWindow::LayoutToolbarButtons() {
     move(midi_refresh_button_, 256, 16, 98, 30);
     move(midi_open_button_, 360, 16, 88, 30);
     move(midi_close_button_, 454, 16, 92, 30);
+    RECT client{};
+    GetClientRect(window_, &client);
+    const auto width = std::max<LONG>(1, client.right - client.left);
+    const auto panel_left = std::max<LONG>(560, width - 440);
+    move(midi_target_combo_, panel_left, 16, 180, 240);
+    move(midi_learn_button_, panel_left + 188, 16, 72, 30);
+    move(midi_cancel_learn_button_, panel_left + 264, 16, 70, 30);
+    move(midi_delete_button_, panel_left + 338, 16, 70, 30);
+    move(midi_clear_button_, panel_left + 338, 50, 70, 30);
+    move(midi_mapping_list_, panel_left, 50, 330, 120);
+    move(midi_hint_label_, panel_left, 174, 410, 36);
+}
+
+void Win32RigWindow::RefreshMidiMappingControls() {
+    if (midi_target_combo_ == nullptr || midi_mapping_list_ == nullptr) {
+        return;
+    }
+    const auto previous_target = SelectedMidiTarget();
+    SendMessageW(midi_target_combo_, CB_RESETCONTENT, 0, 0);
+    midi_target_ids_.clear();
+    if (midi_session_ != nullptr) {
+        for (const auto& target : midi_session_->ParameterTargets()) {
+            midi_target_ids_.push_back(target.target_id);
+            const auto label = Widen(target.display_name);
+            SendMessageW(midi_target_combo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        }
+    }
+    auto target_index = 0L;
+    if (previous_target.has_value()) {
+        const auto found = std::find(midi_target_ids_.begin(), midi_target_ids_.end(), *previous_target);
+        if (found != midi_target_ids_.end()) {
+            target_index = static_cast<LONG>(std::distance(midi_target_ids_.begin(), found));
+        }
+    }
+    if (!midi_target_ids_.empty()) {
+        SendMessageW(midi_target_combo_, CB_SETCURSEL, static_cast<WPARAM>(target_index), 0);
+    }
+
+    SendMessageW(midi_mapping_list_, LB_RESETCONTENT, 0, 0);
+    if (midi_session_ != nullptr) {
+        for (const auto& binding : midi_session_->Bindings()) {
+            const auto label = MidiBindingText(binding);
+            SendMessageW(midi_mapping_list_, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        }
+    }
+}
+
+std::optional<std::string> Win32RigWindow::SelectedMidiTarget() const {
+    if (midi_target_combo_ == nullptr) {
+        return std::nullopt;
+    }
+    const auto selected = SendMessageW(midi_target_combo_, CB_GETCURSEL, 0, 0);
+    if (selected < 0 || static_cast<std::size_t>(selected) >= midi_target_ids_.size()) {
+        return std::nullopt;
+    }
+    return midi_target_ids_[static_cast<std::size_t>(selected)];
 }
 
 bool Win32RigWindow::HandleFileAction(FileDialogAction action) {

@@ -94,8 +94,8 @@ TEST_CASE("RigPreset schema-v2 persists optional MIDI bindings and keeps legacy 
          .number = 11,
          .target_kind = solo_rig::MidiTargetKind::Parameter,
          .target_id = "drive-1.drive",
-         .minimum = 0.1F,
-         .maximum = 0.9F},
+         .minimum = 0.0F,
+         .maximum = 16.0F},
         {.message_type = solo_rig::MidiMessageType::ProgramChange,
          .channel = 1,
          .number = 5,
@@ -109,6 +109,7 @@ TEST_CASE("RigPreset schema-v2 persists optional MIDI bindings and keeps legacy 
     REQUIRE(restored->midi_bindings.has_value());
     REQUIRE(restored->midi_bindings->size() == 2U);
     REQUIRE(restored->midi_bindings->front().target_id == "drive-1.drive");
+    REQUIRE(restored->midi_bindings->front().maximum == 16.0F);
     REQUIRE(restored->midi_bindings->back().target_id == "lead");
 
     const auto legacy = solo_rig::DeserializePreset(
@@ -121,6 +122,6 @@ TEST_CASE("RigPreset rejects malformed or out-of-range persisted MIDI bindings")
     const auto invalid = solo_rig::DeserializePreset(
         "{\"schemaVersion\":2,\"presetId\":\"bad\",\"name\":\"Bad\",\"nodes\":[],\"connections\":[],"
         "\"midiBindings\":[{\"messageType\":\"controlChange\",\"channel\":0,\"number\":7,"
-        "\"targetKind\":\"parameter\",\"targetId\":\"drive-1.drive\",\"minimum\":-0.1,\"maximum\":1.0}]}");
+        "\"targetKind\":\"parameter\",\"targetId\":\"drive-1.drive\",\"minimum\":1.0,\"maximum\":0.0}]}");
     REQUIRE(!invalid.has_value());
 }

@@ -9,6 +9,8 @@
 #include <functional>
 #include <filesystem>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace solo_rig::standalone {
 
@@ -50,6 +52,11 @@ public:
     [[nodiscard]] bool TriggerMidiOpen();
     [[nodiscard]] bool TriggerMidiClose();
     [[nodiscard]] std::size_t DrainMidi();
+    [[nodiscard]] bool TriggerMidiLearn();
+    [[nodiscard]] bool TriggerMidiCancelLearn();
+    [[nodiscard]] bool TriggerMidiDeleteBinding();
+    [[nodiscard]] bool TriggerMidiClearBindings();
+    [[nodiscard]] bool MidiLearnArmed() const noexcept;
     [[nodiscard]] bool MidiDrainTimerEnabled() const noexcept;
 
     [[nodiscard]] static bool RunSmokeTest(HINSTANCE instance);
@@ -64,6 +71,8 @@ private:
     void UpdateEditorViewport();
     void CreateToolbarButtons();
     void LayoutToolbarButtons();
+    void RefreshMidiMappingControls();
+    [[nodiscard]] std::optional<std::string> SelectedMidiTarget() const;
     [[nodiscard]] bool HandleFileAction(FileDialogAction action);
     [[nodiscard]] std::optional<std::filesystem::path> ShowNativeFileDialog(FileDialogAction action) const;
     void UpdateWindowTitle();
@@ -85,6 +94,14 @@ private:
     HWND midi_refresh_button_{};
     HWND midi_open_button_{};
     HWND midi_close_button_{};
+    HWND midi_target_combo_{};
+    HWND midi_mapping_list_{};
+    HWND midi_learn_button_{};
+    HWND midi_cancel_learn_button_{};
+    HWND midi_delete_button_{};
+    HWND midi_clear_button_{};
+    HWND midi_hint_label_{};
+    std::vector<std::string> midi_target_ids_;
     FileDialogProvider file_dialog_provider_;
     StandaloneMidiControlSession* midi_session_{};
     bool midi_timer_enabled_{};

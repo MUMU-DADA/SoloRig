@@ -53,8 +53,7 @@ bool IsValidMidiBinding(const MidiBinding& binding) noexcept {
     return binding.channel < 16U && binding.number < 128U && !binding.target_id.empty() &&
            (binding.message_type == MidiMessageType::ControlChange || binding.message_type == MidiMessageType::ProgramChange) &&
            (binding.target_kind == MidiTargetKind::Parameter || binding.target_kind == MidiTargetKind::Preset) &&
-           std::isfinite(binding.minimum) && std::isfinite(binding.maximum) && binding.minimum >= 0.0F &&
-           binding.maximum <= 1.0F && binding.minimum <= binding.maximum;
+           std::isfinite(binding.minimum) && std::isfinite(binding.maximum) && binding.minimum <= binding.maximum;
 }
 
 std::optional<MidiAction> MapMidiMessage(const MidiBinding& binding, const MidiMessage& message) {

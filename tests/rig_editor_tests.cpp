@@ -185,7 +185,7 @@ TEST_CASE("RigEditor rejects failed loads without changing the current canvas") 
         output << "{\"schemaVersion\":2,\"presetId\":\"invalid-midi\",\"name\":\"Invalid MIDI\","
                    "\"nodes\":[],\"connections\":[],\"midiBindings\":[{\"messageType\":\"controlChange\","
                    "\"channel\":0,\"number\":11,\"targetKind\":\"parameter\","
-                   "\"targetId\":\"drive-1.drive\",\"minimum\":-0.1,\"maximum\":1.0}]}";
+                   "\"targetId\":\"drive-1.drive\",\"minimum\":1.0,\"maximum\":0.0}]}";
     }
     for (const auto& path : {corrupt_path, schema_path, topology_path, invalid_midi_path,
                              directory / "missing.srig"}) {

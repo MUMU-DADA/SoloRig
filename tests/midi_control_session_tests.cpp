@@ -175,3 +175,113 @@ TEST_CASE("Standalone MIDI session reports open failure, no-device state and clo
     session.Close();
     REQUIRE(source->close_count > 0U);
 }
+
+TEST_CASE("Standalone MIDI learn captures only the next CC and replaces conflicting ownership") {
+    solo_rig::RigEditorViewModel editor;
+    auto fake = std::make_unique<FakeMidiInputSource>();
+    auto* source = fake.get();
+    solo_rig::standalone::StandaloneMidiControlSession session(editor, std::move(fake));
+    REQUIRE(session.ParameterTargets().size() >= 2U);
+    REQUIRE(session.RefreshDevices().size() == 1U);
+    REQUIRE(session.OpenSelected());
+    REQUIRE(session.ArmLearn("delay-1.time"));
+    REQUIRE(session.IsLearnArmed());
+    REQUIRE(session.Status().state == solo_rig::standalone::MidiSessionState::LearnArmed);
+
+    const auto before_learn = editor.ExportPreset().nodes.at(1).parameter_values.at("time");
+    source->Inject({.type = solo_rig::MidiMessageType::ProgramChange,
+                    .channel = 0,
+                    .number = 7,
+                    .value = 7});
+    source->Inject({.type = solo_rig::MidiMessageType::ControlChange,
+                    .channel = 0,
+                    .number = 74,
+                    .value = 127});
+    REQUIRE(session.Drain() == 2U);
+    REQUIRE(!session.IsLearnArmed());
+    REQUIRE(editor.ExportPreset().nodes.at(1).parameter_values.at("time") == before_learn);
+    REQUIRE(session.Status().state == solo_rig::standalone::MidiSessionState::Learned);
+    REQUIRE(session.StatusText().find("learned") != std::string::npos);
+    const auto learned = session.Bindings();
+    REQUIRE(learned.size() == 1U);
+    REQUIRE(learned.front().target_id == "delay-1.time");
+    REQUIRE(learned.front().number == 74U);
+    REQUIRE(learned.front().minimum == 0.0F);
+    REQUIRE(learned.front().maximum == 2.0F);
+    REQUIRE(editor.IsDirty());
+
+    source->Inject({.type = solo_rig::MidiMessageType::ControlChange,
+                    .channel = 0,
+                    .number = 74,
+                    .value = 64});
+    REQUIRE(session.Drain() == 1U);
+    REQUIRE(editor.ExportPreset().nodes.at(1).parameter_values.at("time") > 0.99F);
+    REQUIRE(editor.ExportPreset().nodes.at(1).parameter_values.at("time") < 1.02F);
+
+    REQUIRE(session.ClearBindings());
+    REQUIRE(session.ArmLearn("drive-1.drive"));
+    source->Inject({.type = solo_rig::MidiMessageType::ControlChange,
+                    .channel = 0,
+                    .number = 76,
+                    .value = 127});
+    REQUIRE(session.Drain() == 1U);
+    REQUIRE(session.Bindings().front().minimum == 0.0F);
+    REQUIRE(session.Bindings().front().maximum == 16.0F);
+    REQUIRE(editor.ExportPreset().nodes.front().parameter_values.at("drive") == 4.0F);
+    source->Inject({.type = solo_rig::MidiMessageType::ControlChange,
+                    .channel = 0,
+                    .number = 76,
+                    .value = 64});
+    REQUIRE(session.Drain() == 1U);
+    REQUIRE(editor.ExportPreset().nodes.front().parameter_values.at("drive") > 7.9F);
+    REQUIRE(editor.ExportPreset().nodes.front().parameter_values.at("drive") < 8.1F);
+    source->Inject({.type = solo_rig::MidiMessageType::ControlChange,
+                    .channel = 0,
+                    .number = 76,
+                    .value = 127});
+    REQUIRE(session.Drain() == 1U);
+    REQUIRE(editor.ExportPreset().nodes.front().parameter_values.at("drive") == 16.0F);
+
+    REQUIRE(session.ConfigureBindings({{.message_type = solo_rig::MidiMessageType::ControlChange,
+                                        .channel = 0,
+                                        .number = 74,
+                                        .target_kind = solo_rig::MidiTargetKind::Parameter,
+                                        .target_id = "delay-1.time",
+                                        .minimum = 0.0F,
+                                        .maximum = 2.0F}}));
+    REQUIRE(session.ArmLearn("drive-1.drive"));
+    source->Inject({.type = solo_rig::MidiMessageType::ControlChange,
+                    .channel = 0,
+                    .number = 74,
+                    .value = 32});
+    REQUIRE(session.Drain() == 1U);
+    REQUIRE(session.Bindings().size() == 1U);
+    REQUIRE(session.Bindings().front().target_id == "drive-1.drive");
+    REQUIRE(session.StatusText().find("replaced") != std::string::npos);
+}
+
+TEST_CASE("Standalone MIDI learn cancellation, close and binding management are safe") {
+    solo_rig::RigEditorViewModel editor;
+    auto fake = std::make_unique<FakeMidiInputSource>();
+    auto* source = fake.get();
+    solo_rig::standalone::StandaloneMidiControlSession session(editor, std::move(fake));
+    REQUIRE(!session.ArmLearn("missing.parameter"));
+    REQUIRE(!session.IsLearnArmed());
+    REQUIRE(!session.ArmLearn("drive-1.drive"));
+    REQUIRE(session.StatusText().find("requires an open input") != std::string::npos);
+    REQUIRE(session.RefreshDevices().size() == 1U);
+    REQUIRE(session.OpenSelected());
+    REQUIRE(!session.ArmLearn("missing.parameter"));
+    REQUIRE(session.ArmLearn("drive-1.drive"));
+    session.CancelLearn();
+    REQUIRE(!session.IsLearnArmed());
+    REQUIRE(session.ConfigureBindings({ParameterBinding()}));
+    REQUIRE(session.RemoveBinding(0U));
+    REQUIRE(session.Bindings().empty());
+    REQUIRE(session.ClearBindings());
+    REQUIRE(session.Bindings().empty());
+    REQUIRE(session.ArmLearn("drive-1.drive"));
+    session.Close();
+    REQUIRE(!session.IsLearnArmed());
+    REQUIRE(!source->open);
+}

@@ -44,7 +44,16 @@ enum class MidiSessionState {
     Closed,
     NoDevice,
     Open,
+    LearnArmed,
+    Learned,
     Error,
+};
+
+struct MidiLearnTarget {
+    std::string target_id;
+    std::string display_name;
+    float minimum{};
+    float maximum{1.0F};
 };
 
 struct MidiSessionStatus {
@@ -81,6 +90,14 @@ public:
     [[nodiscard]] std::size_t Drain();
     [[nodiscard]] bool ConfigureBindings(std::vector<MidiBinding> bindings);
     [[nodiscard]] bool SyncFromEditor();
+    [[nodiscard]] std::vector<MidiLearnTarget> ParameterTargets() const;
+    [[nodiscard]] std::vector<MidiBinding> Bindings() const;
+    [[nodiscard]] bool ArmLearn(std::string target_id);
+    void CancelLearn() noexcept;
+    [[nodiscard]] bool IsLearnArmed() const noexcept;
+    [[nodiscard]] std::optional<std::string> LearnTarget() const;
+    [[nodiscard]] bool RemoveBinding(std::size_t index);
+    [[nodiscard]] bool ClearBindings();
     [[nodiscard]] bool RegisterPresetBank(
         std::vector<std::pair<std::string, RigPreset>> presets);
 
@@ -93,6 +110,7 @@ private:
     void SetError(std::string message);
     void SetOpenMessage();
     void UpdateBindingCount();
+    void SetLearnMessage(std::string message, MidiSessionState state);
 
     RigEditorViewModel& editor_;
     std::unique_ptr<MidiInputSource> source_;
@@ -100,6 +118,10 @@ private:
     std::vector<MidiInputDevice> devices_;
     std::map<std::string, RigPreset, std::less<>> preset_bank_;
     std::vector<MidiBinding> bindings_;
+    bool learn_armed_{};
+    std::string learn_target_;
+    float learn_minimum_{};
+    float learn_maximum_{1.0F};
     MidiSessionStatus status_;
     std::uint64_t observed_dropped_messages_{};
 };

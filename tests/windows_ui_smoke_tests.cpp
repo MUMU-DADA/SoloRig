@@ -260,3 +260,168 @@ TEST_CASE("Win32 standalone editor closes a replaced MIDI session before rebindi
     REQUIRE(!window.MidiDrainTimerEnabled());
     window.Destroy();
 }
+
+TEST_CASE("Win32 standalone MIDI mapping controls perform CC learn delete and clear") {
+    const auto instance = GetModuleHandleW(nullptr);
+    REQUIRE(instance != nullptr);
+    solo_rig::RigEditorViewModel editor;
+    auto fake = std::make_unique<FakeWindowMidiSource>();
+    auto* source = fake.get();
+    solo_rig::standalone::StandaloneMidiControlSession session(editor, std::move(fake));
+    solo_rig::standalone::Win32RigWindow window;
+    REQUIRE(window.Create(instance, editor, false));
+    window.SetMidiControlSession(&session);
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1004, BN_CLICKED), 0) == 0);
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1005, BN_CLICKED), 0) == 0);
+    REQUIRE(session.IsOpen());
+
+    const auto target_combo = GetDlgItem(window.Handle(), 1007);
+    const auto mapping_list = GetDlgItem(window.Handle(), 1012);
+    REQUIRE(target_combo != nullptr);
+    REQUIRE(mapping_list != nullptr);
+    REQUIRE(SendMessageW(target_combo, CB_GETCOUNT, 0, 0) >= 2);
+    const auto target_index = SendMessageW(target_combo, CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
+                                           reinterpret_cast<LPARAM>(L"delay-1.time"));
+    REQUIRE(target_index >= 0);
+    REQUIRE(SendMessageW(target_combo, CB_SETCURSEL, static_cast<WPARAM>(target_index), 0) >= 0);
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1007, CBN_SELCHANGE),
+                         reinterpret_cast<LPARAM>(target_combo)) == 0);
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1008, BN_CLICKED), 0) == 0);
+    REQUIRE(session.IsLearnArmed());
+    REQUIRE(session.StatusText().find("learn armed") != std::string::npos);
+
+    const auto before_learn = editor.ExportPreset().nodes.at(1).parameter_values.at("time");
+    source->Inject({.type = solo_rig::MidiMessageType::ControlChange,
+                    .channel = 0,
+                    .number = 74,
+                    .value = 127});
+    REQUIRE(SendMessageW(window.Handle(), WM_TIMER, 1U, 0) == 0);
+    REQUIRE(!session.IsLearnArmed());
+    REQUIRE(editor.ExportPreset().nodes.at(1).parameter_values.at("time") == before_learn);
+    REQUIRE(editor.IsDirty());
+    REQUIRE(session.StatusText().find("learned") != std::string::npos);
+    REQUIRE(SendMessageW(mapping_list, LB_GETCOUNT, 0, 0) == 1);
+
+    REQUIRE(SendMessageW(mapping_list, LB_SETCURSEL, 0, 0) >= 0);
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1010, BN_CLICKED), 0) == 0);
+    REQUIRE(SendMessageW(mapping_list, LB_GETCOUNT, 0, 0) == 0);
+
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1008, BN_CLICKED), 0) == 0);
+    REQUIRE(session.IsLearnArmed());
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1009, BN_CLICKED), 0) == 0);
+    REQUIRE(!session.IsLearnArmed());
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1008, BN_CLICKED), 0) == 0);
+    REQUIRE(session.IsLearnArmed());
+    source->Inject({.type = solo_rig::MidiMessageType::ControlChange,
+                    .channel = 0,
+                    .number = 75,
+                    .value = 64});
+    REQUIRE(SendMessageW(window.Handle(), WM_TIMER, 1U, 0) == 0);
+    REQUIRE(SendMessageW(mapping_list, LB_GETCOUNT, 0, 0) == 1);
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1011, BN_CLICKED), 0) == 0);
+    REQUIRE(SendMessageW(mapping_list, LB_GETCOUNT, 0, 0) == 0);
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1008, BN_CLICKED), 0) == 0);
+    REQUIRE(session.IsLearnArmed());
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1006, BN_CLICKED), 0) == 0);
+    REQUIRE(!session.IsLearnArmed());
+    REQUIRE(!session.IsOpen());
+    REQUIRE(!window.MidiDrainTimerEnabled());
+    window.Destroy();
+}
+
+TEST_CASE("Win32 standalone MIDI session syncs loaded bindings and preserves learn on cancel or error") {
+    const auto directory = std::filesystem::temp_directory_path();
+    const auto valid_path = directory / "solorig-midi-learn-valid.srig";
+    const auto corrupt_path = directory / "solorig-midi-learn-corrupt.srig";
+    std::error_code cleanup;
+    std::filesystem::remove(valid_path, cleanup);
+    std::filesystem::remove(corrupt_path, cleanup);
+
+    solo_rig::RigEditorViewModel new_document;
+    REQUIRE(new_document.SetMidiBindings({{.message_type = solo_rig::MidiMessageType::ControlChange,
+                                           .channel = 0,
+                                           .number = 22,
+                                           .target_kind = solo_rig::MidiTargetKind::Parameter,
+                                           .target_id = "delay-1.time",
+                                           .minimum = 0.0F,
+                                           .maximum = 2.0F}}));
+    REQUIRE(new_document.SaveTo(valid_path).success);
+    {
+        std::ofstream output(corrupt_path, std::ios::binary | std::ios::trunc);
+        output << "{not-json";
+    }
+
+    const auto instance = GetModuleHandleW(nullptr);
+    REQUIRE(instance != nullptr);
+    solo_rig::RigEditorViewModel editor;
+    auto fake = std::make_unique<FakeWindowMidiSource>();
+    solo_rig::standalone::StandaloneMidiControlSession session(editor, std::move(fake));
+    REQUIRE(session.ConfigureBindings({{.message_type = solo_rig::MidiMessageType::ControlChange,
+                                        .channel = 0,
+                                        .number = 11,
+                                        .target_kind = solo_rig::MidiTargetKind::Parameter,
+                                        .target_id = "drive-1.drive",
+                                        .minimum = 0.0F,
+                                        .maximum = 16.0F}}));
+    solo_rig::standalone::Win32RigWindow window;
+    REQUIRE(window.Create(instance, editor, false));
+    window.SetMidiControlSession(&session);
+    REQUIRE(window.TriggerMidiRefresh());
+    REQUIRE(window.TriggerMidiOpen());
+    REQUIRE(window.TriggerMidiLearn());
+    REQUIRE(session.IsLearnArmed());
+    const auto before_cancel_preset = editor.ExportPreset();
+    const auto before_cancel_source = editor.SourcePath();
+    const auto before_cancel_dirty = editor.IsDirty();
+    const auto mapping_list = GetDlgItem(window.Handle(), 1012);
+    REQUIRE(mapping_list != nullptr);
+    REQUIRE(SendMessageW(mapping_list, LB_GETCOUNT, 0, 0) == 1);
+    bool cancel = true;
+    bool error = false;
+    window.SetFileDialogProvider([&](solo_rig::standalone::FileDialogAction action,
+                                     const std::optional<std::filesystem::path>&) {
+        if (action != solo_rig::standalone::FileDialogAction::Open) {
+            return std::optional<std::filesystem::path>{};
+        }
+        if (cancel) {
+            return std::optional<std::filesystem::path>{};
+        }
+        return std::optional<std::filesystem::path>(error ? corrupt_path : valid_path);
+    });
+    REQUIRE(!window.TriggerOpen());
+    REQUIRE(session.IsLearnArmed());
+    REQUIRE(session.Bindings().size() == 1U);
+    REQUIRE(session.Bindings().front().number == 11U);
+    REQUIRE(session.Bindings().front().target_id == "drive-1.drive");
+    REQUIRE(SendMessageW(mapping_list, LB_GETCOUNT, 0, 0) == 1);
+    REQUIRE(editor.ExportPreset().nodes.front().parameter_values.at("drive") ==
+            before_cancel_preset.nodes.front().parameter_values.at("drive"));
+    REQUIRE(editor.SourcePath() == before_cancel_source);
+    REQUIRE(editor.IsDirty() == before_cancel_dirty);
+
+    cancel = false;
+    error = true;
+    REQUIRE(!window.TriggerOpen());
+    REQUIRE(session.IsLearnArmed());
+    REQUIRE(session.Bindings().size() == 1U);
+    REQUIRE(session.Bindings().front().number == 11U);
+    REQUIRE(session.Bindings().front().target_id == "drive-1.drive");
+    REQUIRE(SendMessageW(mapping_list, LB_GETCOUNT, 0, 0) == 1);
+    REQUIRE(editor.SourcePath() == before_cancel_source);
+    REQUIRE(editor.IsDirty() == before_cancel_dirty);
+
+    error = false;
+    REQUIRE(window.TriggerOpen());
+    REQUIRE(!session.IsLearnArmed());
+    REQUIRE(!editor.IsDirty());
+    REQUIRE(session.Bindings().size() == 1U);
+    REQUIRE(session.Bindings().front().target_id == "delay-1.time");
+    REQUIRE(session.Bindings().front().number == 22U);
+    REQUIRE(SendMessageW(mapping_list, LB_GETCOUNT, 0, 0) == 1);
+    wchar_t mapping_text[256]{};
+    REQUIRE(SendMessageW(mapping_list, LB_GETTEXT, 0, reinterpret_cast<LPARAM>(mapping_text)) > 0);
+    REQUIRE(std::wstring(mapping_text).find(L"#22") != std::wstring::npos);
+    window.Destroy();
+    std::filesystem::remove(valid_path, cleanup);
+    std::filesystem::remove(corrupt_path, cleanup);
+}

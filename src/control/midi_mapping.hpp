@@ -37,6 +37,8 @@ struct MidiBinding {
 struct MidiAction {
     MidiTargetKind target_kind{MidiTargetKind::Parameter};
     std::string target_id;
+    // Kept under the historical field name for controller compatibility; the
+    // value is the binding's interpolated parameter value, not forced to 0..1.
     float normalized_value{};
 };
 
