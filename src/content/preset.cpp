@@ -65,7 +65,10 @@ std::vector<PresetValidationError> ValidatePreset(const RigPreset& preset) {
 }
 
 std::string SerializePreset(const RigPreset& preset) {
-    std::string serialized = "{\"schemaVersion\":1,\"name\":\"" + EscapeJsonString(preset.name) + "\",\"nodes\":[";
+    const bool has_stable_id = !preset.preset_id.empty();
+    std::string serialized = "{\"schemaVersion\":" + std::to_string(has_stable_id ? kCurrentPresetSchemaVersion : 1) +
+                             (has_stable_id ? ",\"presetId\":\"" + EscapeJsonString(preset.preset_id) + "\"" : "") +
+                             ",\"name\":\"" + EscapeJsonString(preset.name) + "\",\"nodes\":[";
     for (std::size_t index = 0; index < preset.nodes.size(); ++index) {
         const auto& node = preset.nodes[index];
         if (index != 0) {
@@ -105,12 +108,20 @@ std::optional<RigPreset> DeserializePreset(std::string_view source) {
     const auto name = StringField(root, "name");
     const auto* nodes = Find(root, "nodes");
     const auto* connections = Find(root, "connections");
-    if (!schema.has_value() || *schema != 1.0 || !name.has_value() || nodes == nullptr || connections == nullptr ||
+    if (!schema.has_value() || (*schema != 1.0 && *schema != static_cast<double>(kCurrentPresetSchemaVersion)) ||
+        !name.has_value() || nodes == nullptr || connections == nullptr ||
         nodes->AsArray() == nullptr || connections->AsArray() == nullptr) {
         return std::nullopt;
     }
 
     RigPreset preset{.name = *name};
+    if (*schema == static_cast<double>(kCurrentPresetSchemaVersion)) {
+        const auto preset_id = StringField(root, "presetId");
+        if (!preset_id.has_value() || preset_id->empty()) {
+            return std::nullopt;
+        }
+        preset.preset_id = *preset_id;
+    }
     for (const auto& node_value : *nodes->AsArray()) {
         const auto* node = node_value.AsObject();
         if (node == nullptr) {
@@ -180,9 +191,13 @@ std::variant<RigPreset, PresetFileError> LoadPreset(const std::filesystem::path&
         return PresetFileError::CannotRead;
     }
     const std::string contents((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    const auto json = ParseJson(contents);
+    if (!json.value.has_value()) {
+        return PresetFileError::InvalidJson;
+    }
     const auto parsed = DeserializePreset(contents);
     return parsed.has_value() ? std::variant<RigPreset, PresetFileError>(std::move(*parsed)) :
-                                std::variant<RigPreset, PresetFileError>(PresetFileError::InvalidJson);
+                                std::variant<RigPreset, PresetFileError>(PresetFileError::InvalidSchema);
 }
 
 } // namespace solo_rig

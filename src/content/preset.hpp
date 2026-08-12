@@ -23,10 +23,15 @@ struct PresetConnection {
 };
 
 struct RigPreset {
+    // Empty identifies a legacy schema-v1 document. New schema-v2 documents
+    // persist this stable identity; preparation fills it for legacy content.
+    std::string preset_id;
     std::string name;
     std::vector<PresetNode> nodes;
     std::vector<PresetConnection> connections;
 };
+
+inline constexpr int kCurrentPresetSchemaVersion = 2;
 
 enum class PresetValidationError {
     MissingName,

@@ -3,6 +3,7 @@
 #include "test_framework.hpp"
 
 #include <filesystem>
+#include <fstream>
 #include <variant>
 
 namespace {
@@ -52,4 +53,34 @@ TEST_CASE("RigPreset saves atomically and reloads from a user selected file") {
 
     REQUIRE(std::holds_alternative<solo_rig::RigPreset>(loaded));
     REQUIRE(std::get<solo_rig::RigPreset>(loaded).name == "My Main Rig");
+}
+
+TEST_CASE("RigPreset schema version two persists a stable preset identifier") {
+    auto preset = CreatePreset();
+    preset.preset_id = "main-rig";
+
+    const auto restored = solo_rig::DeserializePreset(solo_rig::SerializePreset(preset));
+
+    REQUIRE(restored.has_value());
+    REQUIRE(restored->preset_id == "main-rig");
+}
+
+TEST_CASE("RigPreset accepts legacy and additive unknown fields but rejects unknown schema versions") {
+    const auto legacy = solo_rig::SerializePreset(CreatePreset());
+    const auto with_unknown_field = legacy.substr(0, legacy.size() - 1) + ",\"futureDisplayHint\":true}";
+    const auto accepted = solo_rig::DeserializePreset(with_unknown_field);
+    const auto path = std::filesystem::temp_directory_path() / "SoloRigUnknownSchemaTest.srigpreset";
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << "{\"schemaVersion\":99,\"name\":\"Future\",\"nodes\":[],\"connections\":[]}";
+    }
+    const auto rejected = solo_rig::LoadPreset(path);
+    std::filesystem::remove(path, error);
+
+    REQUIRE(accepted.has_value());
+    REQUIRE(accepted->preset_id.empty());
+    REQUIRE(std::holds_alternative<solo_rig::PresetFileError>(rejected));
+    REQUIRE(std::get<solo_rig::PresetFileError>(rejected) == solo_rig::PresetFileError::InvalidSchema);
 }
