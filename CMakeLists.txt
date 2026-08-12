@@ -8,6 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
 
+option(SOLO_RIG_BUILD_VST3 "Build the SoloRig VST3 plug-in" ON)
+
 set(NAM_CORE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/NeuralAmpModelerCore")
 file(GLOB NAM_CORE_SOURCES CONFIGURE_DEPENDS
     "${NAM_CORE_ROOT}/NAM/*.cpp"
@@ -66,6 +68,67 @@ add_library(solo_rig_core STATIC
 target_include_directories(solo_rig_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(solo_rig_core PUBLIC neural_amp_modeler_core)
 enable_solo_rig_warnings(solo_rig_core)
+
+if(SOLO_RIG_BUILD_VST3)
+    set(SOLO_RIG_VST3_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vst3sdk")
+    if(NOT EXISTS "${SOLO_RIG_VST3_SDK_ROOT}/public.sdk/source/vst/vstaudioeffect.cpp")
+        message(FATAL_ERROR "The vendored VST3 SDK is incomplete. Initialize third_party/vst3sdk first.")
+    endif()
+
+    # Build a self-contained VST3 package inside the build tree. Deployment is an
+    # explicit user action; CMake must never alter the system plug-in folders.
+    list(APPEND CMAKE_MODULE_PATH "${SOLO_RIG_VST3_SDK_ROOT}/cmake/modules")
+    set(SDK_ROOT "${SOLO_RIG_VST3_SDK_ROOT}")
+    set(public_sdk_SOURCE_DIR "${SDK_ROOT}/public.sdk")
+    set(SMTG_CREATE_PLUGIN_LINK OFF CACHE BOOL "Create a link in the system VST3 folder" FORCE)
+    set(SMTG_CREATE_BUNDLE_FOR_WINDOWS ON CACHE BOOL "Create Windows VST3 package folders" FORCE)
+    set(SMTG_CREATE_MODULE_INFO OFF CACHE BOOL "Create VST3 moduleinfo.json" FORCE)
+    set(SMTG_RUN_VST_VALIDATOR OFF CACHE BOOL "Run VST3 validator after every plug-in build" FORCE)
+
+    include(SMTG_VST3_SDK)
+    smtg_setup_symbol_visibility()
+    smtg_create_lib_base_target()
+    smtg_create_pluginterfaces_target()
+    smtg_create_public_sdk_common_target()
+    smtg_create_public_sdk_target()
+    smtg_create_public_sdk_hosting_target()
+
+    # The official validator remains an ordinary CTest case so failures are
+    # visible with the rest of SoloRig's automated test suite.
+    add_subdirectory(
+        "${SDK_ROOT}/public.sdk/samples/vst-hosting/validator"
+        "${CMAKE_CURRENT_BINARY_DIR}/vst3_validator"
+    )
+    # SDK 3.8.1's validator uses filesystem::u8string() as std::string on
+    # Windows. Compile that unmodified third-party validator as C++17 while
+    # SoloRig itself remains C++20.
+    set_target_properties(validator PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+
+    smtg_add_vst3plugin(solo_rig_vst3
+        PACKAGE_NAME "SoloRig"
+        SOURCES_LIST
+            src/vst3/solo_rig_processor.cpp
+            src/vst3/solo_rig_controller.cpp
+            src/vst3/factory.cpp
+    )
+    target_include_directories(solo_rig_vst3 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(solo_rig_vst3 PRIVATE sdk solo_rig_core)
+    # VST3's public SDK headers are compiled into this boundary target. Keep
+    # SoloRig's stricter /W4 /WX policy on its own core and tests; applying it
+    # here would turn warnings in unmodified SDK templates into local failures.
+
+    if(BUILD_TESTING)
+        add_test(
+            NAME solo_rig_vst3_validator
+            COMMAND $<TARGET_FILE:validator>
+                "${CMAKE_CURRENT_BINARY_DIR}/VST3/$<CONFIG>/SoloRig.vst3"
+        )
+    endif()
+endif()
 
 if(BUILD_TESTING)
     add_executable(solo_rig_tests

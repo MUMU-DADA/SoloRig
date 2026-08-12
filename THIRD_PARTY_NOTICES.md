@@ -23,3 +23,12 @@ third-party notices are retained in
 The single-header nlohmann JSON dependency required by NeuralAmpModelerCore is
 MIT licensed. Its SPDX copyright and license declaration are retained in
 `third_party/NeuralAmpModelerCore/Dependencies/nlohmann/json.hpp`.
+
+## VST 3 SDK
+
+`third_party/vst3sdk` is vendored from the official Steinberg VST 3 SDK for
+building and validating the SoloRig VST3 plug-in. Its source is licensed under
+the MIT License; the complete license text is retained in
+`third_party/vst3sdk/LICENSE.txt`.
+
+Copyright (c) 2026 Steinberg Media Technologies GmbH.
