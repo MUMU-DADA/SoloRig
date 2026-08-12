@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "solorig.default-pedal",
+  "controls": {
+    "knob": "standard-knob",
+    "toggle": "standard-toggle",
+    "button": "standard-button",
+    "footswitch": "standard-footswitch"
+  }
+}

@@ -29,7 +29,10 @@ add_library(solo_rig_core STATIC
     src/content/json.cpp
     src/content/module_package.cpp
     src/content/preset.cpp
+    src/content/theme.cpp
     src/control/midi_mapping.cpp
+    src/control/shortcut_registry.cpp
+    src/ui/pedal_layout.cpp
 )
 target_include_directories(solo_rig_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 enable_solo_rig_warnings(solo_rig_core)
@@ -50,7 +53,10 @@ if(BUILD_TESTING)
         tests/json_tests.cpp
         tests/module_package_tests.cpp
         tests/preset_tests.cpp
+        tests/theme_tests.cpp
         tests/midi_mapping_tests.cpp
+        tests/shortcut_registry_tests.cpp
+        tests/pedal_layout_tests.cpp
     )
     target_link_libraries(solo_rig_tests PRIVATE solo_rig_core)
     enable_solo_rig_warnings(solo_rig_tests)

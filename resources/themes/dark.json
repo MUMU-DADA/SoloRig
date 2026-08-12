@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "solorig.dark",
+  "displayName": "SoloRig Dark",
+  "colors": {
+    "background": "#17191D",
+    "surface": "#262A30",
+    "text": "#F1F5F9",
+    "accent": "#4FD1C5",
+    "warning": "#FB7185"
+  },
+  "metrics": {
+    "gridSize": 16,
+    "cornerRadius": 8
+  }
+}

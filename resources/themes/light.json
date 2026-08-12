@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "solorig.light",
+  "displayName": "SoloRig Light",
+  "colors": {
+    "background": "#F4F7FB",
+    "surface": "#FFFFFF",
+    "text": "#172033",
+    "accent": "#0F766E",
+    "warning": "#BE123C"
+  },
+  "metrics": {
+    "gridSize": 16,
+    "cornerRadius": 8
+  }
+}
