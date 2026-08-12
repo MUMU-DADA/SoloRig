@@ -2,6 +2,7 @@
 
 #include "content/json.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <set>
@@ -51,6 +52,50 @@ std::optional<ThemeDefinition> ThemeField(const JsonValue::Object& object) {
     return theme;
 }
 
+std::optional<std::uint8_t> MidiByteField(const JsonValue::Object& object, std::string_view key,
+                                          std::uint8_t maximum) {
+    const auto value = NumberField(object, key);
+    if (!value.has_value() || !std::isfinite(*value) || std::floor(*value) != *value || *value < 0.0 ||
+        *value > static_cast<double>(maximum)) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint8_t>(*value);
+}
+
+std::optional<MidiBinding> MidiBindingField(const JsonValue::Object& object) {
+    const auto message_type = StringField(object, "messageType");
+    const auto channel = MidiByteField(object, "channel", 15U);
+    const auto number = MidiByteField(object, "number", 127U);
+    const auto target_kind = StringField(object, "targetKind");
+    const auto target_id = StringField(object, "targetId");
+    const auto minimum = NumberField(object, "minimum");
+    const auto maximum = NumberField(object, "maximum");
+    if (!message_type.has_value() || !channel.has_value() || !number.has_value() || !target_kind.has_value() ||
+        !target_id.has_value() || !minimum.has_value() || !maximum.has_value() ||
+        !std::isfinite(*minimum) || !std::isfinite(*maximum)) {
+        return std::nullopt;
+    }
+    const auto parsed_message_type = *message_type == "controlChange"
+                                         ? MidiMessageType::ControlChange
+                                         : *message_type == "programChange" ? MidiMessageType::ProgramChange
+                                                                              : MidiMessageType{};
+    const auto parsed_target_kind = *target_kind == "parameter"
+                                        ? MidiTargetKind::Parameter
+                                        : *target_kind == "preset" ? MidiTargetKind::Preset : MidiTargetKind{};
+    if ((*message_type != "controlChange" && *message_type != "programChange") ||
+        (*target_kind != "parameter" && *target_kind != "preset")) {
+        return std::nullopt;
+    }
+    MidiBinding binding{.message_type = parsed_message_type,
+                        .channel = *channel,
+                        .number = *number,
+                        .target_kind = parsed_target_kind,
+                        .target_id = *target_id,
+                        .minimum = static_cast<float>(*minimum),
+                        .maximum = static_cast<float>(*maximum)};
+    return IsValidMidiBinding(binding) ? std::optional<MidiBinding>(std::move(binding)) : std::nullopt;
+}
+
 } // namespace
 
 std::vector<PresetValidationError> ValidatePreset(const RigPreset& preset) {
@@ -75,6 +120,27 @@ std::vector<PresetValidationError> ValidatePreset(const RigPreset& preset) {
             static_cast<void>(parameter_id);
             if (!std::isfinite(value)) {
                 errors.push_back(PresetValidationError::NonFiniteParameterValue);
+            }
+        }
+    }
+    if (preset.midi_bindings.has_value()) {
+        for (const auto& binding : *preset.midi_bindings) {
+            bool target_valid = true;
+            if (binding.target_kind == MidiTargetKind::Parameter) {
+                const auto separator = binding.target_id.rfind('.');
+                target_valid = separator != std::string::npos && separator > 0U &&
+                               separator + 1U < binding.target_id.size();
+                if (target_valid) {
+                    const auto instance_id = std::string_view(binding.target_id).substr(0U, separator);
+                    const auto parameter_id = std::string_view(binding.target_id).substr(separator + 1U);
+                    const auto node = std::ranges::find_if(preset.nodes, [instance_id](const PresetNode& candidate) {
+                        return candidate.instance_id == instance_id;
+                    });
+                    target_valid = node != preset.nodes.end() && node->parameter_values.contains(parameter_id);
+                }
+            }
+            if (!IsValidMidiBinding(binding) || !target_valid) {
+                errors.push_back(PresetValidationError::InvalidMidiBinding);
             }
         }
     }
@@ -141,6 +207,24 @@ std::string SerializePreset(const RigPreset& preset) {
             serialized += "\"" + EscapeJsonString(name) + "\":" + std::to_string(value);
         }
         serialized += "}}";
+    }
+    if (preset.midi_bindings.has_value()) {
+        serialized += ",\"midiBindings\":[";
+        for (std::size_t index = 0; index < preset.midi_bindings->size(); ++index) {
+            const auto& binding = (*preset.midi_bindings)[index];
+            if (index != 0U) {
+                serialized += ',';
+            }
+            serialized += "{\"messageType\":\"";
+            serialized += binding.message_type == MidiMessageType::ControlChange ? "controlChange" : "programChange";
+            serialized += "\",\"channel\":" + std::to_string(binding.channel) +
+                          ",\"number\":" + std::to_string(binding.number) + ",\"targetKind\":\"";
+            serialized += binding.target_kind == MidiTargetKind::Parameter ? "parameter" : "preset";
+            serialized += "\",\"targetId\":\"" + EscapeJsonString(binding.target_id) +
+                          "\",\"minimum\":" + std::to_string(binding.minimum) +
+                          ",\"maximum\":" + std::to_string(binding.maximum) + "}";
+        }
+        serialized += "]";
     }
     return serialized + "}";
 }
@@ -213,6 +297,25 @@ std::optional<RigPreset> DeserializePreset(std::string_view source) {
             return std::nullopt;
         }
         preset.theme = *parsed_theme;
+    }
+    if (const auto* bindings = Find(root, "midiBindings"); bindings != nullptr) {
+        if (bindings->AsArray() == nullptr) {
+            return std::nullopt;
+        }
+        std::vector<MidiBinding> parsed_bindings;
+        parsed_bindings.reserve(bindings->AsArray()->size());
+        for (const auto& binding_value : *bindings->AsArray()) {
+            const auto* binding = binding_value.AsObject();
+            if (binding == nullptr) {
+                return std::nullopt;
+            }
+            const auto parsed_binding = MidiBindingField(*binding);
+            if (!parsed_binding.has_value()) {
+                return std::nullopt;
+            }
+            parsed_bindings.push_back(*parsed_binding);
+        }
+        preset.midi_bindings = std::move(parsed_bindings);
     }
     return ValidatePreset(preset).empty() ? std::optional<RigPreset>(std::move(preset)) : std::nullopt;
 }

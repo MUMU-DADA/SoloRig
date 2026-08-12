@@ -272,6 +272,10 @@ void Win32RigWindow::Paint() {
         status_text += " | ";
         status_text += scene.file_status;
     }
+    if (midi_session_ != nullptr) {
+        status_text += " | ";
+        status_text += midi_session_->StatusText();
+    }
     if (scene.dirty) {
         status_text += " *";
     }
@@ -295,6 +299,25 @@ void Win32RigWindow::Paint() {
 }
 
 void Win32RigWindow::Destroy() noexcept {
+    if (midi_close_button_ != nullptr) {
+        DestroyWindow(midi_close_button_);
+        midi_close_button_ = nullptr;
+    }
+    if (midi_open_button_ != nullptr) {
+        DestroyWindow(midi_open_button_);
+        midi_open_button_ = nullptr;
+    }
+    if (midi_refresh_button_ != nullptr) {
+        DestroyWindow(midi_refresh_button_);
+        midi_refresh_button_ = nullptr;
+    }
+    if (window_ != nullptr) {
+        KillTimer(window_, 1U);
+    }
+    midi_timer_enabled_ = false;
+    if (midi_session_ != nullptr) {
+        midi_session_->Close();
+    }
     if (open_button_ != nullptr) {
         DestroyWindow(open_button_);
         open_button_ = nullptr;
@@ -338,6 +361,66 @@ std::uint64_t Win32RigWindow::PaintCount() const noexcept {
 
 void Win32RigWindow::SetFileDialogProvider(FileDialogProvider provider) {
     file_dialog_provider_ = std::move(provider);
+}
+
+void Win32RigWindow::SetMidiControlSession(StandaloneMidiControlSession* session) {
+    midi_session_ = session;
+    if (window_ != nullptr) {
+        KillTimer(window_, 1U);
+        midi_timer_enabled_ = false;
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
+bool Win32RigWindow::TriggerMidiRefresh() {
+    if (midi_session_ == nullptr) {
+        return false;
+    }
+    const auto devices = midi_session_->RefreshDevices();
+    InvalidateRect(window_, nullptr, FALSE);
+    return !devices.empty();
+}
+
+bool Win32RigWindow::TriggerMidiOpen() {
+    if (midi_session_ == nullptr) {
+        return false;
+    }
+    const auto opened = midi_session_->OpenSelected();
+    if (opened && window_ != nullptr) {
+        SetTimer(window_, 1U, 25U, nullptr);
+        midi_timer_enabled_ = true;
+    } else if (!opened && window_ != nullptr) {
+        KillTimer(window_, 1U);
+        midi_timer_enabled_ = false;
+    }
+    InvalidateRect(window_, nullptr, FALSE);
+    return opened;
+}
+
+bool Win32RigWindow::TriggerMidiClose() {
+    if (midi_session_ == nullptr) {
+        return false;
+    }
+    midi_session_->Close();
+    if (window_ != nullptr) {
+        KillTimer(window_, 1U);
+    }
+    midi_timer_enabled_ = false;
+    InvalidateRect(window_, nullptr, FALSE);
+    return true;
+}
+
+std::size_t Win32RigWindow::DrainMidi() {
+    if (midi_session_ == nullptr) {
+        return 0U;
+    }
+    const auto drained = midi_session_->Drain();
+    InvalidateRect(window_, nullptr, FALSE);
+    return drained;
+}
+
+bool Win32RigWindow::MidiDrainTimerEnabled() const noexcept {
+    return midi_timer_enabled_;
 }
 
 bool Win32RigWindow::TriggerSave() {
@@ -386,6 +469,9 @@ bool Win32RigWindow::TriggerOpen() {
         return false;
     }
     const auto result = editor_->LoadFrom(*source);
+    if (result.success && midi_session_ != nullptr) {
+        static_cast<void>(midi_session_->SyncFromEditor());
+    }
     UpdateWindowTitle();
     InvalidateRect(window_, nullptr, FALSE);
     return result.success;
@@ -449,6 +535,17 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
         LayoutToolbarButtons();
         InvalidateRect(window_, nullptr, FALSE);
         return 0;
+    case WM_TIMER:
+        if (w_param == 1U) {
+            if (midi_session_ == nullptr || !midi_session_->IsOpen()) {
+                KillTimer(window_, 1U);
+                midi_timer_enabled_ = false;
+                return 0;
+            }
+            static_cast<void>(DrainMidi());
+            return 0;
+        }
+        return 0;
     case WM_DPICHANGED: {
         dpi_scale_ = static_cast<float>(HIWORD(w_param)) / 96.0F;
         const auto* suggested = reinterpret_cast<const RECT*>(l_param);
@@ -485,6 +582,7 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
                                          (GetKeyState(VK_SHIFT) & 0x8000) != 0));
         return 0;
     case WM_DESTROY:
+        KillTimer(window_, 1U);
         PostQuitMessage(0);
         return 0;
     case WM_ERASEBKGND:
@@ -497,6 +595,12 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
                 static_cast<void>(TriggerSaveAs());
             } else if (LOWORD(w_param) == 1003) {
                 static_cast<void>(TriggerOpen());
+            } else if (LOWORD(w_param) == 1004) {
+                static_cast<void>(TriggerMidiRefresh());
+            } else if (LOWORD(w_param) == 1005) {
+                static_cast<void>(TriggerMidiOpen());
+            } else if (LOWORD(w_param) == 1006) {
+                static_cast<void>(TriggerMidiClose());
             }
             return 0;
         }
@@ -513,6 +617,12 @@ void Win32RigWindow::CreateToolbarButtons() {
                                       92, 16, 80, 30, window_, reinterpret_cast<HMENU>(1002), instance_, nullptr);
     open_button_ = CreateWindowExW(0, L"BUTTON", L"Open", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                    178, 16, 70, 30, window_, reinterpret_cast<HMENU>(1003), instance_, nullptr);
+    midi_refresh_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Refresh", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                           256, 16, 98, 30, window_, reinterpret_cast<HMENU>(1004), instance_, nullptr);
+    midi_open_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Open", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                        360, 16, 88, 30, window_, reinterpret_cast<HMENU>(1005), instance_, nullptr);
+    midi_close_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Close", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                         454, 16, 92, 30, window_, reinterpret_cast<HMENU>(1006), instance_, nullptr);
     LayoutToolbarButtons();
 }
 
@@ -528,6 +638,9 @@ void Win32RigWindow::LayoutToolbarButtons() {
     move(save_button_, 16, 16, 70, 30);
     move(save_as_button_, 92, 16, 80, 30);
     move(open_button_, 178, 16, 70, 30);
+    move(midi_refresh_button_, 256, 16, 98, 30);
+    move(midi_open_button_, 360, 16, 88, 30);
+    move(midi_close_button_, 454, 16, 92, 30);
 }
 
 bool Win32RigWindow::HandleFileAction(FileDialogAction action) {

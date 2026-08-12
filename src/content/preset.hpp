@@ -1,6 +1,7 @@
 #pragma once
 
 #include "content/theme.hpp"
+#include "control/midi_mapping.hpp"
 
 #include <filesystem>
 #include <map>
@@ -34,6 +35,9 @@ struct RigPreset {
     // Optional schema-v2 metadata extension. Older files omit it and retain
     // the built-in dark theme fallback.
     std::optional<ThemeDefinition> theme;
+    // Optional schema-v2 control-plane extension. Device identities are
+    // intentionally not persisted; bindings target logical preset/module IDs.
+    std::optional<std::vector<MidiBinding>> midi_bindings;
 };
 
 inline constexpr int kCurrentPresetSchemaVersion = 2;
@@ -47,6 +51,7 @@ enum class PresetValidationError {
     NonFiniteParameterValue,
     MissingConnectionEndpoint,
     UnknownConnectionEndpoint,
+    InvalidMidiBinding,
 };
 
 enum class PresetFileError {

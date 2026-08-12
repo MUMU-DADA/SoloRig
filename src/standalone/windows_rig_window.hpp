@@ -1,5 +1,6 @@
 #pragma once
 
+#include "standalone/midi_control_session.hpp"
 #include "ui/rig_editor.hpp"
 
 #include <windows.h>
@@ -44,6 +45,12 @@ public:
     // Centralized command dispatch keeps keyboard shortcuts testable without
     // depending on the host keyboard state. WM_KEYDOWN forwards to this path.
     [[nodiscard]] bool HandleShortcut(std::uint32_t key, bool control, bool shift);
+    void SetMidiControlSession(StandaloneMidiControlSession* session);
+    [[nodiscard]] bool TriggerMidiRefresh();
+    [[nodiscard]] bool TriggerMidiOpen();
+    [[nodiscard]] bool TriggerMidiClose();
+    [[nodiscard]] std::size_t DrainMidi();
+    [[nodiscard]] bool MidiDrainTimerEnabled() const noexcept;
 
     [[nodiscard]] static bool RunSmokeTest(HINSTANCE instance);
 
@@ -75,7 +82,12 @@ private:
     HWND save_button_{};
     HWND save_as_button_{};
     HWND open_button_{};
+    HWND midi_refresh_button_{};
+    HWND midi_open_button_{};
+    HWND midi_close_button_{};
     FileDialogProvider file_dialog_provider_;
+    StandaloneMidiControlSession* midi_session_{};
+    bool midi_timer_enabled_{};
 };
 
 } // namespace solo_rig::standalone

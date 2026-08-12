@@ -48,6 +48,7 @@ public:
     void Close() noexcept;
     [[nodiscard]] bool IsOpen() const noexcept;
     [[nodiscard]] std::optional<MidiMessage> Poll() noexcept;
+    [[nodiscard]] std::uint64_t DroppedMessageCount() const noexcept;
 
     // Called by the WinMM callback with one packed short MIDI message.
     void OnPackedShortMessage(std::uint32_t packed_message) noexcept;
@@ -56,6 +57,7 @@ private:
     std::uintptr_t handle_{};
     MidiStreamDecoder decoder_;
     MidiMessageQueue messages_;
+    std::atomic<std::uint64_t> dropped_messages_{};
 };
 
 } // namespace solo_rig

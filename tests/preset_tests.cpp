@@ -84,3 +84,43 @@ TEST_CASE("RigPreset accepts legacy and additive unknown fields but rejects unkn
     REQUIRE(std::holds_alternative<solo_rig::PresetFileError>(rejected));
     REQUIRE(std::get<solo_rig::PresetFileError>(rejected) == solo_rig::PresetFileError::InvalidSchema);
 }
+
+TEST_CASE("RigPreset schema-v2 persists optional MIDI bindings and keeps legacy files compatible") {
+    auto preset = CreatePreset();
+    preset.preset_id = "midi-rig";
+    preset.midi_bindings = std::vector<solo_rig::MidiBinding>{
+        {.message_type = solo_rig::MidiMessageType::ControlChange,
+         .channel = 1,
+         .number = 11,
+         .target_kind = solo_rig::MidiTargetKind::Parameter,
+         .target_id = "drive-1.drive",
+         .minimum = 0.1F,
+         .maximum = 0.9F},
+        {.message_type = solo_rig::MidiMessageType::ProgramChange,
+         .channel = 1,
+         .number = 5,
+         .target_kind = solo_rig::MidiTargetKind::Preset,
+         .target_id = "lead",
+         .minimum = 0.0F,
+         .maximum = 1.0F},
+    };
+    const auto restored = solo_rig::DeserializePreset(solo_rig::SerializePreset(preset));
+    REQUIRE(restored.has_value());
+    REQUIRE(restored->midi_bindings.has_value());
+    REQUIRE(restored->midi_bindings->size() == 2U);
+    REQUIRE(restored->midi_bindings->front().target_id == "drive-1.drive");
+    REQUIRE(restored->midi_bindings->back().target_id == "lead");
+
+    const auto legacy = solo_rig::DeserializePreset(
+        "{\"schemaVersion\":2,\"presetId\":\"old\",\"name\":\"Old\",\"nodes\":[],\"connections\":[]}");
+    REQUIRE(legacy.has_value());
+    REQUIRE(!legacy->midi_bindings.has_value());
+}
+
+TEST_CASE("RigPreset rejects malformed or out-of-range persisted MIDI bindings") {
+    const auto invalid = solo_rig::DeserializePreset(
+        "{\"schemaVersion\":2,\"presetId\":\"bad\",\"name\":\"Bad\",\"nodes\":[],\"connections\":[],"
+        "\"midiBindings\":[{\"messageType\":\"controlChange\",\"channel\":0,\"number\":7,"
+        "\"targetKind\":\"parameter\",\"targetId\":\"drive-1.drive\",\"minimum\":-0.1,\"maximum\":1.0}]}");
+    REQUIRE(!invalid.has_value());
+}

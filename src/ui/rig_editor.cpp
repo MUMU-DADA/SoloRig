@@ -197,6 +197,23 @@ bool RigEditorViewModel::SetNodeParameter(std::string_view instance_id,
     return true;
 }
 
+std::optional<std::vector<MidiBinding>> RigEditorViewModel::MidiBindings() const {
+    return preset_.midi_bindings;
+}
+
+bool RigEditorViewModel::SetMidiBindings(std::vector<MidiBinding> bindings) {
+    auto candidate = preset_;
+    candidate.midi_bindings = bindings;
+    if (!ValidatePreset(candidate).empty()) {
+        return false;
+    }
+    preset_.midi_bindings = std::move(bindings);
+    dirty_ = true;
+    SetFileStatus("Unsaved changes");
+    RebuildScene();
+    return true;
+}
+
 bool RigEditorViewModel::IsDirty() const noexcept {
     return dirty_;
 }

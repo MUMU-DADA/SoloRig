@@ -97,6 +97,8 @@ public:
     [[nodiscard]] bool SetNodeParameter(std::string_view instance_id,
                                          std::string_view parameter_id,
                                          float value);
+    [[nodiscard]] std::optional<std::vector<MidiBinding>> MidiBindings() const;
+    [[nodiscard]] bool SetMidiBindings(std::vector<MidiBinding> bindings);
     [[nodiscard]] bool IsDirty() const noexcept;
     [[nodiscard]] std::optional<std::filesystem::path> SourcePath() const;
     [[nodiscard]] std::string_view FileStatus() const noexcept;

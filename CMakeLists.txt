@@ -83,6 +83,7 @@ if(WIN32 AND SOLO_RIG_BUILD_STANDALONE)
     add_executable(SoloRigStandalone WIN32
         src/standalone/main.cpp
         src/standalone/windows_rig_window.cpp
+        src/standalone/midi_control_session.cpp
     )
     target_include_directories(SoloRigStandalone PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(SoloRigStandalone PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -102,6 +103,7 @@ if(WIN32 AND SOLO_RIG_BUILD_STANDALONE)
             tests/test_main.cpp
             tests/windows_ui_smoke_tests.cpp
             src/standalone/windows_rig_window.cpp
+            src/standalone/midi_control_session.cpp
         )
         target_include_directories(solo_rig_windows_ui_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         target_compile_definitions(solo_rig_windows_ui_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -210,8 +212,12 @@ if(BUILD_TESTING)
         tests/audio_routing_tests.cpp
         tests/pedal_layout_tests.cpp
         tests/rig_editor_tests.cpp
+        tests/midi_control_session_tests.cpp
     )
     target_link_libraries(solo_rig_tests PRIVATE solo_rig_core)
+    if(WIN32)
+        target_sources(solo_rig_tests PRIVATE src/standalone/midi_control_session.cpp)
+    endif()
     target_compile_definitions(solo_rig_tests PRIVATE SOLO_RIG_SOURCE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}")
     enable_solo_rig_warnings(solo_rig_tests)
     add_test(NAME solo_rig_tests COMMAND solo_rig_tests)

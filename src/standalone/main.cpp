@@ -19,7 +19,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     static_cast<void>(editor.LoadThemeFile(resource_directory / "themes" / "dark.json", false));
     static_cast<void>(editor.LoadSkinFile(resource_directory / "skins" / "default-pedal.json"));
 
+    solo_rig::standalone::StandaloneMidiControlSession midi_session(editor);
     solo_rig::standalone::Win32RigWindow window;
+    window.SetMidiControlSession(&midi_session);
     if (!window.Create(instance, editor, true)) {
         MessageBoxW(nullptr,
                     L"SoloRig could not initialize its Direct2D editor window.",

@@ -99,6 +99,13 @@ TEST_CASE("RigEditor saves and loads the edited preset with normalized source an
     REQUIRE(editor.DragTo({.x = 210.0, .y = 232.0}, false));
     editor.EndDrag();
     REQUIRE(editor.SetNodeParameter("drive-1", "drive", 7.0F));
+    REQUIRE(editor.SetMidiBindings({{.message_type = solo_rig::MidiMessageType::ControlChange,
+                                     .channel = 0,
+                                     .number = 11,
+                                     .target_kind = solo_rig::MidiTargetKind::Parameter,
+                                     .target_id = "drive-1.drive",
+                                     .minimum = 0.0F,
+                                     .maximum = 1.0F}}));
     editor.SetThemeMode(false);
     REQUIRE(editor.IsDirty());
     const auto saved = editor.SaveTo(path);
@@ -117,6 +124,9 @@ TEST_CASE("RigEditor saves and loads the edited preset with normalized source an
     REQUIRE(!restored.IsDirty());
     REQUIRE(restored.ExportPreset().nodes.front().layout_x == editor.ExportPreset().nodes.front().layout_x);
     REQUIRE(restored.ExportPreset().nodes.front().parameter_values.at("drive") == 7.0F);
+    REQUIRE(restored.MidiBindings().has_value());
+    REQUIRE(restored.MidiBindings()->size() == 1U);
+    REQUIRE(restored.MidiBindings()->front().target_id == "drive-1.drive");
     REQUIRE(restored.Scene().theme.id == editor.Scene().theme.id);
     REQUIRE(restored.Scene().theme.colors == editor.Scene().theme.colors);
     REQUIRE(restored.Scene().theme.metrics == editor.Scene().theme.metrics);
@@ -148,11 +158,13 @@ TEST_CASE("RigEditor rejects failed loads without changing the current canvas") 
     const auto corrupt_path = directory / "solorig-editor-corrupt.srig";
     const auto schema_path = directory / "solorig-editor-schema.srig";
     const auto topology_path = directory / "solorig-editor-topology.srig";
+    const auto invalid_midi_path = directory / "solorig-editor-invalid-midi.srig";
     std::error_code cleanup_error;
     solo_rig::RigEditorViewModel editor;
     REQUIRE(editor.SaveTo(valid_path).success);
     const auto before = editor.ExportPreset();
     const auto before_source = editor.SourcePath();
+    const auto before_dirty = editor.IsDirty();
     {
         std::ofstream output(corrupt_path, std::ios::binary | std::ios::trunc);
         output << "{not-json";
@@ -168,15 +180,24 @@ TEST_CASE("RigEditor rejects failed loads without changing the current canvas") 
                    "{\"instanceId\":\"b\",\"moduleId\":\"org.mumu-dada.solorig.digital-delay\",\"x\":1,\"y\":0,\"parameters\":{}}],"
                    "\"connections\":[{\"source\":\"a\",\"destination\":\"b\"},{\"source\":\"b\",\"destination\":\"a\"}]}";
     }
-    for (const auto& path : {corrupt_path, schema_path, topology_path, directory / "missing.srig"}) {
+    {
+        std::ofstream output(invalid_midi_path, std::ios::binary | std::ios::trunc);
+        output << "{\"schemaVersion\":2,\"presetId\":\"invalid-midi\",\"name\":\"Invalid MIDI\","
+                   "\"nodes\":[],\"connections\":[],\"midiBindings\":[{\"messageType\":\"controlChange\","
+                   "\"channel\":0,\"number\":11,\"targetKind\":\"parameter\","
+                   "\"targetId\":\"drive-1.drive\",\"minimum\":-0.1,\"maximum\":1.0}]}";
+    }
+    for (const auto& path : {corrupt_path, schema_path, topology_path, invalid_midi_path,
+                             directory / "missing.srig"}) {
         const auto result = editor.LoadFrom(path);
         REQUIRE(!result.success);
         REQUIRE(editor.ExportPreset().nodes.size() == before.nodes.size());
         REQUIRE(editor.ExportPreset().nodes.front().instance_id == before.nodes.front().instance_id);
         REQUIRE(editor.SourcePath() == before_source);
+        REQUIRE(editor.IsDirty() == before_dirty);
     }
     REQUIRE(!editor.LoadFrom(directory / "not-a-preset.json").success);
-    for (const auto& path : {valid_path, corrupt_path, schema_path, topology_path}) {
+    for (const auto& path : {valid_path, corrupt_path, schema_path, topology_path, invalid_midi_path}) {
         std::filesystem::remove(path, cleanup_error);
     }
 }

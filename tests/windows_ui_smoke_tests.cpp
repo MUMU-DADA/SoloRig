@@ -6,8 +6,56 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
+
+namespace {
+
+class FakeWindowMidiSource final : public solo_rig::standalone::MidiInputSource {
+public:
+    std::vector<solo_rig::MidiInputDevice> EnumerateDevices() override {
+        ++enumerate_count;
+        return {{.index = 9U, .display_name = L"Window Fake MIDI"}};
+    }
+
+    bool Open(std::uint32_t index) override {
+        ++open_count;
+        open = index == 9U;
+        return open;
+    }
+
+    void Close() noexcept override {
+        ++close_count;
+        open = false;
+    }
+
+    bool IsOpen() const noexcept override {
+        return open;
+    }
+
+    std::optional<solo_rig::MidiMessage> Poll() noexcept override {
+        ++poll_count;
+        return queue.TryPop();
+    }
+
+    std::uint64_t DroppedMessageCount() const noexcept override {
+        return 0U;
+    }
+
+    void Inject(const solo_rig::MidiMessage& message) noexcept {
+        static_cast<void>(queue.TryPush(message));
+    }
+
+    solo_rig::MidiMessageQueue queue;
+    bool open{};
+    std::size_t enumerate_count{};
+    std::size_t open_count{};
+    std::size_t close_count{};
+    std::size_t poll_count{};
+};
+
+} // namespace
 
 TEST_CASE("Win32 standalone editor registers creates renders resizes and destroys a hidden window") {
     const auto instance = GetModuleHandleW(nullptr);
@@ -126,4 +174,57 @@ TEST_CASE("Win32 standalone editor routes toolbar and shortcut persistence comma
     for (const auto& path : {save_path, save_as_path, open_path, corrupt_path}) {
         std::filesystem::remove(path, cleanup);
     }
+}
+
+TEST_CASE("Win32 standalone editor controls MIDI session by messages without a startup timer") {
+    const auto instance = GetModuleHandleW(nullptr);
+    REQUIRE(instance != nullptr);
+    solo_rig::RigEditorViewModel editor;
+    auto fake = std::make_unique<FakeWindowMidiSource>();
+    auto* source = fake.get();
+    solo_rig::standalone::StandaloneMidiControlSession session(editor, std::move(fake));
+    REQUIRE(session.ConfigureBindings({{.message_type = solo_rig::MidiMessageType::ControlChange,
+                                        .channel = 0,
+                                        .number = 11,
+                                        .target_kind = solo_rig::MidiTargetKind::Parameter,
+                                        .target_id = "drive-1.drive",
+                                        .minimum = 0.0F,
+                                        .maximum = 1.0F}}));
+
+    solo_rig::standalone::Win32RigWindow window;
+    REQUIRE(window.Create(instance, editor, false));
+    window.SetMidiControlSession(&session);
+    REQUIRE(!window.MidiDrainTimerEnabled());
+    REQUIRE(!session.IsOpen());
+    REQUIRE(session.StatusText().find("MIDI: closed") != std::string::npos);
+
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1004, BN_CLICKED), 0) == 0);
+    REQUIRE(!window.MidiDrainTimerEnabled());
+    REQUIRE(source->enumerate_count == 1U);
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1005, BN_CLICKED), 0) == 0);
+    REQUIRE(window.MidiDrainTimerEnabled());
+    REQUIRE(session.IsOpen());
+    source->Inject({.type = solo_rig::MidiMessageType::ControlChange,
+                    .channel = 0,
+                    .number = 11,
+                    .value = 127});
+    REQUIRE(SendMessageW(window.Handle(), WM_TIMER, 1U, 0) == 0);
+    REQUIRE(editor.ExportPreset().nodes.front().parameter_values.at("drive") == 1.0F);
+    REQUIRE(editor.IsDirty());
+    REQUIRE(session.StatusText().find("updated editor") != std::string::npos);
+    window.Paint();
+    REQUIRE(window.LastPaintSucceeded());
+
+    const auto polls_before_close = source->poll_count;
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1006, BN_CLICKED), 0) == 0);
+    REQUIRE(!window.MidiDrainTimerEnabled());
+    REQUIRE(!session.IsOpen());
+    REQUIRE(SendMessageW(window.Handle(), WM_TIMER, 1U, 0) == 0);
+    REQUIRE(source->poll_count == polls_before_close);
+    REQUIRE(window.Handle() != nullptr);
+    REQUIRE(window.TriggerMidiOpen());
+    REQUIRE(source->open);
+    window.Destroy();
+    REQUIRE(window.Handle() == nullptr);
+    REQUIRE(!source->open);
 }

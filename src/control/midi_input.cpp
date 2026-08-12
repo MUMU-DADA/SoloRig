@@ -100,13 +100,19 @@ std::optional<MidiMessage> WindowsMidiInput::Poll() noexcept {
     return messages_.TryPop();
 }
 
+std::uint64_t WindowsMidiInput::DroppedMessageCount() const noexcept {
+    return dropped_messages_.load(std::memory_order_acquire);
+}
+
 void WindowsMidiInput::OnPackedShortMessage(std::uint32_t packed_message) noexcept {
     const auto status = static_cast<std::uint8_t>(packed_message & 0xFFU);
     const auto first_data = static_cast<std::uint8_t>((packed_message >> 8U) & 0x7FU);
     const auto second_data = static_cast<std::uint8_t>((packed_message >> 16U) & 0x7FU);
     const auto emit = [this](std::optional<MidiMessage> message) noexcept {
         if (message.has_value()) {
-            static_cast<void>(messages_.TryPush(*message));
+            if (!messages_.TryPush(*message)) {
+                dropped_messages_.fetch_add(1U, std::memory_order_relaxed);
+            }
         }
     };
 
