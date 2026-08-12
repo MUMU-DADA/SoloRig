@@ -59,6 +59,7 @@ add_library(solo_rig_core STATIC
     src/dsp/tuner.cpp
     src/content/json.cpp
     src/content/module_package.cpp
+    src/content/module_runtime.cpp
     src/content/preset.cpp
     src/content/theme.cpp
     src/control/midi_mapping.cpp
@@ -152,6 +153,7 @@ if(BUILD_TESTING)
         tests/tuner_tests.cpp
         tests/json_tests.cpp
         tests/module_package_tests.cpp
+        tests/module_runtime_tests.cpp
         tests/preset_tests.cpp
         tests/preset_controller_tests.cpp
         tests/theme_tests.cpp
