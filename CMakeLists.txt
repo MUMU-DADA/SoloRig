@@ -26,6 +26,10 @@ add_library(solo_rig_core STATIC
     src/dsp/digital_delay.cpp
     src/dsp/impulse_response.cpp
     src/dsp/tuner.cpp
+    src/content/json.cpp
+    src/content/module_package.cpp
+    src/content/preset.cpp
+    src/control/midi_mapping.cpp
 )
 target_include_directories(solo_rig_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 enable_solo_rig_warnings(solo_rig_core)
@@ -43,6 +47,10 @@ if(BUILD_TESTING)
         tests/impulse_response_tests.cpp
         tests/quality_policy_tests.cpp
         tests/tuner_tests.cpp
+        tests/json_tests.cpp
+        tests/module_package_tests.cpp
+        tests/preset_tests.cpp
+        tests/midi_mapping_tests.cpp
     )
     target_link_libraries(solo_rig_tests PRIVATE solo_rig_core)
     enable_solo_rig_warnings(solo_rig_tests)
