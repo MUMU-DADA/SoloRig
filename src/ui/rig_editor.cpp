@@ -3,10 +3,14 @@
 #include "content/json.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <iterator>
 #include <ranges>
+#include <set>
+#include <stack>
+#include <system_error>
 
 namespace solo_rig {
 namespace {
@@ -57,27 +61,45 @@ RigPreset RigEditorViewModel::DefaultEditorPreset() {
 
 RigEditorViewModel::RigEditorViewModel(RigPreset preset)
     : layout_(DefaultDarkTheme().metrics.at("gridSize")), theme_(DefaultDarkTheme()), skin_(DefaultPedalSkin()) {
-    SetPreset(std::move(preset));
+    ApplyPreset(std::move(preset), std::nullopt, false);
 }
 
 void RigEditorViewModel::SetPreset(RigPreset preset) {
     if (preset.name.empty()) {
         preset = DefaultEditorPreset();
     }
+    ApplyPreset(std::move(preset), source_path_, true);
+}
+
+void RigEditorViewModel::ApplyPreset(RigPreset preset, std::optional<std::filesystem::path> source, bool dirty) {
+    if (preset.name.empty()) {
+        preset = DefaultEditorPreset();
+    }
     preset_ = std::move(preset);
+    if (preset_.theme.has_value()) {
+        theme_ = *preset_.theme;
+        dark_theme_ = theme_.id.find("dark") != std::string::npos;
+    }
     layout_ = PedalLayout(GridSize());
+    unresolved_nodes_.clear();
     for (const auto& node : preset_.nodes) {
         const auto position = (std::isfinite(node.layout_x) && std::isfinite(node.layout_y))
             ? PedalPosition{node.layout_x, node.layout_y}
             : PedalPosition{};
         static_cast<void>(layout_.Add(node.instance_id, position));
+        if (!IsKnownModule(node.module_id)) {
+            unresolved_nodes_.push_back(node.instance_id);
+        }
     }
+    source_path_ = std::move(source);
+    dirty_ = dirty;
     dragging_instance_id_.clear();
     RebuildScene();
 }
 
 RigPreset RigEditorViewModel::ExportPreset() const {
     auto result = preset_;
+    result.theme = theme_;
     for (auto& node : result.nodes) {
         if (const auto position = layout_.Find(node.instance_id); position.has_value()) {
             node.layout_x = position->x;
@@ -87,10 +109,105 @@ RigPreset RigEditorViewModel::ExportPreset() const {
     return result;
 }
 
-bool RigEditorViewModel::LoadThemeFile(const std::filesystem::path& source) {
+EditorFileResult RigEditorViewModel::SaveTo(const std::filesystem::path& destination) {
+    const auto normalized = NormalizePresetPath(destination);
+    if (!normalized.has_value()) {
+        SetFileStatus("Save failed: only .srig preset files are accepted.");
+        return {.success = false,
+                .error = EditorFileError::InvalidExtension,
+                .message = file_status_};
+    }
+    const auto result = solo_rig::SavePreset(*normalized, ExportPreset());
+    if (result.has_value()) {
+        const auto error = *result;
+        const auto mapped = error == PresetFileError::CannotWrite ? EditorFileError::CannotWrite
+                                                                    : EditorFileError::InvalidSchema;
+        SetFileStatus(error == PresetFileError::CannotWrite ? "Save failed: path is not writable."
+                                                              : "Save failed: current preset is invalid.");
+        return {.success = false, .error = mapped, .message = file_status_};
+    }
+    source_path_ = *normalized;
+    dirty_ = false;
+    RebuildScene();
+    SetFileStatus("Saved: " + source_path_->filename().string());
+    return {.success = true, .message = file_status_};
+}
+
+EditorFileResult RigEditorViewModel::LoadFrom(const std::filesystem::path& source) {
+    const auto normalized = NormalizePresetPath(source);
+    if (!normalized.has_value()) {
+        SetFileStatus("Open failed: only .srig preset files are accepted.");
+        return {.success = false,
+                .error = EditorFileError::InvalidExtension,
+                .message = file_status_};
+    }
+    const auto loaded = solo_rig::LoadPreset(*normalized);
+    if (std::holds_alternative<PresetFileError>(loaded)) {
+        const auto error = std::get<PresetFileError>(loaded);
+        const auto mapped = MapLoadError(error);
+        SetFileStatus("Open failed: " + std::string(
+            error == PresetFileError::CannotRead ? "file cannot be read."
+                : error == PresetFileError::InvalidJson ? "invalid JSON."
+                : "unsupported or invalid preset schema."));
+        return {.success = false, .error = mapped, .message = file_status_};
+    }
+    auto candidate = std::get<RigPreset>(loaded);
+    if (HasInvalidTopology(candidate)) {
+        SetFileStatus("Open failed: preset contains an invalid cyclic topology.");
+        return {.success = false, .error = EditorFileError::InvalidTopology, .message = file_status_};
+    }
+    ApplyPreset(std::move(candidate), *normalized, false);
+    if (!unresolved_nodes_.empty()) {
+        SetFileStatus("Loaded with placeholders: missing module assets for " + unresolved_nodes_.front() + ".");
+        return {.success = true, .warning = true, .message = file_status_};
+    }
+    SetFileStatus("Loaded: " + source_path_->filename().string());
+    return {.success = true, .message = file_status_};
+}
+
+EditorFileResult RigEditorViewModel::SaveCurrent() {
+    if (!source_path_.has_value()) {
+        SetFileStatus("Save requires a destination path.");
+        return {.success = false, .error = EditorFileError::CannotWrite, .message = file_status_};
+    }
+    return SaveTo(*source_path_);
+}
+
+bool RigEditorViewModel::SetNodeParameter(std::string_view instance_id,
+                                          std::string_view parameter_id,
+                                          float value) {
+    const auto node = std::ranges::find_if(preset_.nodes, [instance_id](const PresetNode& candidate) {
+        return candidate.instance_id == instance_id;
+    });
+    if (node == preset_.nodes.end() || !std::isfinite(value)) {
+        return false;
+    }
+    const auto parameter = node->parameter_values.find(parameter_id);
+    if (parameter == node->parameter_values.end()) {
+        return false;
+    }
+    parameter->second = value;
+    dirty_ = true;
+    SetFileStatus("Unsaved changes");
+    return true;
+}
+
+bool RigEditorViewModel::IsDirty() const noexcept {
+    return dirty_;
+}
+
+std::optional<std::filesystem::path> RigEditorViewModel::SourcePath() const {
+    return source_path_;
+}
+
+std::string_view RigEditorViewModel::FileStatus() const noexcept {
+    return file_status_;
+}
+
+bool RigEditorViewModel::LoadThemeFile(const std::filesystem::path& source, bool mark_dirty) {
     const auto loaded = solo_rig::LoadThemeFile(source);
     if (std::holds_alternative<ThemeDefinition>(loaded)) {
-        SetTheme(std::get<ThemeDefinition>(loaded));
+        SetTheme(std::get<ThemeDefinition>(loaded), mark_dirty);
         return true;
     }
     // Keep the current valid theme when an external resource is missing or
@@ -101,15 +218,21 @@ bool RigEditorViewModel::LoadThemeFile(const std::filesystem::path& source) {
 void RigEditorViewModel::SetThemeMode(bool dark) {
     dark_theme_ = dark;
     theme_ = dark ? DefaultDarkTheme() : DefaultLightTheme();
+    dirty_ = true;
+    SetFileStatus("Unsaved changes");
     RebuildScene();
 }
 
-void RigEditorViewModel::SetTheme(ThemeDefinition theme) {
+void RigEditorViewModel::SetTheme(ThemeDefinition theme, bool mark_dirty) {
     if (theme.id.empty() || theme.colors.empty()) {
         return;
     }
     dark_theme_ = theme.id.find("dark") != std::string::npos;
     theme_ = std::move(theme);
+    if (mark_dirty) {
+        dirty_ = true;
+        SetFileStatus("Unsaved changes");
+    }
     RebuildScene();
 }
 
@@ -205,6 +328,8 @@ bool RigEditorViewModel::DragTo(EditorPoint point, bool snap_to_grid) {
     if (!layout_.Move(dragging_instance_id_, position, snap_to_grid)) {
         return false;
     }
+    dirty_ = true;
+    SetFileStatus("Unsaved changes");
     RebuildScene();
     return true;
 }
@@ -232,6 +357,9 @@ void RigEditorViewModel::RebuildScene() {
     scene_.theme = theme_;
     scene_.skin = skin_;
     scene_.audio_status = "ASIO backend not configured/available";
+    scene_.file_status = file_status_;
+    scene_.source_path = source_path_.has_value() ? source_path_->string() : std::string{};
+    scene_.dirty = dirty_;
     scene_.nodes.clear();
     scene_.connections.clear();
     constexpr double kNodeWidth = 196.0;
@@ -244,7 +372,9 @@ void RigEditorViewModel::RebuildScene() {
                                            .y = position.y * dpi_scale_,
                                            .width = kNodeWidth * dpi_scale_,
                                            .height = kNodeHeight * dpi_scale_},
-                                .selected = node.instance_id == dragging_instance_id_});
+                                .selected = node.instance_id == dragging_instance_id_,
+                                .unresolved = !IsKnownModule(node.module_id),
+                                .diagnostic = !IsKnownModule(node.module_id) ? "Missing module asset" : std::string{}});
     }
     for (const auto& connection : preset_.connections) {
         const auto* source = FindSceneNode(connection.source_instance_id);
@@ -258,6 +388,76 @@ void RigEditorViewModel::RebuildScene() {
                                                           .y = destination->bounds.y + destination->bounds.height * 0.5}});
         }
     }
+}
+
+void RigEditorViewModel::SetFileStatus(std::string status) {
+    file_status_ = std::move(status);
+    scene_.file_status = file_status_;
+    scene_.dirty = dirty_;
+}
+
+std::optional<std::filesystem::path> RigEditorViewModel::NormalizePresetPath(
+    const std::filesystem::path& source) {
+    auto extension = source.extension().string();
+    std::ranges::transform(extension, extension.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    if (source.empty() || extension != ".srig") {
+        return std::nullopt;
+    }
+    std::error_code error;
+    auto normalized = std::filesystem::absolute(source, error);
+    if (error) {
+        return std::nullopt;
+    }
+    return normalized.lexically_normal();
+}
+
+std::optional<EditorFileError> RigEditorViewModel::MapLoadError(PresetFileError error) {
+    switch (error) {
+    case PresetFileError::CannotRead:
+        return EditorFileError::CannotRead;
+    case PresetFileError::InvalidJson:
+        return EditorFileError::InvalidJson;
+    case PresetFileError::InvalidSchema:
+    case PresetFileError::InvalidPreset:
+    case PresetFileError::CannotWrite:
+        return EditorFileError::InvalidSchema;
+    }
+    return EditorFileError::InvalidSchema;
+}
+
+bool RigEditorViewModel::HasInvalidTopology(const RigPreset& preset) {
+    std::map<std::string, std::vector<std::string>, std::less<>> graph;
+    for (const auto& node : preset.nodes) {
+        graph[node.instance_id];
+    }
+    for (const auto& connection : preset.connections) {
+        graph[connection.source_instance_id].push_back(connection.destination_instance_id);
+    }
+    std::map<std::string, int, std::less<>> colors;
+    const auto visit = [&graph, &colors](const auto& self, const std::string& node) -> bool {
+        colors[node] = 1;
+        for (const auto& destination : graph[node]) {
+            if (colors[destination] == 1 || (colors[destination] == 0 && self(self, destination))) {
+                return true;
+            }
+        }
+        colors[node] = 2;
+        return false;
+    };
+    for (const auto& [node, unused] : graph) {
+        static_cast<void>(unused);
+        if (colors[node] == 0 && visit(visit, node)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool RigEditorViewModel::IsKnownModule(std::string_view module_id) noexcept {
+    return module_id == "org.mumu-dada.solorig.drive" ||
+           module_id == "org.mumu-dada.solorig.digital-delay";
 }
 
 double RigEditorViewModel::GridSize() const noexcept {

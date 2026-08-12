@@ -86,7 +86,7 @@ if(WIN32 AND SOLO_RIG_BUILD_STANDALONE)
     )
     target_include_directories(SoloRigStandalone PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(SoloRigStandalone PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_link_libraries(SoloRigStandalone PRIVATE solo_rig_core d2d1 dwrite windowscodecs user32 gdi32)
+    target_link_libraries(SoloRigStandalone PRIVATE solo_rig_core d2d1 dwrite windowscodecs user32 gdi32 comdlg32)
     set_target_properties(SoloRigStandalone PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
         OUTPUT_NAME "SoloRigStandalone"
@@ -105,7 +105,7 @@ if(WIN32 AND SOLO_RIG_BUILD_STANDALONE)
         )
         target_include_directories(solo_rig_windows_ui_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         target_compile_definitions(solo_rig_windows_ui_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
-        target_link_libraries(solo_rig_windows_ui_tests PRIVATE solo_rig_core d2d1 dwrite windowscodecs user32 gdi32)
+        target_link_libraries(solo_rig_windows_ui_tests PRIVATE solo_rig_core d2d1 dwrite windowscodecs user32 gdi32 comdlg32)
         add_test(NAME solo_rig_windows_ui_tests COMMAND solo_rig_windows_ui_tests)
     endif()
 endif()

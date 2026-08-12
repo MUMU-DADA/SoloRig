@@ -26,6 +26,31 @@ std::optional<double> NumberField(const JsonValue::Object& object, std::string_v
     return value != nullptr && value->AsNumber() != nullptr ? std::optional<double>(*value->AsNumber()) : std::nullopt;
 }
 
+std::optional<ThemeDefinition> ThemeField(const JsonValue::Object& object) {
+    const auto id = StringField(object, "id");
+    const auto display_name = StringField(object, "displayName");
+    const auto* colors = Find(object, "colors");
+    const auto* metrics = Find(object, "metrics");
+    if (!id.has_value() || !display_name.has_value() || colors == nullptr || metrics == nullptr ||
+        colors->AsObject() == nullptr || metrics->AsObject() == nullptr || id->empty() || display_name->empty()) {
+        return std::nullopt;
+    }
+    ThemeDefinition theme{.id = *id, .display_name = *display_name};
+    for (const auto& [name, value] : *colors->AsObject()) {
+        if (value.AsString() == nullptr || !IsHexColor(*value.AsString())) {
+            return std::nullopt;
+        }
+        theme.colors.emplace(name, *value.AsString());
+    }
+    for (const auto& [name, value] : *metrics->AsObject()) {
+        if (value.AsNumber() == nullptr || !std::isfinite(*value.AsNumber()) || *value.AsNumber() < 0.0) {
+            return std::nullopt;
+        }
+        theme.metrics.emplace(name, *value.AsNumber());
+    }
+    return theme;
+}
+
 } // namespace
 
 std::vector<PresetValidationError> ValidatePreset(const RigPreset& preset) {
@@ -95,7 +120,29 @@ std::string SerializePreset(const RigPreset& preset) {
         serialized += "{\"source\":\"" + EscapeJsonString(connection.source_instance_id) + "\",\"destination\":\"" +
                       EscapeJsonString(connection.destination_instance_id) + "\"}";
     }
-    return serialized + "]}";
+    serialized += "]";
+    if (preset.theme.has_value()) {
+        serialized += ",\"theme\":{\"id\":\"" + EscapeJsonString(preset.theme->id) +
+                      "\",\"displayName\":\"" + EscapeJsonString(preset.theme->display_name) +
+                      "\",\"colors\":{";
+        std::size_t color_index = 0;
+        for (const auto& [name, value] : preset.theme->colors) {
+            if (color_index++ != 0U) {
+                serialized += ',';
+            }
+            serialized += "\"" + EscapeJsonString(name) + "\":\"" + EscapeJsonString(value) + "\"";
+        }
+        serialized += "},\"metrics\":{";
+        std::size_t metric_index = 0;
+        for (const auto& [name, value] : preset.theme->metrics) {
+            if (metric_index++ != 0U) {
+                serialized += ',';
+            }
+            serialized += "\"" + EscapeJsonString(name) + "\":" + std::to_string(value);
+        }
+        serialized += "}}";
+    }
+    return serialized + "}";
 }
 
 std::optional<RigPreset> DeserializePreset(std::string_view source) {
@@ -156,6 +203,16 @@ std::optional<RigPreset> DeserializePreset(std::string_view source) {
             return std::nullopt;
         }
         preset.connections.push_back({.source_instance_id = *source_id, .destination_instance_id = *destination_id});
+    }
+    if (const auto* theme = Find(root, "theme"); theme != nullptr) {
+        if (theme->AsObject() == nullptr) {
+            return std::nullopt;
+        }
+        const auto parsed_theme = ThemeField(*theme->AsObject());
+        if (!parsed_theme.has_value()) {
+            return std::nullopt;
+        }
+        preset.theme = *parsed_theme;
     }
     return ValidatePreset(preset).empty() ? std::optional<RigPreset>(std::move(preset)) : std::nullopt;
 }

@@ -43,6 +43,8 @@ struct RigEditorNode {
     std::string module_id;
     EditorRect bounds;
     bool selected{};
+    bool unresolved{};
+    std::string diagnostic;
 };
 
 struct RigEditorConnection {
@@ -61,6 +63,25 @@ struct RigEditorScene {
     std::vector<RigEditorNode> nodes;
     std::vector<RigEditorConnection> connections;
     std::string audio_status;
+    std::string file_status;
+    std::string source_path;
+    bool dirty{};
+};
+
+enum class EditorFileError {
+    InvalidExtension,
+    CannotRead,
+    InvalidJson,
+    InvalidSchema,
+    InvalidTopology,
+    CannotWrite,
+};
+
+struct EditorFileResult {
+    bool success{};
+    bool warning{};
+    std::optional<EditorFileError> error;
+    std::string message;
 };
 
 class RigEditorViewModel {
@@ -70,10 +91,21 @@ public:
     [[nodiscard]] static RigPreset DefaultEditorPreset();
     void SetPreset(RigPreset preset);
     [[nodiscard]] RigPreset ExportPreset() const;
+    [[nodiscard]] EditorFileResult SaveTo(const std::filesystem::path& destination);
+    [[nodiscard]] EditorFileResult LoadFrom(const std::filesystem::path& source);
+    [[nodiscard]] EditorFileResult SaveCurrent();
+    [[nodiscard]] bool SetNodeParameter(std::string_view instance_id,
+                                         std::string_view parameter_id,
+                                         float value);
+    [[nodiscard]] bool IsDirty() const noexcept;
+    [[nodiscard]] std::optional<std::filesystem::path> SourcePath() const;
+    [[nodiscard]] std::string_view FileStatus() const noexcept;
 
-    [[nodiscard]] bool LoadThemeFile(const std::filesystem::path& source);
+    // User initiated theme loads are dirty by default. Startup resource
+    // loading may explicitly pass false so a new document remains clean.
+    [[nodiscard]] bool LoadThemeFile(const std::filesystem::path& source, bool mark_dirty = true);
     void SetThemeMode(bool dark);
-    void SetTheme(ThemeDefinition theme);
+    void SetTheme(ThemeDefinition theme, bool mark_dirty = true);
     [[nodiscard]] bool IsDarkTheme() const noexcept;
     [[nodiscard]] bool LoadSkinFile(const std::filesystem::path& source);
 
@@ -90,6 +122,13 @@ public:
 
 private:
     void RebuildScene();
+    void ApplyPreset(RigPreset preset, std::optional<std::filesystem::path> source, bool dirty);
+    void SetFileStatus(std::string status);
+    [[nodiscard]] static std::optional<std::filesystem::path> NormalizePresetPath(
+        const std::filesystem::path& source);
+    [[nodiscard]] static std::optional<EditorFileError> MapLoadError(PresetFileError error);
+    [[nodiscard]] static bool HasInvalidTopology(const RigPreset& preset);
+    [[nodiscard]] static bool IsKnownModule(std::string_view module_id) noexcept;
     [[nodiscard]] double GridSize() const noexcept;
     [[nodiscard]] const RigEditorNode* FindSceneNode(std::string_view instance_id) const noexcept;
 
@@ -103,6 +142,10 @@ private:
     double dpi_scale_{1.0};
     std::string dragging_instance_id_;
     EditorPoint drag_offset_{};
+    std::optional<std::filesystem::path> source_path_;
+    bool dirty_{};
+    std::string file_status_;
+    std::vector<std::string> unresolved_nodes_;
     RigEditorScene scene_;
 };
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "content/theme.hpp"
+
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -29,6 +31,9 @@ struct RigPreset {
     std::string name;
     std::vector<PresetNode> nodes;
     std::vector<PresetConnection> connections;
+    // Optional schema-v2 metadata extension. Older files omit it and retain
+    // the built-in dark theme fallback.
+    std::optional<ThemeDefinition> theme;
 };
 
 inline constexpr int kCurrentPresetSchemaVersion = 2;

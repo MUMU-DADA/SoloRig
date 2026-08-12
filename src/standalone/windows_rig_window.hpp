@@ -5,8 +5,20 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <functional>
+#include <filesystem>
+#include <optional>
 
 namespace solo_rig::standalone {
+
+enum class FileDialogAction {
+    Open,
+    Save,
+};
+
+using FileDialogProvider = std::function<std::optional<std::filesystem::path>(
+    FileDialogAction action,
+    const std::optional<std::filesystem::path>& current_path)>;
 
 class Win32RigWindow final {
 public:
@@ -25,6 +37,13 @@ public:
     [[nodiscard]] HWND Handle() const noexcept;
     [[nodiscard]] bool LastPaintSucceeded() const noexcept;
     [[nodiscard]] std::uint64_t PaintCount() const noexcept;
+    void SetFileDialogProvider(FileDialogProvider provider);
+    [[nodiscard]] bool TriggerSave();
+    [[nodiscard]] bool TriggerSaveAs();
+    [[nodiscard]] bool TriggerOpen();
+    // Centralized command dispatch keeps keyboard shortcuts testable without
+    // depending on the host keyboard state. WM_KEYDOWN forwards to this path.
+    [[nodiscard]] bool HandleShortcut(std::uint32_t key, bool control, bool shift);
 
     [[nodiscard]] static bool RunSmokeTest(HINSTANCE instance);
 
@@ -36,6 +55,11 @@ private:
     LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param);
     void ReleaseRenderResources() noexcept;
     void UpdateEditorViewport();
+    void CreateToolbarButtons();
+    void LayoutToolbarButtons();
+    [[nodiscard]] bool HandleFileAction(FileDialogAction action);
+    [[nodiscard]] std::optional<std::filesystem::path> ShowNativeFileDialog(FileDialogAction action) const;
+    void UpdateWindowTitle();
 
     HINSTANCE instance_{};
     HWND window_{};
@@ -48,6 +72,10 @@ private:
     bool class_registered_{};
     bool last_paint_succeeded_{};
     std::uint64_t paint_count_{};
+    HWND save_button_{};
+    HWND save_as_button_{};
+    HWND open_button_{};
+    FileDialogProvider file_dialog_provider_;
 };
 
 } // namespace solo_rig::standalone

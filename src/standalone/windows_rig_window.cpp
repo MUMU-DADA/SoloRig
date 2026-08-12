@@ -3,11 +3,13 @@
 #include <d2d1.h>
 #include <dwrite.h>
 #include <windowsx.h>
+#include <commdlg.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <string>
+#include <utility>
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
@@ -126,7 +128,9 @@ bool Win32RigWindow::Create(HINSTANCE instance, RigEditorViewModel& editor, bool
         Destroy();
         return false;
     }
+    CreateToolbarButtons();
     UpdateEditorViewport();
+    UpdateWindowTitle();
     if (show) {
         ShowWindow(window_, SW_SHOW);
         UpdateWindow(window_);
@@ -262,8 +266,16 @@ void Win32RigWindow::Paint() {
 
     const auto toolbar = Widen("SoloRig   |   T: Toggle Light/Dark Theme");
     target->DrawTextW(toolbar.c_str(), static_cast<UINT32>(toolbar.size()), AsTextFormat(text_format_),
-                      D2D1::RectF(22.0F, 18.0F, width - 20.0F, 52.0F), text);
-    const auto status = Widen(std::string(scene.audio_status));
+                      D2D1::RectF(300.0F, 18.0F, width - 20.0F, 52.0F), text);
+    std::string status_text(scene.audio_status);
+    if (!scene.file_status.empty()) {
+        status_text += " | ";
+        status_text += scene.file_status;
+    }
+    if (scene.dirty) {
+        status_text += " *";
+    }
+    const auto status = Widen(status_text);
     target->DrawTextW(status.c_str(), static_cast<UINT32>(status.size()), AsTextFormat(text_format_),
                       D2D1::RectF(22.0F, std::max(64.0F, height - 34.0F), width - 20.0F, height - 8.0F), warning);
     const auto result = target->EndDraw();
@@ -283,6 +295,18 @@ void Win32RigWindow::Paint() {
 }
 
 void Win32RigWindow::Destroy() noexcept {
+    if (open_button_ != nullptr) {
+        DestroyWindow(open_button_);
+        open_button_ = nullptr;
+    }
+    if (save_as_button_ != nullptr) {
+        DestroyWindow(save_as_button_);
+        save_as_button_ = nullptr;
+    }
+    if (save_button_ != nullptr) {
+        DestroyWindow(save_button_);
+        save_button_ = nullptr;
+    }
     ReleaseRenderResources();
     if (window_ != nullptr) {
         DestroyWindow(window_);
@@ -310,6 +334,80 @@ bool Win32RigWindow::LastPaintSucceeded() const noexcept {
 
 std::uint64_t Win32RigWindow::PaintCount() const noexcept {
     return paint_count_;
+}
+
+void Win32RigWindow::SetFileDialogProvider(FileDialogProvider provider) {
+    file_dialog_provider_ = std::move(provider);
+}
+
+bool Win32RigWindow::TriggerSave() {
+    if (editor_ == nullptr) {
+        return false;
+    }
+    if (!editor_->SourcePath().has_value()) {
+        const auto destination = file_dialog_provider_ ? file_dialog_provider_(FileDialogAction::Save, editor_->SourcePath())
+                                                       : ShowNativeFileDialog(FileDialogAction::Save);
+        if (!destination.has_value()) {
+            return false;
+        }
+        const auto result = editor_->SaveTo(*destination);
+        UpdateWindowTitle();
+        InvalidateRect(window_, nullptr, FALSE);
+        return result.success;
+    }
+    const auto result = editor_->SaveCurrent();
+    UpdateWindowTitle();
+    InvalidateRect(window_, nullptr, FALSE);
+    return result.success;
+}
+
+bool Win32RigWindow::TriggerSaveAs() {
+    if (editor_ == nullptr) {
+        return false;
+    }
+    const auto destination = file_dialog_provider_ ? file_dialog_provider_(FileDialogAction::Save, editor_->SourcePath())
+                                                   : ShowNativeFileDialog(FileDialogAction::Save);
+    if (!destination.has_value()) {
+        return false;
+    }
+    const auto result = editor_->SaveTo(*destination);
+    UpdateWindowTitle();
+    InvalidateRect(window_, nullptr, FALSE);
+    return result.success;
+}
+
+bool Win32RigWindow::TriggerOpen() {
+    if (editor_ == nullptr) {
+        return false;
+    }
+    const auto source = file_dialog_provider_ ? file_dialog_provider_(FileDialogAction::Open, editor_->SourcePath())
+                                              : ShowNativeFileDialog(FileDialogAction::Open);
+    if (!source.has_value()) {
+        return false;
+    }
+    const auto result = editor_->LoadFrom(*source);
+    UpdateWindowTitle();
+    InvalidateRect(window_, nullptr, FALSE);
+    return result.success;
+}
+
+bool Win32RigWindow::HandleShortcut(std::uint32_t key, bool control, bool shift) {
+    if (!control) {
+        if (key == 'T' && editor_ != nullptr) {
+            editor_->ToggleTheme();
+            UpdateWindowTitle();
+            InvalidateRect(window_, nullptr, FALSE);
+            return true;
+        }
+        return false;
+    }
+    if (key == 'S') {
+        return shift ? TriggerSaveAs() : TriggerSave();
+    }
+    if (key == 'O' && !shift) {
+        return TriggerOpen();
+    }
+    return false;
 }
 
 bool Win32RigWindow::RunSmokeTest(HINSTANCE instance) {
@@ -348,6 +446,7 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
     }
     case WM_SIZE:
         Resize(LOWORD(l_param), HIWORD(l_param), dpi_scale_);
+        LayoutToolbarButtons();
         InvalidateRect(window_, nullptr, FALSE);
         return 0;
     case WM_DPICHANGED: {
@@ -370,6 +469,7 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
         if (editor_ != nullptr && (w_param & MK_LBUTTON) != 0U && editor_->IsDragging()) {
             static_cast<void>(editor_->DragTo({static_cast<double>(GET_X_LPARAM(l_param)),
                                                static_cast<double>(GET_Y_LPARAM(l_param))}));
+            UpdateWindowTitle();
             InvalidateRect(window_, nullptr, FALSE);
         }
         return 0;
@@ -380,19 +480,93 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
         ReleaseCapture();
         return 0;
     case WM_KEYDOWN:
-        if (w_param == 'T' && editor_ != nullptr) {
-            editor_->ToggleTheme();
-            InvalidateRect(window_, nullptr, FALSE);
-        }
+        static_cast<void>(HandleShortcut(static_cast<std::uint32_t>(w_param),
+                                         (GetKeyState(VK_CONTROL) & 0x8000) != 0,
+                                         (GetKeyState(VK_SHIFT) & 0x8000) != 0));
         return 0;
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
     case WM_ERASEBKGND:
         return 1;
+    case WM_COMMAND:
+        if (HIWORD(w_param) == BN_CLICKED) {
+            if (LOWORD(w_param) == 1001) {
+                static_cast<void>(TriggerSave());
+            } else if (LOWORD(w_param) == 1002) {
+                static_cast<void>(TriggerSaveAs());
+            } else if (LOWORD(w_param) == 1003) {
+                static_cast<void>(TriggerOpen());
+            }
+            return 0;
+        }
+        return 0;
     default:
         return DefWindowProcW(window_, message, w_param, l_param);
     }
+}
+
+void Win32RigWindow::CreateToolbarButtons() {
+    save_button_ = CreateWindowExW(0, L"BUTTON", L"Save", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                   16, 16, 70, 30, window_, reinterpret_cast<HMENU>(1001), instance_, nullptr);
+    save_as_button_ = CreateWindowExW(0, L"BUTTON", L"Save As", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                      92, 16, 80, 30, window_, reinterpret_cast<HMENU>(1002), instance_, nullptr);
+    open_button_ = CreateWindowExW(0, L"BUTTON", L"Open", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                   178, 16, 70, 30, window_, reinterpret_cast<HMENU>(1003), instance_, nullptr);
+    LayoutToolbarButtons();
+}
+
+void Win32RigWindow::LayoutToolbarButtons() {
+    if (window_ == nullptr) {
+        return;
+    }
+    const auto move = [](HWND button, int x, int y, int width, int height) {
+        if (button != nullptr) {
+            SetWindowPos(button, nullptr, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    };
+    move(save_button_, 16, 16, 70, 30);
+    move(save_as_button_, 92, 16, 80, 30);
+    move(open_button_, 178, 16, 70, 30);
+}
+
+bool Win32RigWindow::HandleFileAction(FileDialogAction action) {
+    return action == FileDialogAction::Open ? TriggerOpen() : TriggerSave();
+}
+
+std::optional<std::filesystem::path> Win32RigWindow::ShowNativeFileDialog(FileDialogAction action) const {
+    wchar_t filename[32768]{};
+    if (editor_ != nullptr && editor_->SourcePath().has_value()) {
+        const auto text = editor_->SourcePath()->wstring();
+        wcsncpy_s(filename, text.c_str(), _TRUNCATE);
+    }
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = window_;
+    dialog.lpstrFile = filename;
+    dialog.nMaxFile = static_cast<DWORD>(std::size(filename));
+    dialog.lpstrFilter = L"SoloRig Preset (*.srig)\0*.srig\0\0";
+    dialog.nFilterIndex = 1;
+    dialog.lpstrDefExt = L"srig";
+    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+    const auto accepted = action == FileDialogAction::Open ? GetOpenFileNameW(&dialog) :
+                                                             GetSaveFileNameW(&dialog);
+    return accepted != FALSE ? std::optional<std::filesystem::path>(std::filesystem::path(filename)) : std::nullopt;
+}
+
+void Win32RigWindow::UpdateWindowTitle() {
+    if (window_ == nullptr || editor_ == nullptr) {
+        return;
+    }
+    std::wstring title = L"SoloRig - Guitar Rig Editor";
+    if (editor_->SourcePath().has_value()) {
+        title += L" - ";
+        title += editor_->SourcePath()->filename().wstring();
+    }
+    if (editor_->IsDirty()) {
+        title += L" *";
+    }
+    SetWindowTextW(window_, title.c_str());
 }
 
 void Win32RigWindow::ReleaseRenderResources() noexcept {
