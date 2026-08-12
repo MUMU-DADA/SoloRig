@@ -1,0 +1,23 @@
+# Local build outputs
+/build/
+/out/
+/artifacts/
+
+# Visual Studio user-specific files
+/.vs/
+*.user
+*.suo
+*.vcxproj.user
+
+# Test and diagnostic outputs
+/TestResults/
+*.log
+*.dmp
+
+# Local audio assets and personal settings
+/local/
+/profiles/
+*.nam
+*.wav
+*.aiff
+*.flac
