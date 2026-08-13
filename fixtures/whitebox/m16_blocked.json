@@ -1,0 +1,17 @@
+{
+  "evidenceSchemaVersion": 1,
+  "moduleId": "blocked.example.device",
+  "moduleVersion": "blocked-no-authorized-reference",
+  "status": "blocked",
+  "netlist": {"schemaVersion": 2, "sourceRef": "blocked/no-authorized-netlist", "inputHash": "sha256:blocked"},
+  "modelAuditRefs": ["blocked.example.model"],
+  "dcOperatingPoint": {"status": "blocked", "sampleCount": 0},
+  "frequencyResponse": {"status": "blocked", "sampleCount": 0},
+  "staticCurve": {"status": "blocked", "sampleCount": 0},
+  "dynamicResponse": {"status": "blocked", "sampleCount": 0},
+  "spiceComparison": {"status": "blocked", "referenceRef": "no-authorized-spice-data"},
+  "goldenComparison": {"status": "blocked", "referenceRef": "no-authorized-golden-data"},
+  "convergence": {"status": "blocked", "cases": [{"id": "extreme-bias", "status": "blocked"}]},
+  "errorThresholds": {"dcAbsolute": 0.001, "frequencyMagnitude": 0.01, "dynamicAbsolute": 0.01},
+  "run": {"toolVersion": "solorig-evidence-tool-m16", "sampleRateHz": 48000, "oversampling": 1, "randomSeed": 0}
+}

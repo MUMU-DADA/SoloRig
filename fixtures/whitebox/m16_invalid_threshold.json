@@ -1,0 +1,17 @@
+{
+  "evidenceSchemaVersion": 1,
+  "moduleId": "test.invalid.threshold",
+  "moduleVersion": "m16-invalid",
+  "status": "passed",
+  "netlist": {"schemaVersion": 2, "sourceRef": "test", "inputHash": "sha256:test"},
+  "modelAuditRefs": ["test.math.cubic.v1"],
+  "dcOperatingPoint": {"status": "passed", "sampleCount": 1, "maxAbsError": 0.1, "threshold": 0.01},
+  "frequencyResponse": {"status": "passed", "sampleCount": 1, "maxAbsError": 0.0, "threshold": 0.001},
+  "staticCurve": {"status": "passed", "sampleCount": 1, "maxAbsError": 0.0, "threshold": 0.001},
+  "dynamicResponse": {"status": "passed", "sampleCount": 1, "maxAbsError": 0.0, "threshold": 0.001},
+  "spiceComparison": {"status": "passed", "sampleCount": 1, "referenceRef": "self", "maxAbsError": 0.0, "threshold": 0.001},
+  "goldenComparison": {"status": "passed", "sampleCount": 1, "referenceRef": "self", "maxAbsError": 0.0, "threshold": 0.001},
+  "convergence": {"status": "passed", "cases": [{"id": "nominal", "status": "passed", "iterations": 1}]},
+  "errorThresholds": {"dcAbsolute": 0.001, "frequencyMagnitude": 0.001, "dynamicAbsolute": 0.001},
+  "run": {"toolVersion": "solorig-evidence-tool-m16", "sampleRateHz": 48000, "oversampling": 1, "randomSeed": 0}
+}

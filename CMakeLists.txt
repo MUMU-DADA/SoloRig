@@ -67,6 +67,7 @@ add_library(solo_rig_core STATIC
     src/content/model_database.cpp
     src/content/topology_decomposition.cpp
     src/content/behavior_lowering.cpp
+    src/content/evidence_chain.cpp
     src/content/module_package.cpp
     src/content/module_runtime.cpp
     src/content/preset.cpp
@@ -228,6 +229,7 @@ if(BUILD_TESTING)
         tests/whitebox_runtime_tests.cpp
         tests/model_database_tests.cpp
         tests/m15_planning_tests.cpp
+        tests/evidence_chain_tests.cpp
         tests/module_package_tests.cpp
         tests/module_runtime_tests.cpp
         tests/rig_runtime_tests.cpp

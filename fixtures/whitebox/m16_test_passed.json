@@ -1,0 +1,24 @@
+{
+  "evidenceSchemaVersion": 1,
+  "moduleId": "test.math.cubic.v1",
+  "moduleVersion": "m16-clean-room-math-1",
+  "status": "passed",
+  "netlist": {"schemaVersion": 2, "sourceRef": "fixtures/m13_linear_divider.json", "inputHash": "sha256:test-netlist"},
+  "modelAuditRefs": ["test.math.cubic.v1"],
+  "dcOperatingPoint": {"status": "passed", "sampleCount": 3, "maxAbsError": 0.000001, "threshold": 0.00001},
+  "frequencyResponse": {"status": "passed", "sampleCount": 3, "maxAbsError": 0.000001, "threshold": 0.00001},
+  "staticCurve": {"status": "passed", "sampleCount": 3, "maxAbsError": 0.000001, "threshold": 0.00001},
+  "dynamicResponse": {"status": "passed", "sampleCount": 4, "maxAbsError": 0.000001, "threshold": 0.00001},
+  "spiceComparison": {"status": "passed", "sampleCount": 3, "referenceRef": "self-authored-math-reference", "maxAbsError": 0.000001, "threshold": 0.00001},
+  "goldenComparison": {"status": "passed", "sampleCount": 3, "referenceRef": "self-authored-math-golden", "maxAbsError": 0.000001, "threshold": 0.00001},
+  "convergence": {"status": "passed", "cases": [
+    {"id": "nominal", "status": "passed", "iterations": 3},
+    {"id": "extreme-bias", "status": "passed", "iterations": 8},
+    {"id": "singular", "status": "passed", "iterations": 1, "expectedError": "SingularMatrix"},
+    {"id": "nonfinite", "status": "passed", "iterations": 0, "expectedError": "NonFinite"},
+    {"id": "nonconvergent", "status": "passed", "iterations": 16, "expectedError": "NonConvergent"},
+    {"id": "reset", "status": "passed", "iterations": 2}
+  ]},
+  "errorThresholds": {"dcAbsolute": 0.00001, "frequencyMagnitude": 0.00001, "dynamicAbsolute": 0.00001},
+  "run": {"toolVersion": "solorig-evidence-tool-m16", "sampleRateHz": 48000, "oversampling": 4, "randomSeed": 0}
+}

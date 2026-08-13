@@ -1,0 +1,17 @@
+{
+  "evidenceSchemaVersion": 1,
+  "moduleId": "test.math.cubic.v1",
+  "moduleVersion": "m16-schema-only-1",
+  "status": "schema-only",
+  "netlist": {"schemaVersion": 2, "sourceRef": "fixtures/m13_linear_divider.json", "inputHash": "sha256:test-netlist"},
+  "modelAuditRefs": ["test.math.cubic.v1"],
+  "dcOperatingPoint": {"status": "schema-only", "sampleCount": 1},
+  "frequencyResponse": {"status": "schema-only", "sampleCount": 0},
+  "staticCurve": {"status": "schema-only", "sampleCount": 0},
+  "dynamicResponse": {"status": "schema-only", "sampleCount": 0},
+  "spiceComparison": {"status": "blocked", "referenceRef": ""},
+  "goldenComparison": {"status": "blocked", "referenceRef": ""},
+  "convergence": {"status": "schema-only", "cases": []},
+  "errorThresholds": {"dcAbsolute": 0.000001, "frequencyMagnitude": 0.000001, "dynamicAbsolute": 0.000001},
+  "run": {"toolVersion": "solorig-evidence-tool-m16", "sampleRateHz": 48000, "oversampling": 1, "randomSeed": 0}
+}
