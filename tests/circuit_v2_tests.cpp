@@ -324,3 +324,82 @@ TEST_CASE("MNA rejects non-finite prepared diode model values before Prepare") {
     REQUIRE(!compiled.circuit.has_value());
     REQUIRE(compiled.error == solo_rig::MnaCompileError::InvalidModel);
 }
+
+TEST_CASE("circuit v2 parses inductor parameters and rejects invalid values") {
+    const auto valid = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","0"],
+      "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],
+      "components":[
+        {"id":"l","type":"inductor","pins":["in","out"],"value":1,"initial":0.25},
+        {"id":"load","type":"resistor","pins":["out","0"],"value":1000}
+      ],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(valid.circuit.has_value());
+    REQUIRE(valid.circuit->components.front().type == solo_rig::CircuitComponentType::Inductor);
+    REQUIRE(valid.circuit->components.front().initial == 0.25);
+    const auto invalid = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["out","0"],
+      "ports":[{"id":"output","direction":"output","node":"out"}],
+      "components":[{"id":"l","type":"inductor","pins":["out","0"],"value":0}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(!invalid.circuit.has_value());
+    REQUIRE(invalid.errors.front() == solo_rig::CircuitLoadError::InvalidValue);
+    const auto invalid_model = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["out","0"],
+      "ports":[{"id":"output","direction":"output","node":"out"}],
+      "components":[{"id":"l","type":"inductor","pins":["out","0"],"value":1,"model":"ideal"}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(!invalid_model.circuit.has_value());
+    REQUIRE(invalid_model.errors.front() == solo_rig::CircuitLoadError::InvalidValue);
+}
+
+TEST_CASE("MNA inductor uses backward Euler history and Reset restores its initial current") {
+    const auto parsed = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","0"],
+      "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],
+      "components":[
+        {"id":"l","type":"inductor","pins":["in","out"],"value":1,"initial":0},
+        {"id":"load","type":"resistor","pins":["out","0"],"value":1000}
+      ],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(parsed.circuit.has_value());
+    auto compiled = solo_rig::CompileMnaCircuit(*parsed.circuit);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(1000.0));
+    const auto first = compiled.circuit->Solve(1.0);
+    const auto second = compiled.circuit->Solve(1.0);
+    REQUIRE(first.Succeeded());
+    REQUIRE(second.Succeeded());
+    REQUIRE(std::fabs(first.output_voltage - 0.5) < 1.0e-9);
+    REQUIRE(std::fabs(second.output_voltage - 0.75) < 1.0e-9);
+    compiled.circuit->Reset();
+    const auto reset = compiled.circuit->Solve(1.0);
+    REQUIRE(reset.Succeeded());
+    REQUIRE(std::fabs(reset.output_voltage - first.output_voltage) < 1.0e-9);
+    REQUIRE(compiled.circuit->Prepare(1000.0));
+    const auto prepared_again = compiled.circuit->Solve(1.0);
+    REQUIRE(prepared_again.Succeeded());
+    REQUIRE(std::fabs(prepared_again.output_voltage - first.output_voltage) < 1.0e-9);
+}
+
+TEST_CASE("MNA rejects a non-finite inductor initial state before Prepare") {
+    solo_rig::CircuitNetlist circuit{
+        .version = 2,
+        .schema = "circuit",
+        .reference_ground = "0",
+        .nodes = {"out", "0"},
+        .ports = {{.id = "output", .direction = solo_rig::CircuitPortDirection::Output, .node = "out"}},
+        .components = {{.id = "l",
+                        .type = solo_rig::CircuitComponentType::Inductor,
+                        .pins = {"out", "0"},
+                        .value = 1.0,
+                        .initial = std::numeric_limits<double>::infinity()}},
+        .solver = {}};
+    const auto compiled = solo_rig::CompileMnaCircuit(circuit);
+    REQUIRE(!compiled.circuit.has_value());
+    REQUIRE(compiled.error == solo_rig::MnaCompileError::InvalidValue);
+}

@@ -42,7 +42,7 @@ public:
 
     [[nodiscard]] bool Prepare(double sample_rate_hz) noexcept;
     // Compile/Prepare owns all storage; Solve is the real-time-safe sample step
-    // and only mutates preallocated matrices, RHS, solution and capacitor history.
+    // and only mutates preallocated matrices, RHS, solution and dynamic histories.
     [[nodiscard]] MnaSolveResult Solve(double input_voltage) noexcept;
     void Reset() noexcept;
 
@@ -53,6 +53,7 @@ public:
         std::int32_t negative_node{-1};
         std::uint32_t branch_index{};
         std::uint32_t history_index{UINT32_MAX};
+        std::uint32_t inductor_history_index{UINT32_MAX};
         double value{};
         double initial{};
         double diode_saturation_current{};
@@ -65,6 +66,7 @@ private:
 
     std::vector<Element> elements_;
     std::vector<double> capacitor_history_;
+    std::vector<double> inductor_history_;
     std::vector<double> matrix_;
     std::vector<double> rhs_;
     std::vector<double> solution_;

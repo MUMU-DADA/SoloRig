@@ -74,6 +74,28 @@ void StampVoltageSource(std::vector<double>& matrix,
     rhs[branch] += voltage;
 }
 
+// Backward-Euler inductor companion in branch-current MNA form:
+// v(+) - v(-) - (L/dt)i = -(L/dt)i_previous.
+void StampInductor(std::vector<double>& matrix,
+                   std::vector<double>& rhs,
+                   std::uint32_t size,
+                   std::int32_t positive,
+                   std::int32_t negative,
+                   std::uint32_t branch,
+                   double inductance_over_dt,
+                   double previous_current) noexcept {
+    if (positive >= 0) {
+        matrix[static_cast<std::size_t>(positive) * size + branch] += 1.0;
+        matrix[static_cast<std::size_t>(branch) * size + static_cast<std::size_t>(positive)] += 1.0;
+    }
+    if (negative >= 0) {
+        matrix[static_cast<std::size_t>(negative) * size + branch] -= 1.0;
+        matrix[static_cast<std::size_t>(branch) * size + static_cast<std::size_t>(negative)] -= 1.0;
+    }
+    matrix[static_cast<std::size_t>(branch) * size + branch] -= inductance_over_dt;
+    rhs[branch] -= inductance_over_dt * previous_current;
+}
+
 void StampDiode(std::vector<double>& matrix,
                 std::vector<double>& rhs,
                 std::uint32_t size,
@@ -171,6 +193,9 @@ void MnaPreparedCircuit::Reset() noexcept {
         if (element.history_index != kNoIndex) {
             capacitor_history_[element.history_index] = element.initial;
         }
+        if (element.inductor_history_index != kNoIndex) {
+            inductor_history_[element.inductor_history_index] = element.initial;
+        }
     }
     std::fill(matrix_.begin(), matrix_.end(), 0.0);
     std::fill(rhs_.begin(), rhs_.end(), 0.0);
@@ -211,6 +236,13 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     StampConductance(matrix_, matrix_size_, element.positive_node, element.negative_node, conductance);
                     StampCurrent(rhs_, element.positive_node, element.negative_node,
                                  conductance * capacitor_history_[element.history_index]);
+                    break;
+                }
+                case CircuitComponentType::Inductor: {
+                    const double inductance_over_dt = element.value * conductance_scale;
+                    StampInductor(matrix_, rhs_, matrix_size_, element.positive_node, element.negative_node,
+                                  element.branch_index, inductance_over_dt,
+                                  inductor_history_[element.inductor_history_index]);
                     break;
                 }
                 case CircuitComponentType::VoltageSource:
@@ -267,6 +299,9 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                 const double negative = element.negative_node >= 0 ? solution_[element.negative_node] : 0.0;
                 capacitor_history_[element.history_index] = positive - negative;
             }
+            if (element.inductor_history_index != kNoIndex) {
+                inductor_history_[element.inductor_history_index] = solution_[element.branch_index];
+            }
         }
         result.output_voltage = output_node_ >= 0 ? solution_[output_node_] : 0.0;
     }
@@ -313,14 +348,20 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
 
     MnaPreparedCircuit prepared;
     for (const auto& component : circuit.components) {
+        if (component.initial.has_value() && !std::isfinite(*component.initial)) {
+            return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+        }
         if (component.type != CircuitComponentType::Resistor && component.type != CircuitComponentType::Capacitor &&
+            component.type != CircuitComponentType::Inductor &&
             component.type != CircuitComponentType::VoltageSource && component.type != CircuitComponentType::Diode) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
         }
         if ((component.type == CircuitComponentType::Resistor || component.type == CircuitComponentType::Capacitor ||
+             component.type == CircuitComponentType::Inductor ||
              component.type == CircuitComponentType::VoltageSource) &&
             (!component.value.has_value() || !std::isfinite(*component.value) ||
-             ((component.type == CircuitComponentType::Resistor || component.type == CircuitComponentType::Capacitor) &&
+            ((component.type == CircuitComponentType::Resistor || component.type == CircuitComponentType::Capacitor ||
+              component.type == CircuitComponentType::Inductor) &&
               *component.value <= 0.0))) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
         }
@@ -336,10 +377,15 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
             return component.type == CircuitComponentType::VoltageSource;
         })) + static_cast<std::uint32_t>(circuit.supplies.size()) + (input_port == circuit.ports.end() ? 0U : 1U);
-    if (non_ground_nodes + voltage_source_count == 0U) {
+    const auto inductor_count = static_cast<std::uint32_t>(std::count_if(
+        circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
+            return component.type == CircuitComponentType::Inductor;
+        }));
+    const auto branch_count = voltage_source_count + inductor_count;
+    if (non_ground_nodes + branch_count == 0U) {
         return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
     }
-    prepared.matrix_size_ = non_ground_nodes + voltage_source_count;
+    prepared.matrix_size_ = non_ground_nodes + branch_count;
     prepared.matrix_.assign(static_cast<std::size_t>(prepared.matrix_size_) * prepared.matrix_size_, 0.0);
     prepared.rhs_.assign(prepared.matrix_size_, 0.0);
     prepared.solution_.assign(prepared.matrix_size_, 0.0);
@@ -371,6 +417,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                             .negative_node = negative,
                                             .branch_index = kNoIndex,
                                             .history_index = kNoIndex,
+                                            .inductor_history_index = kNoIndex,
                                             .value = component.value.value_or(0.0),
                                             .initial = component.initial.value_or(0.0),
                                             .diode_saturation_current = 0.0,
@@ -378,6 +425,11 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                             .diode_max_step = 0.0};
         if (component.type == CircuitComponentType::VoltageSource) {
             element.branch_index = non_ground_nodes + branch++;
+        }
+        if (component.type == CircuitComponentType::Inductor) {
+            element.branch_index = non_ground_nodes + branch++;
+            element.inductor_history_index = static_cast<std::uint32_t>(prepared.inductor_history_.size());
+            prepared.inductor_history_.push_back(0.0);
         }
         if (component.type == CircuitComponentType::Capacitor) {
             element.history_index = history++;
@@ -407,13 +459,14 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                       .negative_node = negative,
                                       .branch_index = non_ground_nodes + branch++,
                                       .history_index = kNoIndex,
+                                      .inductor_history_index = kNoIndex,
                                       .value = supply.voltage,
                                       .initial = 0.0});
     }
     if (input_port != circuit.ports.end()) {
         prepared.input_branch_ = non_ground_nodes + branch++;
     }
-    if (branch != voltage_source_count) {
+    if (branch != branch_count) {
         return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
     }
     prepared.capacitor_history_.assign(history, 0.0);

@@ -16,6 +16,7 @@ enum class CircuitPortDirection {
 enum class CircuitComponentType {
     Resistor,
     Capacitor,
+    Inductor,
     VoltageSource,
     Diode,
     Potentiometer,

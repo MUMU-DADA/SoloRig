@@ -60,6 +60,9 @@ std::optional<CircuitComponentType> ComponentType(std::string_view text) {
     if (text == "capacitor") {
         return CircuitComponentType::Capacitor;
     }
+    if (text == "inductor") {
+        return CircuitComponentType::Inductor;
+    }
     if (text == "voltage-source") {
         return CircuitComponentType::VoltageSource;
     }
@@ -297,11 +300,16 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             }
         }
         if ((*type == CircuitComponentType::Resistor || *type == CircuitComponentType::Capacitor ||
+             *type == CircuitComponentType::Inductor ||
              *type == CircuitComponentType::VoltageSource) && !parsed_component.value.has_value()) {
             return Failure(CircuitLoadError::InvalidValue);
         }
-        if ((*type == CircuitComponentType::Resistor || *type == CircuitComponentType::Capacitor) &&
+        if ((*type == CircuitComponentType::Resistor || *type == CircuitComponentType::Capacitor ||
+             *type == CircuitComponentType::Inductor) &&
             *parsed_component.value <= 0.0) {
+            return Failure(CircuitLoadError::InvalidValue);
+        }
+        if (*type == CircuitComponentType::Inductor && parsed_component.model.has_value()) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         if (*type == CircuitComponentType::Diode && !parsed_component.model.has_value()) {
