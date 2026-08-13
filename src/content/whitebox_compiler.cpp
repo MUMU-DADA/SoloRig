@@ -74,20 +74,17 @@ WhiteboxTopologyClass Classify(const WhiteboxCompiledGraph& graph) {
     std::unordered_map<std::string, std::vector<std::string>> adjacency;
     std::unordered_map<std::string, std::size_t> degree;
     std::unordered_set<std::string> pair_keys;
-    bool duplicate_pair = false;
     for (const auto& component : graph.Components()) {
         const auto& first = component.pins[0];
         const auto& second = component.pins[1];
         const auto pair_key = first < second ? first + "\n" + second : second + "\n" + first;
-        if (!pair_keys.insert(pair_key).second) {
-            duplicate_pair = true;
-        }
+        pair_keys.insert(pair_key);
         adjacency[first].push_back(second);
         adjacency[second].push_back(first);
         ++degree[first];
         ++degree[second];
     }
-    if (duplicate_pair) {
+    if (pair_keys.size() == 1U && graph.Components().size() > 1U) {
         return WhiteboxTopologyClass::Parallel;
     }
 
@@ -375,9 +372,6 @@ WhiteboxCompileResult CompileWhiteboxGraphV2Json(std::string_view source) {
     graph.classification_ = Classify(graph);
     if (graph.classification_ == WhiteboxTopologyClass::Unknown) {
         return Failure(WhiteboxCompileError::InvalidTopology, graph.classification_);
-    }
-    if (graph.classification_ == WhiteboxTopologyClass::Spqr || graph.classification_ == WhiteboxTopologyClass::Rigid) {
-        return Failure(WhiteboxCompileError::UnsupportedTopology, graph.classification_);
     }
     return {.graph = std::move(graph), .error = std::nullopt, .classification = graph.classification_};
 }

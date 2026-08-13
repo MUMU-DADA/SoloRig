@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "schema": "circuit",
+  "referenceGround": "0",
+  "nodes": ["in", "out", "upper", "lower", "0"],
+  "ports": [
+    {"id": "input", "direction": "input", "node": "in"},
+    {"id": "output", "direction": "output", "node": "out"}
+  ],
+  "supplies": [],
+  "components": [
+    {"id": "left-upper", "kind": "resistor", "pins": ["in", "upper"], "value": 1000},
+    {"id": "left-lower", "kind": "resistor", "pins": ["in", "lower"], "value": 1000},
+    {"id": "upper-out", "kind": "resistor", "pins": ["upper", "out"], "value": 1000},
+    {"id": "lower-out", "kind": "resistor", "pins": ["lower", "out"], "value": 1000},
+    {"id": "upper-lower", "kind": "resistor", "pins": ["upper", "lower"], "value": 1000},
+    {"id": "out-ground", "kind": "resistor", "pins": ["out", "0"], "value": 1000}
+  ],
+  "subcircuits": [],
+  "modelReferences": [],
+  "backend": {"preferred": "mna"}
+}

@@ -1,17 +1,19 @@
-# M15 拓扑分解与行为 lowering 基线
+# M15 拓扑分解基线与 M18-B 可执行收口
 
 本里程碑继续使用 SoloRig 自有 clean-room IR，不读取、复制或改写未知 PedalKernel compiler、模型或测试资产，也不宣称等价验证。
 
 ## 拓扑分析
 
-`AnalyzeWhiteboxGraphV2Json` 在非实时编译边界调用现有 v2 图编译器：
+`AnalyzeWhiteboxGraphV2Json` 在非实时编译边界调用 v2 图编译器。M18-B 在 M15 计划 IR 上补齐了第一条可执行闭环：
 
-- Series/Parallel 图生成确定性的 partition、stage、端口边界和信号顺序 IR。
-- blockwise offset 表和 K-method 系数表生成 `planned` 记录，保留 stage ID 与排序；它们是可审计的表结构，不是完整数值分解实现。
-- feedback 识别、完整 SPQR/rigid 分解和跨网络路由目前不会强行生成运行时，分别返回 `FeedbackLoop`、`NonDecomposable` 或 `CrossNetworkBoundary`。
-- 刚性多引脚图仍保留 `Rigid` 分类；子电路跨边界图明确拒绝，避免把边界路由误当作已完成。
+- 每个二端元件先成为 Q 叶；算法反复执行确定性的平行边约简和非边界二度节点串联约简，生成后序 Q/P/S stage、依赖 stage ID、边界方向和信号顺序。组件及 pin 输入顺序变化不改变执行 IR。
+- 完全可串并约简且以输入/参考地为根的图由预分配 WDF tree 执行；Series/Parallel 波散射、Q one-port 状态、内部观察节点电压、Reset 和采样率更新均在实际运行时路径中。
+- 无法继续串并约简的二端线性图形成单个 residual R stage，由通用 MNA 运行时执行；R 内部元件不会被虚假列为独立 WDF 执行 stage。
+- 无向被动电路的环不再被误报为有向 `FeedbackLoop`。未知多引脚元件返回 `NonDecomposable`；未绑定 subcircuit 返回 `CrossNetworkBoundary`。
+- blockwise offset 和 assembly 顺序现在与可执行 stage 同步为 `Ready`；K-method 系数仍保持 `Planned`，不是增量数值优化实现。
+- M18-B stage 装配最多接受 256 个元件，防止串并树递归深度和稠密 MNA 工作区无界增长；超限图在非实时分析边界拒绝。
 
-`PrepareWhiteboxStageRuntime` 是 stage 所有权边界。目前 assembly 状态为 `Unsupported`，因此 Prepare 返回拒绝；`WhiteboxStageRuntime::Process` 是 `noexcept` 且未准备实例返回 `NotPrepared`。没有 JSON、文件、锁或动态分配进入该 Process。
+`PrepareWhiteboxStageRuntime` 是控制线程所有权边界：它校验 plan/graph 一致性，准备全部 one-port、树阻抗或 MNA 工作区。`WhiteboxStageRuntime::Process` 是 `noexcept`，只遍历预分配 stage 和缓冲；未准备实例返回 `NotPrepared`，非有限输入稳定拒绝。没有 JSON、文件、锁或容器扩容进入 Process。
 
 ## 行为模块 lowering
 
@@ -19,4 +21,4 @@
 
 ## 后续边界
 
-完整 SPQR/WDF scattering、运放反馈求解、stage/blockwise/K-method 数值装配、跨网络路由和 BBD/VCO/VCA/spring 实际运行时 lowering 仍需后续授权与验证数据；M10 BJT/MNA 工作树实验改动不属于本提交。
+本次实现是“串并约简 + residual R”的可执行 S/P/Q/R 子集，不宣称 canonical 三连通 SPQR tree，也没有多端口 R scattering 或 WDF/R 混合树组合；这类图目前会整体进入 residual R/MNA。K-method 增量优化、subcircuit/行为岛跨网络路由、BBD/VCO/VCA/spring 运行时和非线性器件族仍属于后续范围。

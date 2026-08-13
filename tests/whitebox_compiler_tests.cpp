@@ -49,16 +49,18 @@ TEST_CASE("M12 compiler builds immutable parallel topology IR and accepts WDF se
     REQUIRE(result.graph->Prepare().graph.has_value());
 }
 
-TEST_CASE("M12 compiler reports planned SPQR and rigid classifications without pretending support") {
+TEST_CASE("M18-B compiler preserves validated SPQR and rigid IR for topology lowering") {
     const auto spqr = solo_rig::CompileWhiteboxGraphV2Json(ReadFixture("m12_spqr_pending.json"));
     REQUIRE(spqr.classification == solo_rig::WhiteboxTopologyClass::Spqr);
-    REQUIRE(spqr.error == solo_rig::WhiteboxCompileError::UnsupportedTopology);
-    REQUIRE(!spqr.graph.has_value());
+    REQUIRE(spqr.error == std::nullopt);
+    REQUIRE(spqr.graph.has_value());
+    REQUIRE(spqr.graph->Prepare().error == solo_rig::WhiteboxCompileError::UnsupportedTopology);
 
     const auto rigid = solo_rig::CompileWhiteboxGraphV2Json(ReadFixture("m12_rigid_pending.json"));
     REQUIRE(rigid.classification == solo_rig::WhiteboxTopologyClass::Rigid);
-    REQUIRE(rigid.error == solo_rig::WhiteboxCompileError::UnsupportedTopology);
-    REQUIRE(!rigid.graph.has_value());
+    REQUIRE(rigid.error == std::nullopt);
+    REQUIRE(rigid.graph.has_value());
+    REQUIRE(rigid.graph->Prepare().error == solo_rig::WhiteboxCompileError::UnsupportedTopology);
 }
 
 TEST_CASE("M12 compiler rejects duplicate IDs, dangling ports and unknown backends atomically") {

@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "schema": "circuit",
+  "referenceGround": "0",
+  "nodes": ["in", "out", "bridge", "0"],
+  "ports": [
+    {"id": "input", "direction": "input", "node": "in"},
+    {"id": "output", "direction": "output", "node": "out"}
+  ],
+  "supplies": [],
+  "components": [
+    {"id": "in-out", "kind": "resistor", "pins": ["in", "out"], "value": 1000},
+    {"id": "out-ground", "kind": "resistor", "pins": ["out", "0"], "value": 1000},
+    {"id": "in-bridge", "kind": "resistor", "pins": ["in", "bridge"], "value": 1000},
+    {"id": "bridge-ground", "kind": "resistor", "pins": ["bridge", "0"], "value": 1000},
+    {"id": "cross", "kind": "resistor", "pins": ["out", "bridge"], "value": 1000}
+  ],
+  "subcircuits": [],
+  "modelReferences": [],
+  "backend": {"preferred": "mna"}
+}

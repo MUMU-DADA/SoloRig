@@ -21,16 +21,16 @@
 | 分类 | M12 前端行为 | 运行时状态 |
 | --- | --- | --- |
 | `series` | 通用二端图、连通且仅两个端点时生成 IR | `Prepare` 成功；`Process` 明确返回 `UnsupportedRuntime` |
-| `parallel` | 通用二端图存在重复端点对时生成 IR | `Prepare` 成功；`Process` 明确返回 `UnsupportedRuntime` |
-| `spqr` | 对连通环路/分支二端图分类 | 返回 `UnsupportedTopology`，不生成可运行图 |
-| `rigid` | 多引脚组件或子电路边界分类 | 返回 `UnsupportedTopology`，不生成可运行图 |
+| `parallel` | 所有二端组件共享同一端点对时生成 IR | `Prepare` 成功；`Process` 明确返回 `UnsupportedRuntime` |
+| `spqr` | 对其它连通环路/分支二端图分类并保留已验证 IR | 交给 M18-B topology lowering；是否可执行由 S/P/Q/R 分解和器件能力决定 |
+| `rigid` | 多引脚组件或子电路边界分类并保留已验证 IR | 编译成功不等于可运行；M18-B 对未知多引脚和未绑定 subcircuit 稳定拒绝 |
 | `unknown` | 空图或不连通图 | 返回 `InvalidTopology` |
 
-这张矩阵是实际实现边界，不是把 SPQR/刚性分解伪装成已完成。M12 没有实现 MNA/WDF 求解、SPQR 分解、非线性联合求解、DC 工作点或行为模块 lowering；这些属于后续里程碑。
+编译成功只表示结构字段、引用和图输入通过前端校验。M18-B 才负责确定性串并约简、residual R 和运行时装配；未知多引脚/跨 subcircuit 图不会因为前端保留 IR 而被视为已支持。当前仍不宣称 canonical SPQR、完整非线性联合求解或行为模块 lowering。
 
 ## 稳定错误与事务性
 
-解析和校验失败返回单一 `WhiteboxCompileError`，且 `graph` 为空：不会产生半成品运行时。当前覆盖版本、schema、ID、节点、引脚、端口、供电、子电路、模型引用、危险路径、backend、拓扑和非有限值错误。未知 backend、未知模型引用、危险路径和不支持分类都不会静默回退到现有固定单块算法。
+解析和校验失败返回单一 `WhiteboxCompileError`，且 `graph` 为空：不会产生半成品运行时。当前覆盖版本、schema、ID、节点、引脚、端口、供电、子电路、模型引用、危险路径、backend、拓扑和非有限值错误。未知 backend、未知模型引用和危险路径不会静默回退到固定单块算法；拓扑能力拒绝发生在可保留完整 IR 的 lowering/Prepare 层。
 
 ## 实时边界
 

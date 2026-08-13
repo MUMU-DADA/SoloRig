@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "schema": "circuit",
+  "referenceGround": "0",
+  "nodes": ["0", "out", "in"],
+  "ports": [
+    {"id": "output", "direction": "output", "node": "out"},
+    {"id": "input", "direction": "input", "node": "in"}
+  ],
+  "supplies": [],
+  "components": [
+    {"id": "shunt-b", "kind": "resistor", "pins": ["out", "0"], "value": 2000},
+    {"id": "series", "kind": "resistor", "pins": ["out", "in"], "value": 1000},
+    {"id": "shunt-a", "kind": "resistor", "pins": ["0", "out"], "value": 2000}
+  ],
+  "subcircuits": [],
+  "modelReferences": [],
+  "backend": {"preferred": "mna"}
+}
