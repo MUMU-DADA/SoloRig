@@ -3,6 +3,7 @@
 #include "test_framework.hpp"
 
 #include <cmath>
+#include <limits>
 #include <string_view>
 
 namespace {
@@ -182,7 +183,7 @@ TEST_CASE("MNA solves independent voltage sources") {
     REQUIRE(std::fabs(result.output_voltage - 2.0) < 1.0e-9);
 }
 
-TEST_CASE("MNA reports singular matrices and unsupported diode devices") {
+TEST_CASE("MNA reports singular matrices and supports the compatible silicon diode model") {
     const auto singular_json = R"({
       "version":2,"schema":"circuit","referenceGround":"0","nodes":["a","b","0"],
       "ports":[{"id":"output","direction":"output","node":"a"}],
@@ -203,7 +204,123 @@ TEST_CASE("MNA reports singular matrices and unsupported diode devices") {
       "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
     })");
     REQUIRE(diode.circuit.has_value());
-    const auto diode_compiled = solo_rig::CompileMnaCircuit(*diode.circuit);
-    REQUIRE(!diode_compiled.circuit.has_value());
-    REQUIRE(diode_compiled.error == solo_rig::MnaCompileError::UnsupportedComponent);
+    auto diode_compiled = solo_rig::CompileMnaCircuit(*diode.circuit);
+    REQUIRE(diode_compiled.circuit.has_value());
+    REQUIRE(diode_compiled.circuit->Prepare(48000.0));
+    const auto first = diode_compiled.circuit->Solve(1.0);
+    const auto second = diode_compiled.circuit->Solve(1.0);
+    REQUIRE(first.Succeeded());
+    REQUIRE(second.Succeeded());
+    REQUIRE(std::isfinite(first.output_voltage));
+    REQUIRE(first.output_voltage == second.output_voltage);
+}
+
+TEST_CASE("circuit v2 parses diode model parameters and rejects unsafe or non-finite values") {
+    constexpr std::string_view valid = R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","0"],
+      "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],
+      "components":[
+        {"id":"r","type":"resistor","pins":["in","out"],"value":1000},
+        {"id":"d","type":"diode","pins":["out","0"],"initial":0.2,
+         "model":{"kind":"shockley","saturationCurrent":1e-9,"thermalVoltage":0.02585,"maxStep":0.5}}
+      ],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,
+        "convergence":{"maxIterations":12,"absoluteTolerance":1e-10,"relativeTolerance":1e-7}}
+    })";
+    const auto parsed = solo_rig::ParseCircuitV2Json(valid);
+    REQUIRE(parsed.circuit.has_value());
+    REQUIRE(parsed.circuit->components.at(1).diode_model.has_value());
+    REQUIRE(parsed.circuit->components.at(1).diode_model->max_step == 0.5);
+    const auto invalid = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["out","0"],
+      "ports":[{"id":"output","direction":"output","node":"out"}],
+      "components":[{"id":"d","type":"diode","pins":["out","0"],
+        "model":{"kind":"shockley","saturationCurrent":0,"thermalVoltage":-1,"maxStep":0}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,
+        "convergence":{"maxIterations":0,"absoluteTolerance":0,"relativeTolerance":0}}
+    })");
+    REQUIRE(!invalid.circuit.has_value());
+    REQUIRE(!invalid.errors.empty());
+}
+
+TEST_CASE("MNA diode Newton produces a bounded deterministic operating point") {
+    constexpr std::string_view source = R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","0"],
+      "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],
+      "components":[
+        {"id":"r","type":"resistor","pins":["in","out"],"value":1000},
+        {"id":"d","type":"diode","pins":["out","0"],"initial":0.1,
+         "model":{"kind":"shockley","saturationCurrent":1e-9,"thermalVoltage":0.02585,"maxStep":1}}
+      ],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,
+        "convergence":{"maxIterations":32,"absoluteTolerance":1e-9,"relativeTolerance":1e-6}}
+    })";
+    const auto parsed = solo_rig::ParseCircuitV2Json(source);
+    REQUIRE(parsed.circuit.has_value());
+    auto compiled = solo_rig::CompileMnaCircuit(*parsed.circuit);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(48000.0));
+    const auto first = compiled.circuit->Solve(0.5);
+    const auto second = compiled.circuit->Solve(0.5);
+    REQUIRE(first.Succeeded());
+    REQUIRE(second.Succeeded());
+    REQUIRE(first.output_voltage > 0.0);
+    REQUIRE(first.output_voltage < 0.5);
+    REQUIRE(std::fabs(first.output_voltage - second.output_voltage) < 1.0e-6);
+}
+
+TEST_CASE("MNA diode Newton reports deterministic non-convergence, non-finite input and bounded iterations") {
+    constexpr std::string_view source = R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","0"],
+      "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],
+      "components":[
+        {"id":"r","type":"resistor","pins":["in","out"],"value":1000},
+        {"id":"d","type":"diode","pins":["out","0"],"model":{"kind":"shockley","saturationCurrent":1e-12,"thermalVoltage":0.02585,"maxStep":0.001}}
+      ],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,
+        "convergence":{"maxIterations":1,"absoluteTolerance":1e-14,"relativeTolerance":1e-14}}
+    })";
+    const auto parsed = solo_rig::ParseCircuitV2Json(source);
+    REQUIRE(parsed.circuit.has_value());
+    auto compiled = solo_rig::CompileMnaCircuit(*parsed.circuit);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(48000.0));
+    REQUIRE(compiled.circuit->Solve(std::numeric_limits<double>::quiet_NaN()).error == solo_rig::MnaSolveError::NonFinite);
+    REQUIRE(compiled.circuit->Solve(10.0).error == solo_rig::MnaSolveError::NonConvergent);
+}
+
+TEST_CASE("MNA explicitly rejects unimplemented dynamic controls instead of silently degrading") {
+    const auto parsed = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["out","0"],
+      "ports":[{"id":"output","direction":"output","node":"out"}],
+      "components":[{"id":"mode","type":"switch","pins":["out","0"],
+        "switch":{"states":["open","closed"],"initial":0}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(parsed.circuit.has_value());
+    const auto compiled = solo_rig::CompileMnaCircuit(*parsed.circuit);
+    REQUIRE(!compiled.circuit.has_value());
+    REQUIRE(compiled.error == solo_rig::MnaCompileError::UnsupportedComponent);
+}
+
+TEST_CASE("MNA rejects non-finite prepared diode model values before Prepare") {
+    solo_rig::CircuitNetlist circuit{
+        .version = 2,
+        .schema = "circuit",
+        .reference_ground = "0",
+        .nodes = {"out", "0"},
+        .ports = {{.id = "output", .direction = solo_rig::CircuitPortDirection::Output, .node = "out"}},
+        .components = {{.id = "d",
+                        .type = solo_rig::CircuitComponentType::Diode,
+                        .pins = {"out", "0"},
+                        .value = std::nullopt,
+                        .tolerance = std::nullopt,
+                        .initial = std::nullopt,
+                        .model = "inline-shockley",
+                        .diode_model = solo_rig::CircuitDiodeModel{.kind = "shockley",
+                                                                     .saturation_current = std::numeric_limits<double>::infinity()}}},
+        .solver = {}};
+    const auto compiled = solo_rig::CompileMnaCircuit(circuit);
+    REQUIRE(!compiled.circuit.has_value());
+    REQUIRE(compiled.error == solo_rig::MnaCompileError::InvalidModel);
 }

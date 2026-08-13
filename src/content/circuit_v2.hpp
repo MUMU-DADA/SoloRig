@@ -33,6 +33,13 @@ struct CircuitSwitchSpec {
     std::uint32_t initial_state{};
 };
 
+struct CircuitDiodeModel {
+    std::string kind{"shockley"};
+    double saturation_current{1.0e-9};
+    double thermal_voltage{0.02585};
+    double max_step{1.0};
+};
+
 struct CircuitPort {
     std::string id;
     CircuitPortDirection direction{CircuitPortDirection::Input};
@@ -54,6 +61,7 @@ struct CircuitComponent {
     std::optional<double> tolerance;
     std::optional<double> initial;
     std::optional<std::string> model;
+    std::optional<CircuitDiodeModel> diode_model;
     std::optional<CircuitPotentiometerSpec> potentiometer;
     std::optional<CircuitSwitchSpec> switch_spec;
 };

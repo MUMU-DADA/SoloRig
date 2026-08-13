@@ -265,12 +265,35 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             }
         }
         if (const auto* model = Find(*component, "model"); model != nullptr) {
-            parsed_component.model = StringValue(model);
-            if (!parsed_component.model.has_value()) {
+            if (const auto model_text = StringValue(model); model_text.has_value()) {
+                parsed_component.model = *model_text;
+                if (!IsSafeModelReference(*parsed_component.model)) {
+                    return Failure(CircuitLoadError::UnsafeAssetPath);
+                }
+                if (*type == CircuitComponentType::Diode &&
+                    (*model_text == "silicon" || *model_text == "shockley")) {
+                    parsed_component.diode_model = CircuitDiodeModel{};
+                }
+            } else if (const auto* model_object = model->AsObject(); model_object != nullptr) {
+                const auto kind = StringValue(Find(*model_object, "kind"));
+                const auto saturation = Find(*model_object, "saturationCurrent") == nullptr
+                    ? std::optional<double>(1.0e-9) : NumberValue(Find(*model_object, "saturationCurrent"));
+                const auto thermal = Find(*model_object, "thermalVoltage") == nullptr
+                    ? std::optional<double>(0.02585) : NumberValue(Find(*model_object, "thermalVoltage"));
+                const auto max_step = Find(*model_object, "maxStep") == nullptr
+                    ? std::optional<double>(1.0) : NumberValue(Find(*model_object, "maxStep"));
+                if (*type != CircuitComponentType::Diode || !kind.has_value() || *kind != "shockley" ||
+                    !saturation.has_value() || !thermal.has_value() || !max_step.has_value() ||
+                    *saturation <= 0.0 || *thermal <= 0.0 || *max_step <= 0.0) {
+                    return Failure(CircuitLoadError::InvalidValue);
+                }
+                parsed_component.model = "inline-shockley";
+                parsed_component.diode_model = CircuitDiodeModel{.kind = *kind,
+                                                                   .saturation_current = *saturation,
+                                                                   .thermal_voltage = *thermal,
+                                                                   .max_step = *max_step};
+            } else {
                 return Failure(CircuitLoadError::InvalidValue);
-            }
-            if (!IsSafeModelReference(*parsed_component.model)) {
-                return Failure(CircuitLoadError::UnsafeAssetPath);
             }
         }
         if ((*type == CircuitComponentType::Resistor || *type == CircuitComponentType::Capacitor ||
@@ -283,6 +306,9 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         }
         if (*type == CircuitComponentType::Diode && !parsed_component.model.has_value()) {
             return Failure(CircuitLoadError::MissingModel);
+        }
+        if (*type == CircuitComponentType::Diode && !parsed_component.diode_model.has_value()) {
+            return Failure(CircuitLoadError::InvalidValue);
         }
 
         if (const auto* potentiometer = Find(*component, "potentiometer"); potentiometer != nullptr) {

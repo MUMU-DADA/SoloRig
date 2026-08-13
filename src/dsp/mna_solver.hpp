@@ -15,6 +15,8 @@ enum class MnaCompileError {
     UnsupportedComponent,
     InvalidValue,
     InvalidSolver,
+    InvalidModel,
+    InvalidConvergence,
 };
 
 enum class MnaSolveError {
@@ -22,6 +24,7 @@ enum class MnaSolveError {
     NotPrepared,
     SingularMatrix,
     NonFinite,
+    NonConvergent,
 };
 
 struct MnaSolveResult {
@@ -43,9 +46,7 @@ public:
     [[nodiscard]] MnaSolveResult Solve(double input_voltage) noexcept;
     void Reset() noexcept;
 
-private:
-    friend struct MnaCompileResult;
-
+public:
     struct Element {
         CircuitComponentType type{CircuitComponentType::Resistor};
         std::int32_t positive_node{-1};
@@ -54,19 +55,29 @@ private:
         std::uint32_t history_index{UINT32_MAX};
         double value{};
         double initial{};
+        double diode_saturation_current{};
+        double diode_thermal_voltage{};
+        double diode_max_step{};
     };
+
+private:
+    friend struct MnaCompileResult;
 
     std::vector<Element> elements_;
     std::vector<double> capacitor_history_;
     std::vector<double> matrix_;
     std::vector<double> rhs_;
     std::vector<double> solution_;
+    std::vector<double> newton_previous_;
     std::int32_t input_node_{-1};
     std::int32_t output_node_{-1};
     std::uint32_t input_branch_{UINT32_MAX};
     std::uint32_t matrix_size_{};
     std::uint32_t oversampling_{1};
     double sample_rate_hz_{};
+    std::uint32_t max_iterations_{1};
+    double absolute_tolerance_{1.0e-9};
+    double relative_tolerance_{1.0e-6};
     bool prepared_{};
 
     friend MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit);

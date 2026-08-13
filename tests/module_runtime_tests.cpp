@@ -150,6 +150,43 @@ TEST_CASE("External analog v2 module uses the unified linear MNA runtime") {
     REQUIRE(std::fabs(output.ChannelData(0)[0] - 0.5F) < 1.0e-6F);
 }
 
+TEST_CASE("External analog v2 module uses the prepared nonlinear diode MNA runtime") {
+    const auto directory = CreateRuntimePackage(R"({
+        "schemaVersion":1,
+        "moduleId":"org.mumu-dada.solorig.external-diode-v2",
+        "displayName":"External Diode v2",
+        "category":"analog-circuit",
+        "logicFile":"logic/main.json",
+        "ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}]
+    })",
+                                                R"({
+        "version":2,"schema":"circuit","referenceGround":"0",
+        "nodes":["in","out","0"],
+        "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],
+        "components":[
+            {"id":"series","type":"resistor","pins":["in","out"],"value":1000},
+            {"id":"diode","type":"diode","pins":["out","0"],
+             "model":{"kind":"shockley","saturationCurrent":1e-9,"thermalVoltage":0.02585,"maxStep":1}}
+        ],
+        "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,
+          "convergence":{"maxIterations":32,"absoluteTolerance":1e-9,"relativeTolerance":1e-6}}
+    })");
+    const auto package = solo_rig::LoadModulePackage(directory);
+    RemoveRuntimePackage(directory);
+    REQUIRE(package.package.has_value());
+    auto runtime = solo_rig::CreateModuleRuntime(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    solo_rig::AudioBuffer input(1, 8);
+    solo_rig::AudioBuffer output(1, 8);
+    input.ChannelData(0)[0] = 0.5F;
+    REQUIRE(processor->Prepare(TestFormat()));
+    processor->Process(input, output, 1);
+    REQUIRE(std::isfinite(output.ChannelData(0)[0]));
+    REQUIRE(output.ChannelData(0)[0] > 0.0F);
+    REQUIRE(output.ChannelData(0)[0] < 0.5F);
+}
+
 TEST_CASE("External digital delay package executes declared delay feedback and mix operations") {
     const auto directory = CreateRuntimePackage(R"({
         "schemaVersion":1,
