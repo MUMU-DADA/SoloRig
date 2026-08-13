@@ -1,0 +1,124 @@
+#pragma once
+
+#include <stdint.h>
+
+#if defined(_WIN32)
+#if defined(SOLO_RIG_BACKEND_BUILD)
+#define SOLO_RIG_BACKEND_API __declspec(dllexport)
+#else
+#define SOLO_RIG_BACKEND_API __declspec(dllimport)
+#endif
+#else
+#define SOLO_RIG_BACKEND_API
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct SoloRigBackend SoloRigBackend;
+typedef struct SoloRigSnapshot SoloRigSnapshot;
+
+typedef enum SoloRigStatus {
+    SOLO_RIG_STATUS_OK = 0,
+    SOLO_RIG_STATUS_INVALID_ARGUMENT = 1,
+    SOLO_RIG_STATUS_OUT_OF_MEMORY = 2,
+    SOLO_RIG_STATUS_NOT_FOUND = 3,
+    SOLO_RIG_STATUS_FILE_ERROR = 4,
+    SOLO_RIG_STATUS_INVALID_PRESET = 5,
+    SOLO_RIG_STATUS_INTERNAL_ERROR = 6,
+} SoloRigStatus;
+
+typedef struct SoloRigSnapshotInfo {
+    uint32_t schema_version;
+    uint8_t dark_theme;
+    const char* preset_id_utf8;
+    const char* preset_name_utf8;
+    const char* source_path_utf8;
+    const char* audio_status_utf8;
+    const char* file_status_utf8;
+    const char* midi_status_utf8;
+    uint32_t node_count;
+    uint32_t binding_count;
+} SoloRigSnapshotInfo;
+
+typedef struct SoloRigNodeView {
+    const char* instance_id_utf8;
+    const char* module_id_utf8;
+    float layout_x;
+    float layout_y;
+    uint8_t selected;
+    uint8_t unresolved;
+    const char* diagnostic_utf8;
+    uint32_t parameter_count;
+} SoloRigNodeView;
+
+typedef struct SoloRigParameterView {
+    const char* parameter_id_utf8;
+    float value;
+} SoloRigParameterView;
+
+typedef struct SoloRigBindingView {
+    uint32_t message_type;
+    uint32_t channel;
+    uint32_t number;
+    uint32_t target_kind;
+    const char* target_id_utf8;
+    float minimum;
+    float maximum;
+} SoloRigBindingView;
+
+// ABI contract:
+// - All strings are UTF-8 and NUL-terminated. Pointers returned through a
+//   snapshot remain valid until solorig_snapshot_destroy(snapshot).
+// - Backend and snapshot handles are created/destroyed by this DLL. The caller
+//   must release the snapshot before destroying its backend.
+// - Backend calls are control/UI-thread only, are not thread-safe, and must
+//   never be made from an audio callback or any real-time processing thread.
+// - Startup creation only constructs the in-memory default editor. It does not
+//   enumerate/open MIDI, access files, connect ASIO, or enter VST3 processing.
+// - On failure, the backend state remains unchanged. Error text is UTF-8 and
+//   valid until the next call on the same backend handle.
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_create(SoloRigBackend** out_backend);
+SOLO_RIG_BACKEND_API void solorig_backend_destroy(SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API const char* solorig_backend_last_error_utf8(const SoloRigBackend* backend);
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_snapshot_create(
+    SoloRigBackend* backend,
+    SoloRigSnapshot** out_snapshot);
+SOLO_RIG_BACKEND_API void solorig_snapshot_destroy(SoloRigSnapshot* snapshot);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_info(
+    const SoloRigSnapshot* snapshot,
+    SoloRigSnapshotInfo* out_info);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node(
+    const SoloRigSnapshot* snapshot,
+    uint32_t index,
+    SoloRigNodeView* out_node);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_parameter(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t parameter_index,
+    SoloRigParameterView* out_parameter);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_binding(
+    const SoloRigSnapshot* snapshot,
+    uint32_t index,
+    SoloRigBindingView* out_binding);
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_parameter_utf8(
+    SoloRigBackend* backend,
+    const char* instance_id_utf8,
+    const char* parameter_id_utf8,
+    float value);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark(
+    SoloRigBackend* backend,
+    uint8_t dark);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_save_utf8(
+    SoloRigBackend* backend,
+    const char* path_utf8);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_open_utf8(
+    SoloRigBackend* backend,
+    const char* path_utf8);
+
+#ifdef __cplusplus
+}
+#endif

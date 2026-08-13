@@ -1,0 +1,53 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="SoloRig.Standalone.MainWindow"
+        Width="960"
+        Height="640"
+        MinWidth="640"
+        MinHeight="420"
+        Title="{Binding WindowTitle}">
+  <DockPanel Margin="18">
+    <StackPanel DockPanel.Dock="Top" Spacing="8">
+      <TextBlock FontSize="24" FontWeight="Bold" Text="{Binding WindowTitle}" />
+      <TextBlock Text="M1 Avalonia 骨架：C ABI 快照与控制探针" />
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button Content="Refresh snapshot" Command="{Binding RefreshCommand}" />
+        <Button Content="Drive +1" Command="{Binding IncreaseDriveCommand}" />
+        <Button Content="Toggle theme" Command="{Binding ToggleThemeCommand}" />
+      </StackPanel>
+      <TextBlock Text="{Binding Status}" />
+      <TextBlock Text="{Binding FileStatus}" />
+      <TextBlock Text="{Binding AudioStatus}" />
+      <TextBlock Text="{Binding MidiStatus}" />
+    </StackPanel>
+    <Border Margin="0,16,0,0" Padding="12" BorderBrush="#777777" BorderThickness="1" CornerRadius="6">
+      <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <ItemsControl ItemsSource="{Binding Nodes}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel Orientation="Horizontal" ItemWidth="260" ItemHeight="160" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Margin="6" Padding="12" Background="#30343B" CornerRadius="8">
+                <StackPanel Spacing="6">
+                  <TextBlock FontSize="18" FontWeight="Bold" Text="{Binding InstanceId}" />
+                  <TextBlock Text="{Binding ModuleId}" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding LayoutText}" />
+                  <ItemsControl ItemsSource="{Binding Parameters}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <TextBlock Text="{Binding DisplayText}" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </Border>
+  </DockPanel>
+</Window>

@@ -79,6 +79,20 @@ target_include_directories(solo_rig_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src
 target_link_libraries(solo_rig_core PUBLIC neural_amp_modeler_core)
 enable_solo_rig_warnings(solo_rig_core)
 
+if(WIN32)
+    add_library(solo_rig_backend SHARED
+        src/interop/solorig_backend.cpp
+    )
+    target_include_directories(solo_rig_backend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_compile_definitions(solo_rig_backend PRIVATE SOLO_RIG_BACKEND_BUILD UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(solo_rig_backend PRIVATE solo_rig_core)
+    set_target_properties(solo_rig_backend PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        OUTPUT_NAME "SoloRigBackend"
+    )
+    enable_solo_rig_warnings(solo_rig_backend)
+endif()
+
 if(WIN32 AND SOLO_RIG_BUILD_STANDALONE)
     add_executable(SoloRigStandalone WIN32
         src/standalone/main.cpp
@@ -221,4 +235,16 @@ if(BUILD_TESTING)
     target_compile_definitions(solo_rig_tests PRIVATE SOLO_RIG_SOURCE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}")
     enable_solo_rig_warnings(solo_rig_tests)
     add_test(NAME solo_rig_tests COMMAND solo_rig_tests)
+
+    if(WIN32)
+        add_executable(solo_rig_backend_abi_tests
+            tests/test_main.cpp
+            tests/backend_abi_tests.cpp
+        )
+        target_include_directories(solo_rig_backend_abi_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_link_libraries(solo_rig_backend_abi_tests PRIVATE solo_rig_backend)
+        target_compile_definitions(solo_rig_backend_abi_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+        enable_solo_rig_warnings(solo_rig_backend_abi_tests)
+        add_test(NAME solo_rig_backend_abi_tests COMMAND solo_rig_backend_abi_tests)
+    endif()
 endif()

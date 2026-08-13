@@ -2,6 +2,8 @@
 /build/
 /out/
 /artifacts/
+/src/managed/**/bin/
+/src/managed/**/obj/
 
 # Visual Studio user-specific files
 /.vs/

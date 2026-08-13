@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SoloRig.Ui\SoloRig.Ui.csproj" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\..\build\bin\SoloRigBackend.dll"
+          Link="SoloRigBackend.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\..\..\build\bin\SoloRigBackend.dll')" />
+  </ItemGroup>
+</Project>
