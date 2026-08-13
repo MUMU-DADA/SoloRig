@@ -13,6 +13,10 @@ bool PedalLayout::Add(std::string module_instance_id, PedalPosition position) {
     return positions_.emplace(std::move(module_instance_id), position).second;
 }
 
+bool PedalLayout::Remove(std::string_view module_instance_id) {
+    return positions_.erase(std::string(module_instance_id)) != 0U;
+}
+
 bool PedalLayout::Move(std::string_view module_instance_id, PedalPosition position, bool snap_to_grid) {
     const auto iterator = positions_.find(std::string(module_instance_id));
     if (iterator == positions_.end() || !std::isfinite(position.x) || !std::isfinite(position.y)) {

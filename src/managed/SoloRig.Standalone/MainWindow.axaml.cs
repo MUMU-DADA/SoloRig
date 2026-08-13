@@ -15,6 +15,10 @@ public sealed partial class MainWindow : Window
         Patterns = ["*.srig"],
         MimeTypes = ["application/x-solorig-preset"]
     };
+    private static readonly FilePickerFileType ResourceFileType = new("SoloRig resources")
+    {
+        Patterns = ["*.nam", "*.nam-a2", "*.ir", "*.wav", "*.json"]
+    };
 
     private RigEditorViewModel? viewModel;
     private bool dragging;
@@ -37,6 +41,11 @@ public sealed partial class MainWindow : Window
         EditorCanvas is not null && viewModel is not null &&
         viewModel.CanvasNodes.Count >= 2 && viewModel.CanvasConnections.Count >= 1 &&
         EditorCanvas.Bounds.Width > 0 && EditorCanvas.Bounds.Height > 0;
+
+    public bool HasM5VisualContent => HasEditorVisualContent &&
+        ModuleCatalogList is not null && ModuleCatalogList.Bounds.Width > 0 &&
+        ModuleCatalogList.ItemCount >= 2 && PerformanceText is not null &&
+        PresetSelector is not null && PresetSelector.Bounds.Width > 0;
 
     private void ViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
     {
@@ -135,6 +144,34 @@ public sealed partial class MainWindow : Window
     private void OpenClick(object? sender, RoutedEventArgs args) => _ = OpenAsync();
     private void SaveClick(object? sender, RoutedEventArgs args) => _ = SaveAsync();
     private void SaveAsClick(object? sender, RoutedEventArgs args) => _ = SaveAsAsync();
+    private void ImportResourceClick(object? sender, RoutedEventArgs args) => _ = ImportResourceAsync();
+
+    private async Task ImportResourceAsync()
+    {
+        if (viewModel is null)
+        {
+            return;
+        }
+        var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
+        if (storage is null)
+        {
+            viewModel.ReportFileDialogCancelled("Resource import");
+            return;
+        }
+        var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "导入 NAM / IR / circuit 资源",
+            AllowMultiple = false,
+            FileTypeFilter = [ResourceFileType]
+        });
+        var path = files.FirstOrDefault()?.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            viewModel.ReportFileDialogCancelled("Resource import");
+            return;
+        }
+        viewModel.ImportResource(path);
+    }
 
     private async Task OpenAsync()
     {

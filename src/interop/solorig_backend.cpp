@@ -165,6 +165,9 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_info(
     out_info->connection_count = static_cast<uint32_t>(snapshot->scene.connections.size());
     out_info->binding_count = snapshot->preset.midi_bindings.has_value()
         ? static_cast<uint32_t>(snapshot->preset.midi_bindings->size()) : 0U;
+    out_info->total_latency_samples = snapshot->scene.performance.total_latency_samples;
+    out_info->estimated_cpu_percent = snapshot->scene.performance.estimated_cpu_percent;
+    out_info->resource_status_utf8 = snapshot->scene.resource_status.c_str();
     return SOLO_RIG_STATUS_OK;
 }
 
@@ -345,4 +348,123 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_open_utf8(
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "a UTF-8 .srig path is required");
     }
     return MapFileResult(backend, backend->editor.LoadFrom(PathFromUtf8(path_utf8)));
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_new_preset(SoloRigBackend* backend) {
+    if (!ValidBackend(backend)) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    backend->editor.NewPreset();
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_catalog_count(
+    SoloRigBackend* backend, uint32_t* out_count) {
+    if (!ValidBackend(backend) || out_count == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "backend and catalog count are required");
+    }
+    static const auto catalog = solo_rig::RigEditorViewModel::ModuleCatalog();
+    *out_count = static_cast<uint32_t>(catalog.size());
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_catalog_entry(
+    SoloRigBackend* backend, uint32_t index, SoloRigModuleCatalogView* out_entry) {
+    if (!ValidBackend(backend) || out_entry == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "backend and catalog entry are required");
+    }
+    static const auto catalog = solo_rig::RigEditorViewModel::ModuleCatalog();
+    if (index >= catalog.size()) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "module catalog entry was not found");
+    }
+    const auto& entry = catalog[index];
+    out_entry->module_id_utf8 = entry.module_id.c_str();
+    out_entry->display_name_utf8 = entry.display_name.c_str();
+    out_entry->category_utf8 = entry.category.c_str();
+    out_entry->description_utf8 = entry.description.c_str();
+    out_entry->parameter_count = static_cast<uint32_t>(entry.default_parameters.size());
+    out_entry->declared_latency_samples = entry.latency_samples;
+    out_entry->estimated_cpu_percent = entry.estimated_cpu_percent;
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_add_node_utf8(
+    SoloRigBackend* backend, const char* module_id_utf8, const char* instance_id_utf8,
+    double layout_x, double layout_y) {
+    if (!ValidBackend(backend) || !ValidText(module_id_utf8) || !ValidText(instance_id_utf8) ||
+        !std::isfinite(layout_x) || !std::isfinite(layout_y)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "module, instance and finite layout are required");
+    }
+    if (!backend->editor.AddNode(module_id_utf8, instance_id_utf8, layout_x, layout_y)) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "module node could not be added");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_delete_node_utf8(
+    SoloRigBackend* backend, const char* instance_id_utf8) {
+    if (!ValidBackend(backend) || !ValidText(instance_id_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "a node instance ID is required");
+    }
+    if (!backend->editor.DeleteNode(instance_id_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "node could not be deleted");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_duplicate_node_utf8(
+    SoloRigBackend* backend, const char* source_instance_id_utf8, const char* new_instance_id_utf8) {
+    if (!ValidBackend(backend) || !ValidText(source_instance_id_utf8) || !ValidText(new_instance_id_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "source and destination node IDs are required");
+    }
+    if (!backend->editor.DuplicateNode(source_instance_id_utf8, new_instance_id_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "node could not be duplicated");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_connect_utf8(
+    SoloRigBackend* backend, const char* source_instance_id_utf8, const char* destination_instance_id_utf8) {
+    if (!ValidBackend(backend) || !ValidText(source_instance_id_utf8) || !ValidText(destination_instance_id_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "source and destination node IDs are required");
+    }
+    if (!backend->editor.ConnectNodes(source_instance_id_utf8, destination_instance_id_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_PRESET, "connection was rejected by topology validation");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_disconnect_utf8(
+    SoloRigBackend* backend, const char* source_instance_id_utf8, const char* destination_instance_id_utf8) {
+    if (!ValidBackend(backend) || !ValidText(source_instance_id_utf8) || !ValidText(destination_instance_id_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "source and destination node IDs are required");
+    }
+    if (!backend->editor.DisconnectNodes(source_instance_id_utf8, destination_instance_id_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "connection was not found");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_import_resource_utf8(
+    SoloRigBackend* backend, const char* path_utf8) {
+    if (!ValidBackend(backend) || !ValidText(path_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "an explicit resource path is required");
+    }
+    const auto result = backend->editor.ImportResource(PathFromUtf8(path_utf8));
+    if (!result.success) {
+        if (result.error == solo_rig::EditorFileError::CannotRead) {
+            return SetError(backend, SOLO_RIG_STATUS_FILE_ERROR, result.message);
+        }
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, result.message);
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
 }

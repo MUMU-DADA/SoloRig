@@ -45,7 +45,20 @@ typedef struct SoloRigSnapshotInfo {
     uint32_t node_count;
     uint32_t connection_count;
     uint32_t binding_count;
+    uint32_t total_latency_samples;
+    double estimated_cpu_percent;
+    const char* resource_status_utf8;
 } SoloRigSnapshotInfo;
+
+typedef struct SoloRigModuleCatalogView {
+    const char* module_id_utf8;
+    const char* display_name_utf8;
+    const char* category_utf8;
+    const char* description_utf8;
+    uint32_t parameter_count;
+    uint32_t declared_latency_samples;
+    double estimated_cpu_percent;
+} SoloRigModuleCatalogView;
 
 typedef struct SoloRigNodeView {
     const char* instance_id_utf8;
@@ -153,6 +166,38 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_save_utf8(
     SoloRigBackend* backend,
     const char* path_utf8);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_open_utf8(
+    SoloRigBackend* backend,
+    const char* path_utf8);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_new_preset(SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_catalog_count(
+    SoloRigBackend* backend,
+    uint32_t* out_count);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_catalog_entry(
+    SoloRigBackend* backend,
+    uint32_t index,
+    SoloRigModuleCatalogView* out_entry);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_add_node_utf8(
+    SoloRigBackend* backend,
+    const char* module_id_utf8,
+    const char* instance_id_utf8,
+    double layout_x,
+    double layout_y);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_delete_node_utf8(
+    SoloRigBackend* backend,
+    const char* instance_id_utf8);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_duplicate_node_utf8(
+    SoloRigBackend* backend,
+    const char* source_instance_id_utf8,
+    const char* new_instance_id_utf8);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_connect_utf8(
+    SoloRigBackend* backend,
+    const char* source_instance_id_utf8,
+    const char* destination_instance_id_utf8);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_disconnect_utf8(
+    SoloRigBackend* backend,
+    const char* source_instance_id_utf8,
+    const char* destination_instance_id_utf8);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_import_resource_utf8(
     SoloRigBackend* backend,
     const char* path_utf8);
 

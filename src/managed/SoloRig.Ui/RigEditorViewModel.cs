@@ -43,17 +43,21 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private BackendSnapshot snapshot = EmptySnapshot;
     private IReadOnlyList<CanvasNodeSnapshot> canvasNodes = [];
     private IReadOnlyList<CanvasConnectionSnapshot> canvasConnections = [];
+    private IReadOnlyList<ModuleCatalogSnapshot> moduleCatalog = [];
+    private string moduleSearchText = string.Empty;
+    private ModuleCatalogSnapshot? selectedCatalogModule;
     private string status = "Starting backend probe...";
 
     private static BackendSnapshot EmptySnapshot => new(
         0, true, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty,
-        1280, 720, 1, false, [], [], []);
+        1280, 720, 1, false, [], [], [], 0, 0, "No external resource imported");
 
     public RigEditorViewModel()
     {
         try
         {
             backend = new BackendSession();
+            moduleCatalog = backend.ReadCatalog();
             Refresh();
         }
         catch (Exception exception)
@@ -63,6 +67,12 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         RefreshCommand = new RelayCommand(Refresh);
         IncreaseDriveCommand = new RelayCommand(IncreaseDrive);
         ToggleThemeCommand = new RelayCommand(ToggleThemeAction);
+        NewPresetCommand = new RelayCommand(NewPreset);
+        AddModuleCommand = new RelayCommand(AddSelectedModule);
+        DeleteSelectedCommand = new RelayCommand(DeleteSelectedNode);
+        DuplicateSelectedCommand = new RelayCommand(DuplicateSelectedNode);
+        ConnectSelectedCommand = new RelayCommand(ConnectSelectedNodes);
+        DisconnectSelectedCommand = new RelayCommand(DisconnectSelectedNodes);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -70,6 +80,28 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public IReadOnlyList<NodeSnapshot> Nodes => snapshot.Nodes;
     public IReadOnlyList<CanvasNodeSnapshot> CanvasNodes => canvasNodes;
     public IReadOnlyList<CanvasConnectionSnapshot> CanvasConnections => canvasConnections;
+    public IReadOnlyList<ModuleCatalogSnapshot> ModuleCatalog => moduleCatalog;
+    public IReadOnlyList<ModuleCatalogSnapshot> FilteredModuleCatalog => moduleCatalog
+        .Where(module => string.IsNullOrWhiteSpace(ModuleSearchText) ||
+                         module.DisplayText.Contains(ModuleSearchText, StringComparison.OrdinalIgnoreCase) ||
+                         module.ModuleId.Contains(ModuleSearchText, StringComparison.OrdinalIgnoreCase))
+        .ToArray();
+    public string ModuleSearchText
+    {
+        get => moduleSearchText;
+        set
+        {
+            if (Set(ref moduleSearchText, value))
+            {
+                OnPropertiesChanged(nameof(FilteredModuleCatalog));
+            }
+        }
+    }
+    public ModuleCatalogSnapshot? SelectedCatalogModule
+    {
+        get => selectedCatalogModule;
+        set => Set(ref selectedCatalogModule, value);
+    }
     public NodeSnapshot? SelectedNode => snapshot.Nodes.FirstOrDefault(node => node.Selected);
     public IReadOnlyList<ParameterEditorSnapshot> SelectedParameters =>
         SelectedNode is null
@@ -79,17 +111,26 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public bool IsDirty => snapshot.Dirty;
     public bool DarkTheme => snapshot.DarkTheme;
     public string WindowTitle => string.IsNullOrWhiteSpace(snapshot.PresetName)
-        ? "SoloRig Avalonia M2"
-        : $"SoloRig Avalonia M2 - {snapshot.PresetName}{(snapshot.Dirty ? " *" : string.Empty)}";
+        ? "SoloRig Avalonia M5"
+        : $"SoloRig Avalonia M5 - {snapshot.PresetName}{(snapshot.Dirty ? " *" : string.Empty)}";
     public string AudioStatus => $"Audio: {snapshot.AudioStatus}";
     public string MidiStatus => $"MIDI: {snapshot.MidiStatus} | mappings: {snapshot.Bindings.Count}";
     public string FileStatus => string.IsNullOrWhiteSpace(snapshot.SourcePath)
         ? $"Preset: unsaved default{(snapshot.Dirty ? " *" : string.Empty)}"
         : $"Preset: {snapshot.SourcePath}{(snapshot.Dirty ? " *" : string.Empty)}";
+    public string PerformanceStatus => $"性能/延迟: {snapshot.EstimatedCpuPercent:0.0}% CPU · {snapshot.TotalLatencySamples} samples";
+    public string ResourceStatus => $"资源: {snapshot.ResourceStatus}";
+    public IReadOnlyList<string> PresetNames => ["SoloRig Default", snapshot.PresetName];
     public string Status { get => status; private set => Set(ref status, value); }
     public ICommand RefreshCommand { get; }
     public ICommand IncreaseDriveCommand { get; }
     public ICommand ToggleThemeCommand { get; }
+    public ICommand NewPresetCommand { get; }
+    public ICommand AddModuleCommand { get; }
+    public ICommand DeleteSelectedCommand { get; }
+    public ICommand DuplicateSelectedCommand { get; }
+    public ICommand ConnectSelectedCommand { get; }
+    public ICommand DisconnectSelectedCommand { get; }
 
     public void Refresh()
     {
@@ -105,7 +146,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             Status = $"Backend probe OK | schema {snapshot.SchemaVersion} | theme {(snapshot.DarkTheme ? "dark" : "light")}";
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
                 nameof(SelectedNode), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
-                nameof(WindowTitle), nameof(AudioStatus), nameof(MidiStatus), nameof(FileStatus));
+                nameof(WindowTitle), nameof(AudioStatus), nameof(MidiStatus), nameof(FileStatus),
+                nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames));
         }
         catch (Exception exception)
         {
@@ -244,6 +286,48 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     public void EndDrag() => backend?.EndDrag();
 
+    public bool AddModule(string moduleId, string instanceId, double x, double y)
+    {
+        if (backend is null) return false;
+        try { backend.AddNode(moduleId, instanceId, x, y); Refresh(); Status = $"Added module: {instanceId}"; return true; }
+        catch (Exception exception) { Status = exception.Message; Refresh(); return false; }
+    }
+
+    public bool DeleteNode(string instanceId)
+    {
+        if (backend is null) return false;
+        try { backend.DeleteNode(instanceId); Refresh(); Status = $"Deleted node: {instanceId}"; return true; }
+        catch (Exception exception) { Status = exception.Message; Refresh(); return false; }
+    }
+
+    public bool DuplicateNode(string sourceInstanceId, string newInstanceId)
+    {
+        if (backend is null) return false;
+        try { backend.DuplicateNode(sourceInstanceId, newInstanceId); Refresh(); Status = $"Duplicated node: {newInstanceId}"; return true; }
+        catch (Exception exception) { Status = exception.Message; Refresh(); return false; }
+    }
+
+    public bool ConnectNodes(string sourceInstanceId, string destinationInstanceId)
+    {
+        if (backend is null) return false;
+        try { backend.Connect(sourceInstanceId, destinationInstanceId); Refresh(); Status = "Connection updated"; return true; }
+        catch (Exception exception) { Status = exception.Message; Refresh(); return false; }
+    }
+
+    public bool DisconnectNodes(string sourceInstanceId, string destinationInstanceId)
+    {
+        if (backend is null) return false;
+        try { backend.Disconnect(sourceInstanceId, destinationInstanceId); Refresh(); Status = "Connection removed"; return true; }
+        catch (Exception exception) { Status = exception.Message; Refresh(); return false; }
+    }
+
+    public bool ImportResource(string path)
+    {
+        if (backend is null) return false;
+        try { backend.ImportResource(path); Refresh(); Status = snapshot.ResourceStatus; return true; }
+        catch (Exception exception) { Status = exception.Message; return false; }
+    }
+
     public bool SaveToPath(string path)
     {
         if (backend is null)
@@ -306,6 +390,42 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     private void ToggleThemeAction() => ToggleTheme();
 
+    private void NewPreset()
+    {
+        if (backend is null) return;
+        try { backend.NewPreset(); Refresh(); Status = "New in-memory preset created"; }
+        catch (Exception exception) { Status = exception.Message; }
+    }
+
+    private void AddSelectedModule()
+    {
+        var module = SelectedCatalogModule ?? FilteredModuleCatalog.FirstOrDefault();
+        if (module is null) return;
+        var id = $"{module.DisplayName.ToLowerInvariant()}-{snapshot.Nodes.Count + 1}";
+        AddModule(module.ModuleId, id, 64 + snapshot.Nodes.Count * 32, 300);
+    }
+
+    private void DeleteSelectedNode()
+    {
+        if (SelectedNode is not null) DeleteNode(SelectedNode.InstanceId);
+    }
+
+    private void DuplicateSelectedNode()
+    {
+        if (SelectedNode is not null) DuplicateNode(SelectedNode.InstanceId, $"{SelectedNode.InstanceId}-copy");
+    }
+
+    private void ConnectSelectedNodes()
+    {
+        if (snapshot.Nodes.Count >= 2) ConnectNodes(snapshot.Nodes[0].InstanceId, snapshot.Nodes[^1].InstanceId);
+    }
+
+    private void DisconnectSelectedNodes()
+    {
+        var connection = snapshot.Connections.FirstOrDefault();
+        if (connection is not null) DisconnectNodes(connection.SourceInstanceId, connection.DestinationInstanceId);
+    }
+
     private double ToBackendX(double x) => x * Math.Max(snapshot.DpiScale, 1.0);
     private double ToBackendY(double y) => y * Math.Max(snapshot.DpiScale, 1.0);
 
@@ -319,14 +439,15 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             connection.DestinationX / scale, connection.DestinationY / scale)).ToArray();
     }
 
-    private void Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
         if (EqualityComparer<T>.Default.Equals(field, value))
         {
-            return;
+            return false;
         }
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        return true;
     }
 
     private void OnPropertiesChanged(params string[] names)

@@ -20,14 +20,17 @@ public sealed class App : Application
             var mainWindow = new MainWindow(viewModel);
             desktop.MainWindow = mainWindow;
             desktop.Exit += (_, _) => viewModel.Dispose();
-            if ((desktop.Args ?? Array.Empty<string>()).Contains("--m2-visual-probe", StringComparer.Ordinal))
+            var args = desktop.Args ?? Array.Empty<string>();
+            if (args.Contains("--m2-visual-probe", StringComparer.Ordinal) ||
+                args.Contains("--m5-visual-probe", StringComparer.Ordinal))
             {
+                var m5Probe = args.Contains("--m5-visual-probe", StringComparer.Ordinal);
                 var attempts = 0;
                 var probe = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
                 probe.Tick += (_, _) =>
                 {
                     attempts++;
-                    if (mainWindow.HasEditorVisualContent)
+                    if ((m5Probe && mainWindow.HasM5VisualContent) || (!m5Probe && mainWindow.HasEditorVisualContent))
                     {
                         probe.Stop();
                         desktop.Shutdown(0);

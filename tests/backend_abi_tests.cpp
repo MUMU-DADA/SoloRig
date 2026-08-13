@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 TEST_CASE("C ABI backend creates a side-effect-free default snapshot") {
@@ -128,4 +129,49 @@ TEST_CASE("C ABI backend rejects invalid editor commands without changing the sn
     REQUIRE(after.dirty == before.dirty);
     solorig_snapshot_destroy(snapshot);
     solorig_backend_destroy(backend);
+}
+
+TEST_CASE("C ABI exposes catalog, transactional editing and performance snapshot") {
+    SoloRigBackend* backend = nullptr;
+    REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);
+    uint32_t catalog_count = 0;
+    REQUIRE(solorig_backend_catalog_count(backend, &catalog_count) == SOLO_RIG_STATUS_OK);
+    REQUIRE(catalog_count >= 2U);
+    SoloRigModuleCatalogView entry{};
+    REQUIRE(solorig_backend_catalog_entry(backend, 0U, &entry) == SOLO_RIG_STATUS_OK);
+    REQUIRE(entry.module_id_utf8 != nullptr);
+    REQUIRE(entry.parameter_count > 0U);
+    REQUIRE(solorig_backend_add_node_utf8(backend, "org.mumu-dada.solorig.drive", "drive-2", 640.0, 160.0) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_duplicate_node_utf8(backend, "drive-2", "drive-3") == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_connect_utf8(backend, "drive-1", "drive-2") == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_connect_utf8(backend, "drive-1", "drive-2") != SOLO_RIG_STATUS_OK);
+    SoloRigSnapshot* snapshot = nullptr;
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    SoloRigSnapshotInfo info{};
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    REQUIRE(info.node_count == 4U);
+    REQUIRE(info.total_latency_samples > 0U);
+    REQUIRE(info.estimated_cpu_percent > 0.0);
+    solorig_snapshot_destroy(snapshot);
+    REQUIRE(solorig_backend_add_node_utf8(backend, "missing.module", "bad", 0.0, 0.0) == SOLO_RIG_STATUS_NOT_FOUND);
+    REQUIRE(solorig_backend_delete_node_utf8(backend, "drive-3") == SOLO_RIG_STATUS_OK);
+    solorig_backend_destroy(backend);
+}
+
+TEST_CASE("C ABI explicit resource import identifies supported assets without startup scanning") {
+    SoloRigBackend* backend = nullptr;
+    REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);
+    const auto path = std::filesystem::temp_directory_path() / "solorig-abi-resource.ir";
+    { std::ofstream output(path, std::ios::binary | std::ios::trunc); output << "ir"; }
+    REQUIRE(solorig_backend_import_resource_utf8(backend, path.string().c_str()) == SOLO_RIG_STATUS_OK);
+    SoloRigSnapshot* snapshot = nullptr;
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    SoloRigSnapshotInfo info{};
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    REQUIRE(std::string(info.resource_status_utf8).find("IR") != std::string::npos);
+    solorig_snapshot_destroy(snapshot);
+    REQUIRE(solorig_backend_import_resource_utf8(backend, "missing.unknown") == SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    solorig_backend_destroy(backend);
+    std::error_code cleanup;
+    std::filesystem::remove(path, cleanup);
 }

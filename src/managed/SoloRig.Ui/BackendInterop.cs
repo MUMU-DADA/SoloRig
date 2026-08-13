@@ -31,6 +31,9 @@ internal struct NativeSnapshotInfo
     public uint NodeCount;
     public uint ConnectionCount;
     public uint BindingCount;
+    public uint TotalLatencySamples;
+    public double EstimatedCpuPercent;
+    public IntPtr ResourceStatus;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -74,6 +77,18 @@ internal struct NativeBindingView
     public IntPtr TargetId;
     public float Minimum;
     public float Maximum;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeModuleCatalogView
+{
+    public IntPtr ModuleId;
+    public IntPtr DisplayName;
+    public IntPtr Category;
+    public IntPtr Description;
+    public uint ParameterCount;
+    public uint DeclaredLatencySamples;
+    public double EstimatedCpuPercent;
 }
 
 internal static class NativeMethods
@@ -145,6 +160,43 @@ internal static class NativeMethods
     internal static extern NativeStatus solorig_backend_open_utf8(
         IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_new_preset(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_catalog_count(IntPtr backend, out uint count);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_catalog_entry(IntPtr backend, uint index, out NativeModuleCatalogView entry);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_add_node_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string moduleId,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string instanceId, double layoutX, double layoutY);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_delete_node_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string instanceId);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_duplicate_node_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceInstanceId,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string newInstanceId);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_connect_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceInstanceId,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string destinationInstanceId);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_disconnect_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceInstanceId,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string destinationInstanceId);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_import_resource_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
     internal static string Utf8(IntPtr pointer) => pointer == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(pointer) ?? string.Empty;
 }
 
@@ -190,6 +242,17 @@ public sealed record BindingSnapshot(
     string TargetId,
     float Minimum,
     float Maximum);
+public sealed record ModuleCatalogSnapshot(
+    string ModuleId,
+    string DisplayName,
+    string Category,
+    string Description,
+    uint ParameterCount,
+    uint DeclaredLatencySamples,
+    double EstimatedCpuPercent)
+{
+    public string DisplayText => $"{DisplayName} · {Category}";
+}
 public sealed record BackendSnapshot(
     uint SchemaVersion,
     bool DarkTheme,
@@ -205,7 +268,10 @@ public sealed record BackendSnapshot(
     bool Dirty,
     IReadOnlyList<NodeSnapshot> Nodes,
     IReadOnlyList<ConnectionSnapshot> Connections,
-    IReadOnlyList<BindingSnapshot> Bindings);
+    IReadOnlyList<BindingSnapshot> Bindings,
+    uint TotalLatencySamples,
+    double EstimatedCpuPercent,
+    string ResourceStatus);
 
 public sealed class BackendSession : IDisposable
 {
@@ -256,7 +322,8 @@ public sealed class BackendSession : IDisposable
             return new BackendSnapshot(info.SchemaVersion, info.DarkTheme != 0, NativeMethods.Utf8(info.PresetId),
                 NativeMethods.Utf8(info.PresetName), NativeMethods.Utf8(info.SourcePath), NativeMethods.Utf8(info.AudioStatus),
                 NativeMethods.Utf8(info.FileStatus), NativeMethods.Utf8(info.MidiStatus), info.ViewportWidth,
-                info.ViewportHeight, info.DpiScale, info.Dirty != 0, nodes, connections, bindings);
+                info.ViewportHeight, info.DpiScale, info.Dirty != 0, nodes, connections, bindings,
+                info.TotalLatencySamples, info.EstimatedCpuPercent, NativeMethods.Utf8(info.ResourceStatus));
         }
         finally
         {
@@ -291,6 +358,40 @@ public sealed class BackendSession : IDisposable
     public void Save(string path) => Ensure(NativeMethods.solorig_backend_save_utf8(handle, path), "save preset");
 
     public void Open(string path) => Ensure(NativeMethods.solorig_backend_open_utf8(handle, path), "open preset");
+
+    public void NewPreset() => Ensure(NativeMethods.solorig_backend_new_preset(handle), "new preset");
+
+    public IReadOnlyList<ModuleCatalogSnapshot> ReadCatalog()
+    {
+        Ensure(NativeMethods.solorig_backend_catalog_count(handle, out var count), "catalog count");
+        var entries = new List<ModuleCatalogSnapshot>((int)count);
+        for (uint index = 0; index < count; index++)
+        {
+            Ensure(NativeMethods.solorig_backend_catalog_entry(handle, index, out var entry), "catalog entry");
+            entries.Add(new ModuleCatalogSnapshot(NativeMethods.Utf8(entry.ModuleId), NativeMethods.Utf8(entry.DisplayName),
+                NativeMethods.Utf8(entry.Category), NativeMethods.Utf8(entry.Description), entry.ParameterCount,
+                entry.DeclaredLatencySamples, entry.EstimatedCpuPercent));
+        }
+        return entries;
+    }
+
+    public void AddNode(string moduleId, string instanceId, double layoutX, double layoutY) =>
+        Ensure(NativeMethods.solorig_backend_add_node_utf8(handle, moduleId, instanceId, layoutX, layoutY), "add node");
+
+    public void DeleteNode(string instanceId) =>
+        Ensure(NativeMethods.solorig_backend_delete_node_utf8(handle, instanceId), "delete node");
+
+    public void DuplicateNode(string sourceInstanceId, string newInstanceId) =>
+        Ensure(NativeMethods.solorig_backend_duplicate_node_utf8(handle, sourceInstanceId, newInstanceId), "duplicate node");
+
+    public void Connect(string sourceInstanceId, string destinationInstanceId) =>
+        Ensure(NativeMethods.solorig_backend_connect_utf8(handle, sourceInstanceId, destinationInstanceId), "connect nodes");
+
+    public void Disconnect(string sourceInstanceId, string destinationInstanceId) =>
+        Ensure(NativeMethods.solorig_backend_disconnect_utf8(handle, sourceInstanceId, destinationInstanceId), "disconnect nodes");
+
+    public void ImportResource(string path) =>
+        Ensure(NativeMethods.solorig_backend_import_resource_utf8(handle, path), "import resource");
 
     public void Dispose()
     {

@@ -4,6 +4,19 @@ using var viewModel = new RigEditorViewModel();
 Require(viewModel.Nodes.Count >= 2, "default snapshot exposes Drive and Delay nodes");
 Require(viewModel.Snapshot.Connections.Count == 1, "default snapshot exposes the Drive-to-Delay connection");
 Require(viewModel.MidiStatus.Contains("closed", StringComparison.OrdinalIgnoreCase), "startup MIDI remains closed");
+Require(viewModel.ModuleCatalog.Count >= 2, "module catalog exposes built-in modules");
+Require(viewModel.ModuleCatalog.Any(module => module.ModuleId == "org.mumu-dada.solorig.drive"), "catalog exposes Drive metadata");
+Require(viewModel.AddModule("org.mumu-dada.solorig.drive", "drive-extra", 640, 320), "module add uses the C ABI transaction");
+Require(viewModel.Snapshot.Nodes.Any(node => node.InstanceId == "drive-extra" && node.Parameters.Any(parameter => parameter.Id == "drive" && parameter.Value == 4.0F)),
+    "added module receives validated defaults");
+Require(viewModel.DuplicateNode("drive-extra", "drive-copy"), "node duplication uses the C ABI transaction");
+Require(viewModel.ConnectNodes("drive-extra", "drive-copy"), "serial connection edit succeeds");
+Require(viewModel.Snapshot.Connections.Any(connection => connection.SourceInstanceId == "drive-extra"), "connection feedback is visible");
+Require(viewModel.DeleteNode("drive-copy"), "node deletion removes the copied module");
+Require(viewModel.Snapshot.TotalLatencySamples > 0 && viewModel.Snapshot.EstimatedCpuPercent > 0, "performance snapshot is visible");
+Require(viewModel.PresetNames.Contains("SoloRig Default"), "preset list exposes the in-memory default");
+viewModel.NewPresetCommand.Execute(null);
+Require(string.IsNullOrEmpty(viewModel.Snapshot.SourcePath) && !viewModel.IsDirty, "quick default preset switching stays in memory and clean");
 Require(viewModel.SetParameter("drive-1.drive", 6.0F), "C ABI parameter edit succeeds");
 Require(viewModel.Nodes.SelectMany(node => node.Parameters).Any(parameter => parameter.Id == "drive" && parameter.Value == 6.0F),
     "edited parameter is visible in the next snapshot");
@@ -17,10 +30,15 @@ Require(!viewModel.Snapshot.DarkTheme, "theme change is visible in the snapshot"
 
 var path = Path.Combine(Path.GetTempPath(), "solorig-m2-contract.srig");
 var corruptPath = Path.Combine(Path.GetTempPath(), "solorig-m2-corrupt.srig");
+var resourcePath = Path.Combine(Path.GetTempPath(), "solorig-m5-resource.nam");
 try
 {
     File.Delete(path);
+    File.Delete(resourcePath);
     File.WriteAllText(corruptPath, "{not-json");
+    File.WriteAllText(resourcePath, "model");
+    Require(viewModel.ImportResource(resourcePath), "explicit resource import is recognized");
+    Require(viewModel.Snapshot.ResourceStatus.Contains("NAM", StringComparison.Ordinal), "resource status identifies NAM");
     Require(viewModel.SaveToPath(path), "explicit Save writes a validated preset");
     Require(!viewModel.IsDirty, "successful Save clears dirty state");
     var savedLayout = viewModel.Nodes.Single(node => node.InstanceId == "drive-1").LayoutX;
@@ -46,9 +64,10 @@ finally
 {
     File.Delete(path);
     File.Delete(corruptPath);
+    File.Delete(resourcePath);
 }
 
-Console.WriteLine("[PASS] Avalonia shared ViewModel performs M2 layout, parameter, theme and file workflow");
+Console.WriteLine("[PASS] Avalonia shared ViewModel performs M5 catalog, graph editing, performance, resource and preset workflow");
 
 static void Require(bool condition, string description)
 {

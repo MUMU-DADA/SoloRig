@@ -33,6 +33,35 @@ std::optional<std::string> StringField(const JsonValue::Object& object, std::str
     return value != nullptr && value->AsString() != nullptr ? std::optional<std::string>(*value->AsString()) : std::nullopt;
 }
 
+const ModuleCatalogEntry* CatalogEntry(std::string_view module_id) noexcept {
+    static const std::vector<ModuleCatalogEntry> catalog{
+        {.module_id = "org.mumu-dada.solorig.drive",
+         .display_name = "Drive",
+         .category = "Analog",
+         .description = "Built-in drive processor",
+         .default_parameters = {{"drive", 4.0F}, {"outputGain", 1.0F}, {"diodeThreshold", 0.35F}},
+         .latency_samples = 0U,
+         .estimated_cpu_percent = 1.5},
+        {.module_id = "org.mumu-dada.solorig.digital-delay",
+         .display_name = "Delay",
+         .category = "Digital",
+         .description = "Built-in digital delay processor",
+         .default_parameters = {{"time", 0.35F}, {"feedback", 0.35F}, {"mix", 0.25F}},
+         .latency_samples = 96U,
+         .estimated_cpu_percent = 2.5},
+    };
+    const auto iterator = std::ranges::find_if(catalog, [module_id](const auto& entry) {
+        return entry.module_id == module_id;
+    });
+    return iterator == catalog.end() ? nullptr : &*iterator;
+}
+
+bool HasConnection(const RigPreset& preset, std::string_view source, std::string_view destination) {
+    return std::ranges::any_of(preset.connections, [source, destination](const auto& connection) {
+        return connection.source_instance_id == source && connection.destination_instance_id == destination;
+    });
+}
+
 } // namespace
 
 const PedalSkinDefinition& DefaultPedalSkin() {
@@ -69,6 +98,11 @@ void RigEditorViewModel::SetPreset(RigPreset preset) {
         preset = DefaultEditorPreset();
     }
     ApplyPreset(std::move(preset), source_path_, true);
+}
+
+void RigEditorViewModel::NewPreset() {
+    ApplyPreset(DefaultEditorPreset(), std::nullopt, false);
+    SetFileStatus("New preset created");
 }
 
 void RigEditorViewModel::ApplyPreset(RigPreset preset, std::optional<std::filesystem::path> source, bool dirty) {
@@ -292,6 +326,166 @@ bool RigEditorViewModel::LoadSkinFile(const std::filesystem::path& source) {
     return true;
 }
 
+std::vector<ModuleCatalogEntry> RigEditorViewModel::ModuleCatalog() {
+    return {*CatalogEntry("org.mumu-dada.solorig.drive"),
+            *CatalogEntry("org.mumu-dada.solorig.digital-delay")};
+}
+
+bool RigEditorViewModel::AddNode(std::string_view module_id, std::string_view instance_id,
+                                 double layout_x, double layout_y) {
+    const auto* entry = CatalogEntry(module_id);
+    if (entry == nullptr || instance_id.empty() || !std::isfinite(layout_x) || !std::isfinite(layout_y) ||
+        std::ranges::any_of(preset_.nodes, [instance_id](const auto& node) { return node.instance_id == instance_id; })) {
+        SetFileStatus("Edit failed: invalid or duplicate module node.");
+        return false;
+    }
+    auto candidate = preset_;
+    PresetNode node{.instance_id = std::string(instance_id),
+                    .module_id = std::string(module_id),
+                    .layout_x = layout_x,
+                    .layout_y = layout_y};
+    for (const auto& [parameter, value] : entry->default_parameters) {
+        node.parameter_values.emplace(parameter, value);
+    }
+    candidate.nodes.push_back(std::move(node));
+    if (!ValidatePreset(candidate).empty() || HasInvalidTopology(candidate)) {
+        SetFileStatus("Edit failed: candidate preset validation rejected the node.");
+        return false;
+    }
+    preset_ = std::move(candidate);
+    static_cast<void>(layout_.Add(std::string(instance_id), {.x = layout_x, .y = layout_y}));
+    dirty_ = true;
+    SetFileStatus("Unsaved changes");
+    RebuildScene();
+    return true;
+}
+
+bool RigEditorViewModel::DeleteNode(std::string_view instance_id) {
+    auto candidate = preset_;
+    const auto iterator = std::ranges::find_if(candidate.nodes, [instance_id](const auto& node) {
+        return node.instance_id == instance_id;
+    });
+    if (iterator == candidate.nodes.end()) {
+        SetFileStatus("Edit failed: node was not found.");
+        return false;
+    }
+    candidate.nodes.erase(iterator);
+    std::erase_if(candidate.connections, [instance_id](const auto& connection) {
+        return connection.source_instance_id == instance_id || connection.destination_instance_id == instance_id;
+    });
+    if (!ValidatePreset(candidate).empty() || HasInvalidTopology(candidate)) {
+        SetFileStatus("Edit failed: candidate preset validation rejected node deletion.");
+        return false;
+    }
+    preset_ = std::move(candidate);
+    static_cast<void>(layout_.Remove(std::string(instance_id)));
+    if (dragging_instance_id_ == instance_id) {
+        dragging_instance_id_.clear();
+    }
+    dirty_ = true;
+    SetFileStatus("Unsaved changes");
+    RebuildScene();
+    return true;
+}
+
+bool RigEditorViewModel::DuplicateNode(std::string_view source_instance_id, std::string_view new_instance_id) {
+    const auto source = std::ranges::find_if(preset_.nodes, [source_instance_id](const auto& node) {
+        return node.instance_id == source_instance_id;
+    });
+    if (source == preset_.nodes.end() || new_instance_id.empty() ||
+        std::ranges::any_of(preset_.nodes, [new_instance_id](const auto& node) { return node.instance_id == new_instance_id; })) {
+        SetFileStatus("Edit failed: source node or new instance ID is invalid.");
+        return false;
+    }
+    auto candidate = preset_;
+    auto copy = *source;
+    copy.instance_id = std::string(new_instance_id);
+    copy.layout_x += GridSize() * 2.0;
+    candidate.nodes.push_back(copy);
+    if (!ValidatePreset(candidate).empty() || HasInvalidTopology(candidate)) {
+        SetFileStatus("Edit failed: candidate preset validation rejected node duplication.");
+        return false;
+    }
+    preset_ = std::move(candidate);
+    static_cast<void>(layout_.Add(copy.instance_id, {.x = copy.layout_x, .y = copy.layout_y}));
+    dirty_ = true;
+    SetFileStatus("Unsaved changes");
+    RebuildScene();
+    return true;
+}
+
+bool RigEditorViewModel::ConnectNodes(std::string_view source_instance_id, std::string_view destination_instance_id) {
+    if (source_instance_id.empty() || destination_instance_id.empty() || source_instance_id == destination_instance_id ||
+        !std::ranges::any_of(preset_.nodes, [source_instance_id](const auto& node) { return node.instance_id == source_instance_id; }) ||
+        !std::ranges::any_of(preset_.nodes, [destination_instance_id](const auto& node) { return node.instance_id == destination_instance_id; }) ||
+        HasConnection(preset_, source_instance_id, destination_instance_id)) {
+        SetFileStatus("Connection failed: endpoints are invalid or already connected.");
+        return false;
+    }
+    auto candidate = preset_;
+    candidate.connections.push_back({.source_instance_id = std::string(source_instance_id),
+                                      .destination_instance_id = std::string(destination_instance_id)});
+    if (!ValidatePreset(candidate).empty() || HasInvalidTopology(candidate)) {
+        SetFileStatus("Connection failed: cyclic or invalid topology.");
+        return false;
+    }
+    preset_ = std::move(candidate);
+    dirty_ = true;
+    SetFileStatus("Unsaved changes");
+    RebuildScene();
+    return true;
+}
+
+bool RigEditorViewModel::DisconnectNodes(std::string_view source_instance_id, std::string_view destination_instance_id) {
+    if (!HasConnection(preset_, source_instance_id, destination_instance_id)) {
+        SetFileStatus("Connection failed: connection was not found.");
+        return false;
+    }
+    auto candidate = preset_;
+    std::erase_if(candidate.connections, [source_instance_id, destination_instance_id](const auto& connection) {
+        return connection.source_instance_id == source_instance_id && connection.destination_instance_id == destination_instance_id;
+    });
+    if (!ValidatePreset(candidate).empty() || HasInvalidTopology(candidate)) {
+        SetFileStatus("Connection failed: candidate topology is invalid.");
+        return false;
+    }
+    preset_ = std::move(candidate);
+    dirty_ = true;
+    SetFileStatus("Unsaved changes");
+    RebuildScene();
+    return true;
+}
+
+EditorFileResult RigEditorViewModel::ImportResource(const std::filesystem::path& source) {
+    std::string extension = source.extension().string();
+    std::ranges::transform(extension, extension.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    std::string label;
+    if (extension == ".nam") {
+        label = "NAM";
+    } else if (extension == ".nam-a2") {
+        label = "NAM A2";
+    } else if (extension == ".ir" || extension == ".wav") {
+        label = "IR";
+    } else if (extension == ".json") {
+        label = "external circuit";
+    } else {
+        SetFileStatus("Resource import failed: unsupported resource type.");
+        return {.success = false, .error = EditorFileError::InvalidExtension, .message = file_status_};
+    }
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(source, error) || error) {
+        SetFileStatus("Resource import failed: file cannot be read.");
+        return {.success = false, .error = EditorFileError::CannotRead, .message = file_status_};
+    }
+    resource_status_ = "Imported " + label + ": " + source.filename().string();
+    dirty_ = true;
+    SetFileStatus("Unsaved changes");
+    RebuildScene();
+    return {.success = true, .message = resource_status_};
+}
+
 void RigEditorViewModel::SetViewport(double width, double height, double dpi_scale) {
     viewport_width_ = std::max(width, 1.0);
     viewport_height_ = std::max(height, 1.0);
@@ -381,6 +575,14 @@ void RigEditorViewModel::RebuildScene() {
     scene_.audio_status = "ASIO backend not configured/available";
     scene_.file_status = file_status_;
     scene_.source_path = source_path_.has_value() ? source_path_->string() : std::string{};
+    scene_.resource_status = resource_status_;
+    scene_.performance = {};
+    for (const auto& node : preset_.nodes) {
+        if (const auto* entry = CatalogEntry(node.module_id); entry != nullptr) {
+            scene_.performance.total_latency_samples += entry->latency_samples;
+            scene_.performance.estimated_cpu_percent += entry->estimated_cpu_percent;
+        }
+    }
     scene_.dirty = dirty_;
     scene_.nodes.clear();
     scene_.connections.clear();

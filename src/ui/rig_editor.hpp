@@ -5,9 +5,11 @@
 #include "ui/pedal_layout.hpp"
 
 #include <filesystem>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace solo_rig {
@@ -54,6 +56,21 @@ struct RigEditorConnection {
     EditorPoint destination;
 };
 
+struct ModuleCatalogEntry {
+    std::string module_id;
+    std::string display_name;
+    std::string category;
+    std::string description;
+    std::vector<std::pair<std::string, float>> default_parameters;
+    uint32_t latency_samples{};
+    double estimated_cpu_percent{};
+};
+
+struct RigEditorPerformance {
+    uint32_t total_latency_samples{};
+    double estimated_cpu_percent{};
+};
+
 struct RigEditorScene {
     double viewport_width{};
     double viewport_height{};
@@ -65,6 +82,8 @@ struct RigEditorScene {
     std::string audio_status;
     std::string file_status;
     std::string source_path;
+    std::string resource_status;
+    RigEditorPerformance performance;
     bool dirty{};
 };
 
@@ -90,6 +109,7 @@ public:
 
     [[nodiscard]] static RigPreset DefaultEditorPreset();
     void SetPreset(RigPreset preset);
+    void NewPreset();
     [[nodiscard]] RigPreset ExportPreset() const;
     [[nodiscard]] EditorFileResult SaveTo(const std::filesystem::path& destination);
     [[nodiscard]] EditorFileResult LoadFrom(const std::filesystem::path& source);
@@ -110,6 +130,15 @@ public:
     void SetTheme(ThemeDefinition theme, bool mark_dirty = true);
     [[nodiscard]] bool IsDarkTheme() const noexcept;
     [[nodiscard]] bool LoadSkinFile(const std::filesystem::path& source);
+
+    [[nodiscard]] static std::vector<ModuleCatalogEntry> ModuleCatalog();
+    [[nodiscard]] bool AddNode(std::string_view module_id, std::string_view instance_id,
+                               double layout_x, double layout_y);
+    [[nodiscard]] bool DeleteNode(std::string_view instance_id);
+    [[nodiscard]] bool DuplicateNode(std::string_view source_instance_id, std::string_view new_instance_id);
+    [[nodiscard]] bool ConnectNodes(std::string_view source_instance_id, std::string_view destination_instance_id);
+    [[nodiscard]] bool DisconnectNodes(std::string_view source_instance_id, std::string_view destination_instance_id);
+    [[nodiscard]] EditorFileResult ImportResource(const std::filesystem::path& source);
 
     void SetViewport(double width, double height, double dpi_scale);
     [[nodiscard]] const RigEditorScene& Scene() const noexcept;
@@ -147,6 +176,7 @@ private:
     std::optional<std::filesystem::path> source_path_;
     bool dirty_{};
     std::string file_status_;
+    std::string resource_status_{"No external resource imported"};
     std::vector<std::string> unresolved_nodes_;
     RigEditorScene scene_;
 };

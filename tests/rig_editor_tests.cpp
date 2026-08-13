@@ -6,6 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 #include <string>
 
 namespace {
@@ -265,4 +266,57 @@ TEST_CASE("RigEditor loads missing modules as visible placeholder nodes with a w
     REQUIRE(editor.Scene().nodes.front().diagnostic == "Missing module asset");
     REQUIRE(editor.FileStatus().find("placeholders") != std::string_view::npos);
     std::filesystem::remove(path, cleanup_error);
+}
+
+TEST_CASE("RigEditor exposes a catalog and transactional node editing") {
+    const auto catalog = solo_rig::RigEditorViewModel::ModuleCatalog();
+    REQUIRE(catalog.size() >= 2U);
+    REQUIRE(std::ranges::any_of(catalog, [](const auto& entry) {
+        return entry.module_id == "org.mumu-dada.solorig.drive";
+    }));
+    solo_rig::RigEditorViewModel editor;
+    const auto before = editor.ExportPreset();
+    REQUIRE(editor.AddNode("org.mumu-dada.solorig.drive", "drive-2", 600.0, 160.0));
+    REQUIRE(editor.ExportPreset().nodes.size() == before.nodes.size() + 1U);
+    REQUIRE(editor.ExportPreset().nodes.back().parameter_values.at("drive") == 4.0F);
+    const auto after_add = editor.ExportPreset();
+    REQUIRE(!editor.AddNode("unknown.module", "bad", 0.0, 0.0));
+    REQUIRE(!editor.AddNode("org.mumu-dada.solorig.drive", "drive-2", 0.0, 0.0));
+    REQUIRE(editor.ExportPreset().nodes.size() == after_add.nodes.size());
+    REQUIRE(editor.DuplicateNode("drive-2", "drive-3"));
+    REQUIRE(editor.DeleteNode("drive-3"));
+    REQUIRE(!editor.DeleteNode("missing"));
+    REQUIRE(editor.ExportPreset().nodes.size() == after_add.nodes.size());
+}
+
+TEST_CASE("RigEditor connection edits validate topology and preserve state on failure") {
+    solo_rig::RigEditorViewModel editor;
+    REQUIRE(editor.AddNode("org.mumu-dada.solorig.drive", "parallel-1", 600.0, 320.0));
+    const auto before = editor.ExportPreset();
+    REQUIRE(editor.ConnectNodes("drive-1", "parallel-1"));
+    REQUIRE(editor.ExportPreset().connections.size() == before.connections.size() + 1U);
+    const auto connected = editor.ExportPreset();
+    REQUIRE(!editor.ConnectNodes("drive-1", "parallel-1"));
+    REQUIRE(!editor.ConnectNodes("parallel-1", "missing"));
+    REQUIRE(!editor.ConnectNodes("parallel-1", "drive-1"));
+    REQUIRE(editor.ExportPreset().connections.size() == connected.connections.size());
+    REQUIRE(editor.DisconnectNodes("drive-1", "parallel-1"));
+    REQUIRE(!editor.DisconnectNodes("drive-1", "parallel-1"));
+}
+
+TEST_CASE("RigEditor exposes deterministic performance and explicit resource recognition") {
+    solo_rig::RigEditorViewModel editor;
+    REQUIRE(editor.Scene().performance.total_latency_samples > 0U);
+    REQUIRE(editor.Scene().performance.estimated_cpu_percent > 0.0);
+    const auto before = editor.Scene().resource_status;
+    const auto missing = editor.ImportResource(std::filesystem::temp_directory_path() / "missing.nam");
+    REQUIRE(!missing.success);
+    REQUIRE(editor.Scene().resource_status == before);
+    const auto path = std::filesystem::temp_directory_path() / "solorig-test-model.nam";
+    { std::ofstream output(path, std::ios::binary | std::ios::trunc); output << "model"; }
+    const auto imported = editor.ImportResource(path);
+    REQUIRE(imported.success);
+    REQUIRE(editor.Scene().resource_status.find("NAM") != std::string::npos);
+    std::error_code cleanup;
+    std::filesystem::remove(path, cleanup);
 }
