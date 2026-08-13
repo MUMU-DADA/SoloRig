@@ -1,6 +1,7 @@
 #pragma once
 
 #include "content/whitebox_compiler.hpp"
+#include "content/wdf_runtime.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -55,8 +56,17 @@ struct WhiteboxRuntimePrepareResult;
 
 class WhiteboxRuntime final {
 public:
+    WhiteboxRuntime() noexcept;
+    WhiteboxRuntime(WhiteboxRuntime&&) noexcept = default;
+    WhiteboxRuntime& operator=(WhiteboxRuntime&&) noexcept = default;
+    WhiteboxRuntime(const WhiteboxRuntime&) = delete;
+    WhiteboxRuntime& operator=(const WhiteboxRuntime&) = delete;
     [[nodiscard]] WhiteboxRuntimeError Process(double input, double& output) noexcept;
     [[nodiscard]] WhiteboxRuntimeError SolveDc(double input, double& output) noexcept;
+    // The control thread may update the prepared runtime rate between audio
+    // runs; this only changes already allocated state and never parses or
+    // allocates. The caller must not race an active Process call.
+    [[nodiscard]] bool SetSampleRate(double sample_rate_hz) noexcept;
     void Reset() noexcept;
     [[nodiscard]] bool IsPrepared() const noexcept { return prepared_; }
     [[nodiscard]] WhiteboxRuntimeBackend Backend() const noexcept { return backend_; }
@@ -84,6 +94,13 @@ private:
         double initial{};
     };
 
+    enum class WdfNetworkKind {
+        SeriesGrounded,
+        SeriesOpen,
+        ParallelDriven,
+        ParallelFloating,
+    };
+
     std::vector<Element> elements_;
     std::vector<double> capacitor_history_;
     std::vector<double> inductor_history_;
@@ -91,6 +108,13 @@ private:
     std::vector<double> rhs_;
     std::vector<double> solution_;
     std::vector<double> previous_;
+    std::vector<WdfOnePort> wdf_ports_;
+    std::optional<WdfAdaptor> wdf_adaptor_;
+    std::vector<double> wdf_incident_;
+    std::vector<double> wdf_reflected_;
+    std::vector<double> wdf_resistances_;
+    std::size_t wdf_output_position_{};
+    WdfNetworkKind wdf_network_kind_{WdfNetworkKind::SeriesOpen};
     std::int32_t input_node_{-1};
     std::int32_t output_node_{-1};
     std::uint32_t input_branch_{UINT32_MAX};

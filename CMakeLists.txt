@@ -68,6 +68,7 @@ add_library(solo_rig_core STATIC
     src/content/topology_decomposition.cpp
     src/content/behavior_lowering.cpp
     src/content/evidence_chain.cpp
+    src/content/wdf_runtime.cpp
     src/content/module_package.cpp
     src/content/module_runtime.cpp
     src/content/preset.cpp
@@ -217,6 +218,7 @@ if(BUILD_TESTING)
         tests/audio_graph_tests.cpp
         tests/realtime_load_meter_tests.cpp
         tests/realtime_contract_tests.cpp
+        tests/wdf_runtime_tests.cpp
         tests/diode_clipper_tests.cpp
         tests/digital_delay_tests.cpp
         tests/impulse_response_tests.cpp

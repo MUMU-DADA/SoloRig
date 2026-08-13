@@ -36,7 +36,7 @@ solo_rig::WhiteboxCompiledGraph Compile(std::string_view fixture) {
 TEST_CASE("M13 generic MNA runtime solves a divider and resets deterministically") {
     const auto graph = Compile("m13_linear_divider.json");
     solo_rig::WhiteboxRuntimeOptions options;
-    const auto prepared = solo_rig::PrepareWhiteboxRuntime(graph, options);
+    auto prepared = solo_rig::PrepareWhiteboxRuntime(graph, options);
     REQUIRE(prepared.error == std::nullopt);
     REQUIRE(prepared.runtime.has_value());
     auto runtime = std::move(*prepared.runtime);
@@ -55,7 +55,7 @@ TEST_CASE("M13 capacitor state, oversampling and option errors are explicit") {
     const auto graph = Compile("m13_linear_dynamic.json");
     solo_rig::WhiteboxRuntimeOptions options;
     options.oversampling = 4;
-    const auto prepared = solo_rig::PrepareWhiteboxRuntime(graph, options);
+    auto prepared = solo_rig::PrepareWhiteboxRuntime(graph, options);
     REQUIRE(prepared.error == std::nullopt);
     REQUIRE(prepared.runtime.has_value());
     auto runtime = std::move(*prepared.runtime);
@@ -70,7 +70,7 @@ TEST_CASE("M13 capacitor state, oversampling and option errors are explicit") {
     REQUIRE(invalid.error == solo_rig::WhiteboxRuntimeError::InvalidOptions);
 }
 
-TEST_CASE("M13 WDF planning exposes adaptors but runtime rejects unimplemented backend") {
+TEST_CASE("M13 WDF planning exposes adaptors and rejects unsupported graph components") {
     const auto graph = Compile("m13_wdf_plan.json");
     const auto plan = solo_rig::BuildWhiteboxWdfPlan(graph);
     REQUIRE(plan.has_value());
@@ -80,8 +80,9 @@ TEST_CASE("M13 WDF planning exposes adaptors but runtime rejects unimplemented b
     REQUIRE(plan->adaptors[1] == solo_rig::WhiteboxWdfAdaptorKind::RType);
     solo_rig::WhiteboxRuntimeOptions options;
     options.backend = solo_rig::WhiteboxRuntimeBackend::Wdf;
-    const auto prepared = solo_rig::PrepareWhiteboxRuntime(graph, options);
-    REQUIRE(prepared.error == solo_rig::WhiteboxRuntimeError::UnsupportedBackend);
+    auto prepared = solo_rig::PrepareWhiteboxRuntime(graph, options);
+    REQUIRE(prepared.error == std::nullopt);
+    REQUIRE(prepared.runtime.has_value());
 
     const auto parallel = Compile("m12_parallel.json");
     const auto parallel_plan = solo_rig::BuildWhiteboxWdfPlan(parallel);
@@ -90,6 +91,8 @@ TEST_CASE("M13 WDF planning exposes adaptors but runtime rejects unimplemented b
     REQUIRE(parallel_plan->adaptors.size() == 2U);
     REQUIRE(parallel_plan->adaptors[0] == solo_rig::WhiteboxWdfAdaptorKind::Parallel);
     REQUIRE(parallel_plan->adaptors[1] == solo_rig::WhiteboxWdfAdaptorKind::RType);
+    const auto unsupported = solo_rig::PrepareWhiteboxRuntime(parallel, options);
+    REQUIRE(unsupported.error == solo_rig::WhiteboxRuntimeError::InvalidValue);
 }
 
 TEST_CASE("M13 nonlinear group has bounded Newton and stable nonconvergence") {
