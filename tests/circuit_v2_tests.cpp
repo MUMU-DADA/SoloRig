@@ -864,6 +864,96 @@ TEST_CASE("M18-C1 prepared nonlinear Solve is a noexcept preallocated boundary")
     }
 }
 
+TEST_CASE("M18-C2 BJT inline compatibility and audit references reach prepared Solve") {
+    const auto inline_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c2_bjt_inline_npn.json"));
+    REQUIRE(inline_graph.circuit.has_value());
+    auto inline_compiled = solo_rig::CompileMnaCircuit(*inline_graph.circuit);
+    REQUIRE(inline_compiled.circuit.has_value());
+    REQUIRE(inline_compiled.circuit->Prepare(192000.0));
+    REQUIRE(inline_compiled.circuit->Solve(0.7).Succeeded());
+    const auto reference_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c2_bjt_reference_npn.json"));
+    REQUIRE(reference_graph.circuit.has_value());
+    const auto no_database = solo_rig::CompileMnaCircuit(*reference_graph.circuit);
+    REQUIRE(no_database.error == solo_rig::MnaCompileError::MissingModelAuthorization);
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c2_cleanroom_npn_model.json"));
+    REQUIRE(database.database.has_value());
+    auto referenced = solo_rig::CompileMnaCircuit(*reference_graph.circuit, *database.database);
+    REQUIRE(referenced.circuit.has_value());
+    REQUIRE(referenced.circuit->Prepare(192000.0));
+    REQUIRE(referenced.circuit->Solve(0.7).Succeeded());
+
+    const auto unknown_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c2_unknown_bjt_reference.json"));
+    REQUIRE(unknown_graph.circuit.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*unknown_graph.circuit, *database.database).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+
+    const auto pnp_database = solo_rig::BuildModelDatabase(ReadFixture("m18c2_cleanroom_pnp_model.json"));
+    const auto pnp_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c2_bjt_reference_pnp.json"));
+    REQUIRE(pnp_database.database.has_value());
+    REQUIRE(pnp_graph.circuit.has_value());
+    auto pnp = solo_rig::CompileMnaCircuit(*pnp_graph.circuit, *pnp_database.database);
+    REQUIRE(pnp.circuit.has_value());
+    REQUIRE(pnp.circuit->Prepare(192000.0));
+    REQUIRE(pnp.circuit->Solve(-0.7).Succeeded());
+}
+
+TEST_CASE("M18-C2 dynamic audited BJT matches an independent backward-Euler reference and Reset") {
+    const auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c2_dynamic_reference_npn.json"));
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c2_cleanroom_npn_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(48000.0));
+
+    const auto run_sequence = [&](solo_rig::MnaPreparedCircuit& circuit) {
+        double history = 5.0;
+        for (const double base : {0.0, 0.45, 0.60, 0.70, 0.55, 0.20}) {
+            double reference = history;
+            for (std::uint32_t iteration = 0; iteration < 128U; ++iteration) {
+                const auto forward = 1.0e-15 * (std::exp(base / 0.02585) - 1.0);
+                const auto reverse_exp = std::exp((base - reference) / 0.02585);
+                const auto reverse = 1.0e-15 * (reverse_exp - 1.0);
+                const auto collector_current = (100.0 / 101.0) * forward - reverse;
+                const auto collector_jacobian = 1.0e-15 / 0.02585 * reverse_exp;
+                const auto residual = (reference - 5.0) / 1000.0 +
+                    1.0e-6 * 48000.0 * (reference - history) + collector_current;
+                const auto next = reference - residual / (1.0 / 1000.0 + 1.0e-6 * 48000.0 + collector_jacobian);
+                if (std::fabs(next - reference) < 1.0e-13) {
+                    reference = next;
+                    break;
+                }
+                reference = next;
+            }
+            const auto solved = circuit.Solve(base);
+            REQUIRE(solved.Succeeded());
+            REQUIRE(std::fabs(solved.output_voltage - reference) < 1.0e-8);
+            history = reference;
+        }
+        return history;
+    };
+    const auto first = run_sequence(*compiled.circuit);
+    compiled.circuit->Reset();
+    REQUIRE(std::fabs(run_sequence(*compiled.circuit) - first) < 1.0e-10);
+}
+
+TEST_CASE("M18-C2 audited BJT remains deterministic at 192 kHz with four-times oversampling") {
+    auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c2_bjt_reference_npn.json"));
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c2_cleanroom_npn_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    graph.circuit->solver.oversampling = 4U;
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(192000.0));
+    constexpr auto contract = solo_rig::MnaPreparedCircuit::ProcessContract();
+    static_assert(!contract.process_allocates && !contract.process_locks &&
+                  !contract.process_reads_files && !contract.process_parses_json);
+    for (std::uint32_t sample = 0; sample < 1024U; ++sample) {
+        REQUIRE(compiled.circuit->Solve(sample % 2U == 0U ? 0.4 : 0.7).Succeeded());
+    }
+}
+
 TEST_CASE("M18-C1 MNA solves forward conduction reverse breakdown and zero bias") {
     auto diode_compiled = solo_rig::CompileMnaCircuit(
         *solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_diode_forward.json")).circuit);

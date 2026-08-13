@@ -64,12 +64,53 @@ std::optional<ModelLicenseReviewStatus> ParseReviewStatus(std::string_view value
 
 bool IsApprovedKind(ModelKind kind) {
     return kind == ModelKind::Diode || kind == ModelKind::Zener ||
+           kind == ModelKind::Bjt ||
            kind == ModelKind::TestMathematical;
 }
 
-bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
-    if (model.kind != ModelKind::Diode && model.kind != ModelKind::Zener) {
+bool HasBjtParameterContract(const ModelAuditRecord& model) {
+    if (model.kind != ModelKind::Bjt) {
         return true;
+    }
+    struct RequiredParameter {
+        std::string_view id;
+        std::string_view unit;
+        double minimum;
+        double maximum;
+    };
+    constexpr RequiredParameter required[] = {
+        {"saturation-current", "A", 1.0e-30, 1.0e-3},
+        {"forward-beta", "1", 0.01, 1.0e6},
+        {"reverse-beta", "1", 0.01, 1.0e6},
+        {"thermal-voltage", "V", 1.0e-6, 1.0},
+        {"max-current", "A", 1.0e-12, 1.0e6},
+        {"max-step", "V", 1.0e-20, 10.0}};
+    if (model.parameters.size() != std::size(required)) {
+        return false;
+    }
+    return std::all_of(std::begin(required), std::end(required), [&model](const auto& expected) {
+        return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
+            return parameter.id == expected.id && parameter.unit == expected.unit &&
+                   std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
+                   parameter.default_value <= expected.maximum && std::isfinite(parameter.minimum) &&
+                   std::isfinite(parameter.maximum) && parameter.minimum >= expected.minimum &&
+                   parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
+                   parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
+        }) == 1;
+    });
+}
+
+bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
+    if (model.kind != ModelKind::Diode && model.kind != ModelKind::Zener && model.kind != ModelKind::Bjt) {
+        return true;
+    }
+    if (model.kind == ModelKind::Bjt) {
+        if (!model.polarity.has_value() || (*model.polarity != "npn" && *model.polarity != "pnp")) {
+            return false;
+        }
+        return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
+               model.license.permission_evidence == "self-authored-clean-room" &&
+               model.part_number == "self-authored-" + *model.polarity + "-no-commercial-part";
     }
     return model.part_number.find("no-commercial-part") != std::string::npos &&
            model.source.origin.find("self-authored clean-room") != std::string::npos &&
@@ -100,7 +141,7 @@ std::vector<ModelKindContract> ModelKindContracts() {
     return {
         {ModelKind::Diode, ModelAvailability::Approved},
         {ModelKind::Zener, ModelAvailability::Approved},
-        {ModelKind::Bjt, ModelAvailability::Blocked},
+        {ModelKind::Bjt, ModelAvailability::Approved},
         {ModelKind::Jfet, ModelAvailability::Blocked},
         {ModelKind::Mosfet, ModelAvailability::Blocked},
         {ModelKind::Opamp, ModelAvailability::Blocked},
@@ -150,6 +191,13 @@ ModelAuditParseResult ParseModelAuditJson(std::string_view source) {
                             .part_number = *part,
                             .kind = *kind,
                             .availability = *availability};
+    if (*kind == ModelKind::Bjt) {
+        const auto polarity = StringValue(Find(object, "polarity"));
+        if (!polarity.has_value() || (*polarity != "npn" && *polarity != "pnp")) {
+            return {.model = std::nullopt, .error = ModelAuditError::InvalidField};
+        }
+        record.polarity = *polarity;
+    }
 
     const auto* parameters_value = Find(object, "parameters");
     const auto* parameters = parameters_value == nullptr ? nullptr : parameters_value->AsArray();
@@ -263,7 +311,8 @@ std::optional<ModelAuditError> ModelDatabase::Register(ModelAuditRecord model) {
     if (model.license.review_status != ModelLicenseReviewStatus::Approved) {
         return ModelAuditError::MissingModelAuthorization;
     }
-    if (!IsAuthorizedCleanRoomDevice(model)) {
+    if (!IsAuthorizedCleanRoomDevice(model) ||
+        (model.kind == ModelKind::Bjt && (!model.polarity.has_value() || !HasBjtParameterContract(model)))) {
         return ModelAuditError::MissingModelAuthorization;
     }
     if (model.availability != ModelAvailability::Approved || !IsApprovedKind(model.kind)) {
@@ -308,6 +357,9 @@ ModelLookupResult ModelDatabase::Bind(const ModelBinding& binding) const {
         return result;
     }
     if (result.model->kind != binding.expected_kind) {
+        return {.model = std::nullopt, .error = ModelAuditError::ModelKindMismatch};
+    }
+    if (binding.expected_polarity.has_value() && result.model->polarity != binding.expected_polarity) {
         return {.model = std::nullopt, .error = ModelAuditError::ModelKindMismatch};
     }
     return result;

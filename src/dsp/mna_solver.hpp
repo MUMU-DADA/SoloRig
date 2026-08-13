@@ -71,13 +71,7 @@ public:
         double controlled_minimum{};
         double controlled_maximum{};
         bool controlled_has_limits{};
-        int bjt_polarity{1};
-        double bjt_saturation_current{};
-        double bjt_forward_beta{};
-        double bjt_reverse_beta{};
-        double bjt_thermal_voltage{};
-        double bjt_max_current{};
-        double bjt_max_step{};
+        NonlinearBjtModel nonlinear_bjt_model{};
     };
 
 private:

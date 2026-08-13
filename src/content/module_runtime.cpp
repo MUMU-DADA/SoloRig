@@ -451,8 +451,10 @@ std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> Create
 
 std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateMnaRuntime(
     const ModulePackage& package,
-    const CircuitNetlist& circuit) {
-    const auto compiled = CompileMnaCircuit(circuit);
+    const CircuitNetlist& circuit,
+    const ModelDatabase* model_database = nullptr) {
+    const auto compiled = model_database == nullptr
+        ? CompileMnaCircuit(circuit) : CompileMnaCircuit(circuit, *model_database);
     if (!compiled.circuit.has_value()) {
         return compiled.error == MnaCompileError::UnsupportedComponent ? ModuleRuntimeError::UnsupportedCircuit
                                                                         : ModuleRuntimeError::UnsupportedAnalogTopology;
@@ -477,6 +479,16 @@ std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> Create
                                                                              : ModuleRuntimeError::LogicCategoryMismatch;
     }
     return package.logic.index() == 0U ? ModuleRuntimeError::MissingLogic : ModuleRuntimeError::UnsupportedCategory;
+}
+
+std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateModuleRuntime(
+    const ModulePackage& package, const ModelDatabase& model_database) {
+    if (const auto* circuit = std::get_if<CircuitNetlist>(&package.logic)) {
+        return package.descriptor.category == EffectCategory::AnalogCircuit
+            ? CreateMnaRuntime(package, *circuit, &model_database)
+            : ModuleRuntimeError::LogicCategoryMismatch;
+    }
+    return CreateModuleRuntime(package);
 }
 
 } // namespace solo_rig

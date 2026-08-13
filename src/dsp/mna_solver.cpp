@@ -172,67 +172,27 @@ void StampBjt(std::vector<double>& matrix,
               std::uint32_t size,
               const MnaPreparedCircuit::Element& element,
               const std::vector<double>& guess) noexcept {
-    // Bounded Ebers-Moll companion model. The two junction exponentials are
-    // clamped to [-60, 60] and their currents are hard-limited at Prepare-time
-    // values; all arrays below are fixed-size so this stamp is allocation-free.
     const auto collector = element.positive_node >= 0 ? guess[static_cast<std::size_t>(element.positive_node)] : 0.0;
     const auto base = element.bjt_base_node >= 0 ? guess[static_cast<std::size_t>(element.bjt_base_node)] : 0.0;
     const auto emitter = element.negative_node >= 0 ? guess[static_cast<std::size_t>(element.negative_node)] : 0.0;
-    const auto polarity = static_cast<double>(element.bjt_polarity);
-    const auto base_emitter = polarity * (base - emitter);
-    const auto base_collector = polarity * (base - collector);
-    const auto forward_exponent = std::clamp(base_emitter / element.bjt_thermal_voltage, -60.0, 60.0);
-    const auto reverse_exponent = std::clamp(base_collector / element.bjt_thermal_voltage, -60.0, 60.0);
-    const auto forward_exponential = std::exp(forward_exponent);
-    const auto reverse_exponential = std::exp(reverse_exponent);
-    auto forward_current = element.bjt_saturation_current * (forward_exponential - 1.0);
-    auto reverse_current = element.bjt_saturation_current * (reverse_exponential - 1.0);
-    auto forward_conductance = element.bjt_saturation_current / element.bjt_thermal_voltage * forward_exponential;
-    auto reverse_conductance = element.bjt_saturation_current / element.bjt_thermal_voltage * reverse_exponential;
-    if (forward_current > element.bjt_max_current) {
-        forward_current = element.bjt_max_current;
-        forward_conductance = 0.0;
-    } else if (forward_current < -element.bjt_max_current) {
-        forward_current = -element.bjt_max_current;
-        forward_conductance = 0.0;
+    const auto evaluation = EvaluateNonlinearBjt(element.nonlinear_bjt_model, collector, base, emitter);
+    if (!evaluation.Succeeded()) {
+        StampConductance(matrix, size, element.positive_node, element.negative_node,
+                         std::numeric_limits<double>::quiet_NaN());
+        return;
     }
-    if (reverse_current > element.bjt_max_current) {
-        reverse_current = element.bjt_max_current;
-        reverse_conductance = 0.0;
-    } else if (reverse_current < -element.bjt_max_current) {
-        reverse_current = -element.bjt_max_current;
-        reverse_conductance = 0.0;
-    }
-    const auto forward_alpha = element.bjt_forward_beta / (element.bjt_forward_beta + 1.0);
-    const auto reverse_alpha = element.bjt_reverse_beta / (element.bjt_reverse_beta + 1.0);
-    const auto collector_current = polarity * (forward_alpha * forward_current - reverse_current);
-    const auto emitter_current = polarity * (-forward_current + reverse_alpha * reverse_current);
-    const auto base_current = polarity * ((1.0 - forward_alpha) * forward_current +
-                                           (1.0 - reverse_alpha) * reverse_current);
-    const double currents[3] = {collector_current, base_current, emitter_current};
-    const double jacobian[3][3] = {
-        {reverse_conductance,
-         forward_alpha * forward_conductance - reverse_conductance,
-         -forward_alpha * forward_conductance},
-        {-(1.0 - reverse_alpha) * reverse_conductance,
-         (1.0 - forward_alpha) * forward_conductance + (1.0 - reverse_alpha) * reverse_conductance,
-         -(1.0 - forward_alpha) * forward_conductance},
-        {-reverse_alpha * reverse_conductance,
-         -forward_conductance + reverse_alpha * reverse_conductance,
-         forward_conductance},
-    };
     const std::int32_t nodes[3] = {element.positive_node, element.bjt_base_node, element.negative_node};
     const double voltages[3] = {collector, base, emitter};
     for (std::size_t row = 0; row < 3U; ++row) {
         if (nodes[row] < 0) {
             continue;
         }
-        double equivalent_current = currents[row];
+        double equivalent_current = evaluation.currents[row];
         for (std::size_t column = 0; column < 3U; ++column) {
-            equivalent_current -= jacobian[row][column] * voltages[column];
+            equivalent_current -= evaluation.jacobian[row][column] * voltages[column];
             if (nodes[column] >= 0) {
                 matrix[static_cast<std::size_t>(nodes[row]) * size + static_cast<std::size_t>(nodes[column])] +=
-                    jacobian[row][column];
+                    evaluation.jacobian[row][column];
             }
         }
         rhs[static_cast<std::size_t>(nodes[row])] -= equivalent_current;
@@ -444,7 +404,7 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     }
                 }
                 if (element.type == CircuitComponentType::Bjt) {
-                    const auto polarity = static_cast<double>(element.bjt_polarity);
+                    const auto polarity = element.nonlinear_bjt_model.polarity == BjtPolarity::Npn ? 1.0 : -1.0;
                     const auto old_collector = element.positive_node >= 0 ? newton_previous_[element.positive_node] : 0.0;
                     const auto old_base = element.bjt_base_node >= 0 ? newton_previous_[element.bjt_base_node] : 0.0;
                     const auto old_emitter = element.negative_node >= 0 ? newton_previous_[element.negative_node] : 0.0;
@@ -457,11 +417,12 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     const auto new_bc = polarity * (new_base - new_collector);
                     const auto be_delta = std::fabs(new_be - old_be);
                     const auto bc_delta = std::fabs(new_bc - old_bc);
-                    if (be_delta > element.bjt_max_step || bc_delta > element.bjt_max_step) {
+                    if (be_delta > element.nonlinear_bjt_model.max_step ||
+                        bc_delta > element.nonlinear_bjt_model.max_step) {
                         const auto largest_junction_step = std::max(be_delta, bc_delta);
                         if (largest_junction_step > 0.0 && std::isfinite(largest_junction_step)) {
                             nonlinear_step_scale = std::min(
-                                nonlinear_step_scale, element.bjt_max_step / largest_junction_step);
+                                nonlinear_step_scale, element.nonlinear_bjt_model.max_step / largest_junction_step);
                         }
                     }
                 }
@@ -559,11 +520,14 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
         }
         if (component.type == CircuitComponentType::Bjt) {
-            if (component.pins.size() != 3U || !component.bjt_model.has_value() || component.value.has_value() ||
-                component.tolerance.has_value() || component.model.has_value() || component.diode_model.has_value() ||
+            if (component.pins.size() != 3U || (!component.bjt_model.has_value() && !component.model.has_value()) || component.value.has_value() ||
+                component.tolerance.has_value() || component.diode_model.has_value() ||
                 component.potentiometer.has_value() || component.controlled_source.has_value() ||
                 component.switch_spec.has_value()) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            if (component.model.has_value() && !component.bjt_model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
             }
             const auto& bjt = *component.bjt_model;
             if (bjt.kind != "ebers-moll" || bjt.model_version != 1U ||
@@ -690,13 +654,17 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                                 .controlled_minimum = 0.0,
                                                 .controlled_maximum = 0.0,
                                                 .controlled_has_limits = false,
-                                                .bjt_polarity = bjt.polarity == "npn" ? 1 : -1,
-                                                .bjt_saturation_current = bjt.saturation_current,
-                                                .bjt_forward_beta = bjt.forward_beta,
-                                                .bjt_reverse_beta = bjt.reverse_beta,
-                                                .bjt_thermal_voltage = bjt.thermal_voltage,
-                                                .bjt_max_current = bjt.max_current,
-                                                .bjt_max_step = bjt.max_step};
+                                                .nonlinear_bjt_model = {
+                                                    .polarity = bjt.polarity == "npn" ? BjtPolarity::Npn : BjtPolarity::Pnp,
+                                                    .saturation_current = bjt.saturation_current,
+                                                    .forward_beta = bjt.forward_beta,
+                                                    .reverse_beta = bjt.reverse_beta,
+                                                    .thermal_voltage = bjt.thermal_voltage,
+                                                    .max_current = bjt.max_current,
+                                                    .max_step = bjt.max_step}};
+            if (!ValidateNonlinearBjtModel(element.nonlinear_bjt_model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
             prepared.elements_.push_back(element);
             continue;
         }
@@ -841,11 +809,40 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
 MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDatabase& model_database) {
     CircuitNetlist bound = circuit;
     for (auto& component : bound.components) {
-        if (component.type != CircuitComponentType::Diode || component.diode_model.has_value()) {
+        if (component.type != CircuitComponentType::Diode && component.type != CircuitComponentType::Bjt) {
             continue;
         }
         if (!component.model.has_value()) {
+            if (component.type == CircuitComponentType::Bjt && component.bjt_model.has_value()) {
+                continue;
+            }
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+        }
+        if (component.type == CircuitComponentType::Bjt) {
+            const auto result = model_database.Bind({*component.model, ModelKind::Bjt});
+            if (!result.model.has_value() || !result.model->polarity.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& record = *result.model;
+            const auto saturation = ModelParameter(record, "saturation-current");
+            const auto forward_beta = ModelParameter(record, "forward-beta");
+            const auto reverse_beta = ModelParameter(record, "reverse-beta");
+            const auto thermal = ModelParameter(record, "thermal-voltage");
+            const auto max_current = ModelParameter(record, "max-current");
+            const auto max_step = ModelParameter(record, "max-step");
+            if (!saturation.has_value() || !forward_beta.has_value() || !reverse_beta.has_value() ||
+                !thermal.has_value() || !max_current.has_value() || !max_step.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            component.bjt_model = CircuitBjtModel{
+                .kind = "ebers-moll", .model_version = 1U, .polarity = *record.polarity,
+                .saturation_current = *saturation, .forward_beta = *forward_beta,
+                .reverse_beta = *reverse_beta, .thermal_voltage = *thermal,
+                .max_current = *max_current, .max_step = *max_step};
+            continue;
+        }
+        if (component.diode_model.has_value()) {
+            continue;
         }
         const auto diode = model_database.Bind({*component.model, ModelKind::Diode});
         const auto zener = diode.model.has_value()

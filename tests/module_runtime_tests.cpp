@@ -1,5 +1,6 @@
 #include "content/module_package.hpp"
 #include "content/module_runtime.hpp"
+#include "content/model_database.hpp"
 #include "core/audio_buffer.hpp"
 #include "test_framework.hpp"
 
@@ -35,6 +36,12 @@ void RemoveRuntimePackage(const std::filesystem::path& directory) {
 
 solo_rig::AudioFormat TestFormat() {
     return {.sample_rate_hz = 48000.0, .max_block_size = 8, .channel_count = 1};
+}
+
+std::string ReadWhiteboxFixture(std::string_view name) {
+    const auto path = std::filesystem::path(SOLO_RIG_SOURCE_DIRECTORY) / "fixtures" / "whitebox" / name;
+    std::ifstream input(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
 } // namespace
@@ -309,6 +316,46 @@ TEST_CASE("External analog v2 module uses the prepared BJT MNA runtime") {
     REQUIRE(output.ChannelData(0)[0] >= 0.0F);
     REQUIRE(output.ChannelData(0)[0] <= 5.0F);
     REQUIRE(!processor->SetParameter("beta", 200.0F));
+}
+
+TEST_CASE("M18-C2 external analog v2 runtime binds an audited BJT reference before Process") {
+    const auto directory = CreateRuntimePackage(R"({
+        "schemaVersion":1,"moduleId":"org.mumu-dada.solorig.external-audited-bjt-v2",
+        "displayName":"External audited BJT v2","category":"analog-circuit","logicFile":"logic/main.json",
+        "ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}]
+    })",
+                                                R"({
+        "version":2,"schema":"circuit","referenceGround":"0","nodes":["collector","base","vcc","0"],
+        "ports":[{"id":"input","direction":"input","node":"base"},{"id":"output","direction":"output","node":"collector"}],
+        "supplies":[{"id":"vcc","positive":"vcc","negative":"0","voltage":5}],
+        "components":[
+          {"id":"load","type":"resistor","pins":["vcc","collector"],"value":1000},
+          {"id":"q1","type":"bjt","pins":["collector","base","0"],"model":"solorig.cleanroom.bjt.npn.v1"}
+        ],
+        "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":4,
+          "convergence":{"maxIterations":64,"absoluteTolerance":1e-9,"relativeTolerance":1e-6}}
+    })");
+    const auto package = solo_rig::LoadModulePackage(directory);
+    RemoveRuntimePackage(directory);
+    const auto database = solo_rig::BuildModelDatabase(ReadWhiteboxFixture("m18c2_cleanroom_npn_model.json"));
+    REQUIRE(package.package.has_value());
+    REQUIRE(database.database.has_value());
+    REQUIRE(std::holds_alternative<solo_rig::ModuleRuntimeError>(
+        solo_rig::CreateModuleRuntime(*package.package)));
+
+    auto runtime = solo_rig::CreateModuleRuntime(*package.package, *database.database);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    solo_rig::AudioBuffer input(1, 8);
+    solo_rig::AudioBuffer output(1, 8);
+    for (std::uint32_t sample = 0; sample < 8U; ++sample) {
+        input.ChannelData(0)[sample] = sample % 2U == 0U ? 0.4F : 0.7F;
+    }
+    REQUIRE(processor->Prepare({.sample_rate_hz = 192000.0, .max_block_size = 8, .channel_count = 1}));
+    processor->Process(input, output, 8);
+    for (std::uint32_t sample = 0; sample < 8U; ++sample) {
+        REQUIRE(std::isfinite(output.ChannelData(0)[sample]));
+    }
 }
 
 TEST_CASE("External digital delay package executes declared delay feedback and mix operations") {

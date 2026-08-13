@@ -1,6 +1,7 @@
 #pragma once
 
 #include "content/module_package.hpp"
+#include "content/model_database.hpp"
 #include "core/audio_graph.hpp"
 
 #include <memory>
@@ -34,5 +35,7 @@ public:
 
 [[nodiscard]] std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateModuleRuntime(
     const ModulePackage& package);
+[[nodiscard]] std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateModuleRuntime(
+    const ModulePackage& package, const ModelDatabase& model_database);
 
 } // namespace solo_rig

@@ -87,6 +87,7 @@ struct ModelAuditRecord {
     std::string device_family;
     std::string part_number;
     ModelKind kind{ModelKind::TestMathematical};
+    std::optional<std::string> polarity;
     ModelAvailability availability{ModelAvailability::Blocked};
     std::vector<ModelParameterAudit> parameters;
     ModelSourceAudit source;
@@ -108,6 +109,7 @@ struct ModelLookupResult {
 struct ModelBinding {
     std::string model_id;
     ModelKind expected_kind{ModelKind::TestMathematical};
+    std::optional<std::string> expected_polarity;
 };
 
 struct ModelKindContract {

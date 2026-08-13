@@ -448,7 +448,10 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             const auto thermal = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "thermalVoltage"));
             const auto max_current = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "maxCurrent"));
             const auto max_step = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "maxStep"));
-            if (bjt == nullptr || !kind.has_value() || *kind != "ebers-moll" || !model_version.has_value() ||
+            if (bjt == nullptr && !parsed_component.model.has_value()) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            if (bjt != nullptr && (!kind.has_value() || *kind != "ebers-moll" || !model_version.has_value() ||
                 *model_version != 1U || !polarity.has_value() || (*polarity != "npn" && *polarity != "pnp") ||
                 !saturation.has_value() || *saturation <= 0.0 || !forward_beta.has_value() || *forward_beta <= 0.0 ||
                 !reverse_beta.has_value() || *reverse_beta <= 0.0 || !thermal.has_value() || *thermal <= 0.0 ||
@@ -457,10 +460,11 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                 *max_current > 1.0e6 || *max_step > 10.0 || parsed_component.value.has_value() ||
                 parsed_component.tolerance.has_value() || parsed_component.model.has_value() ||
                 parsed_component.diode_model.has_value() || parsed_component.potentiometer.has_value() ||
-                parsed_component.controlled_source.has_value() || parsed_component.switch_spec.has_value()) {
+                parsed_component.controlled_source.has_value() || parsed_component.switch_spec.has_value())) {
                 return Failure(CircuitLoadError::InvalidValue);
             }
-            parsed_component.bjt_model = CircuitBjtModel{.kind = *kind,
+            if (bjt != nullptr) {
+                parsed_component.bjt_model = CircuitBjtModel{.kind = *kind,
                                                          .model_version = *model_version,
                                                          .polarity = *polarity,
                                                          .saturation_current = *saturation,
@@ -469,8 +473,9 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                                                          .thermal_voltage = *thermal,
                                                          .max_current = *max_current,
                                                          .max_step = *max_step};
+            }
         }
-        if (is_bjt && !parsed_component.bjt_model.has_value()) {
+        if (is_bjt && !parsed_component.bjt_model.has_value() && !parsed_component.model.has_value()) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         circuit.components.push_back(std::move(parsed_component));

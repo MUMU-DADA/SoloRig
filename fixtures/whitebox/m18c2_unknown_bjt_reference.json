@@ -1,0 +1,48 @@
+{
+  "version": 2,
+  "schema": "circuit",
+  "referenceGround": "0",
+  "nodes": [
+    "c",
+    "b",
+    "0"
+  ],
+  "ports": [
+    {
+      "id": "input",
+      "direction": "input",
+      "node": "b"
+    },
+    {
+      "id": "output",
+      "direction": "output",
+      "node": "c"
+    }
+  ],
+  "components": [
+    {
+      "id": "q",
+      "type": "bjt",
+      "pins": [
+        "c",
+        "b",
+        "0"
+      ],
+      "model": "solorig.cleanroom.bjt.unknown.v1"
+    },
+    {
+      "id": "rc",
+      "type": "resistor",
+      "pins": [
+        "c",
+        "0"
+      ],
+      "value": 1000.0
+    }
+  ],
+  "solver": {
+    "method": "modified-nodal-analysis",
+    "integration": "backward-euler",
+    "oversampling": 1
+  }
+}
