@@ -11,6 +11,7 @@ public enum NativeStatus : uint
     FileError = 4,
     InvalidPreset = 5,
     InternalError = 6,
+    Unsupported = 7,
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -91,6 +92,35 @@ internal struct NativeModuleCatalogView
     public double EstimatedCpuPercent;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeRealtimeContractView
+{
+    public uint ContractVersion;
+    public uint ProcessNoexcept;
+    public uint ProcessAllocates;
+    public uint ProcessReadsFiles;
+    public uint ProcessParsesJson;
+    public uint ProcessLocks;
+    public uint PrepareOwnsCompilation;
+    public uint MaximumOversampling;
+    public uint SampleRateHz;
+    public uint MaxBlockSize;
+    public uint ChannelCount;
+    public uint DeclaredLatencySamples;
+    public double EstimatedCpuPercent;
+    public IntPtr ThreadRule;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeWhiteboxStatusView
+{
+    public uint SchemaVersion;
+    public IntPtr GraphStatus;
+    public IntPtr RuntimeStatus;
+    public IntPtr EvidenceStatus;
+    public IntPtr Diagnostic;
+}
+
 internal static class NativeMethods
 {
     private const string Library = "SoloRigBackend";
@@ -103,6 +133,14 @@ internal static class NativeMethods
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern IntPtr solorig_backend_last_error_utf8(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_realtime_contract(
+        IntPtr backend, out NativeRealtimeContractView contractView);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_whitebox_status(
+        IntPtr backend, out NativeWhiteboxStatusView statusView);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_snapshot_create(IntPtr backend, out IntPtr snapshot);
@@ -253,6 +291,35 @@ public sealed record ModuleCatalogSnapshot(
 {
     public string DisplayText => $"{DisplayName} · {Category}";
 }
+
+public sealed record RealtimeContractSnapshot(
+    uint ContractVersion,
+    bool ProcessNoexcept,
+    bool ProcessAllocates,
+    bool ProcessReadsFiles,
+    bool ProcessParsesJson,
+    bool ProcessLocks,
+    bool PrepareOwnsCompilation,
+    uint MaximumOversampling,
+    uint SampleRateHz,
+    uint MaxBlockSize,
+    uint ChannelCount,
+    uint DeclaredLatencySamples,
+    double EstimatedCpuPercent,
+    string ThreadRule)
+{
+    public bool IsRealtimeSafe => ProcessNoexcept && !ProcessAllocates && !ProcessReadsFiles &&
+                                  !ProcessParsesJson && !ProcessLocks && PrepareOwnsCompilation &&
+                                  MaximumOversampling is >= 1 and <= 16;
+    public string SampleFormatText => SampleRateHz == 0 ? "host-configured" : $"{SampleRateHz} Hz";
+}
+
+public sealed record WhiteboxStatusSnapshot(
+    uint SchemaVersion,
+    string GraphStatus,
+    string RuntimeStatus,
+    string EvidenceStatus,
+    string Diagnostic);
 public sealed record BackendSnapshot(
     uint SchemaVersion,
     bool DarkTheme,
@@ -281,6 +348,27 @@ public sealed class BackendSession : IDisposable
     {
         var status = NativeMethods.solorig_backend_create(out handle);
         Ensure(status, "backend create");
+    }
+
+    public RealtimeContractSnapshot ReadRealtimeContract()
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_realtime_contract(handle, out var value), "realtime contract");
+        return new RealtimeContractSnapshot(
+            value.ContractVersion, value.ProcessNoexcept != 0, value.ProcessAllocates != 0,
+            value.ProcessReadsFiles != 0, value.ProcessParsesJson != 0, value.ProcessLocks != 0,
+            value.PrepareOwnsCompilation != 0, value.MaximumOversampling, value.SampleRateHz,
+            value.MaxBlockSize, value.ChannelCount, value.DeclaredLatencySamples,
+            value.EstimatedCpuPercent, NativeMethods.Utf8(value.ThreadRule));
+    }
+
+    public WhiteboxStatusSnapshot ReadWhiteboxStatus()
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_whitebox_status(handle, out var value), "whitebox status");
+        return new WhiteboxStatusSnapshot(
+            value.SchemaVersion, NativeMethods.Utf8(value.GraphStatus), NativeMethods.Utf8(value.RuntimeStatus),
+            NativeMethods.Utf8(value.EvidenceStatus), NativeMethods.Utf8(value.Diagnostic));
     }
 
     public BackendSnapshot ReadSnapshot()
@@ -411,5 +499,13 @@ public sealed class BackendSession : IDisposable
         }
         var detail = NativeMethods.Utf8(NativeMethods.solorig_backend_last_error_utf8(handle));
         throw new BackendException(operation, status, detail);
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (handle == IntPtr.Zero)
+        {
+            throw new ObjectDisposedException(nameof(BackendSession));
+        }
     }
 }

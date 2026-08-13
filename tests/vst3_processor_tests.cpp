@@ -2,6 +2,7 @@
 
 #include "vst3/solo_rig_processor.h"
 #include "vst3/solo_rig_ids.h"
+#include "core/realtime_contract.hpp"
 
 #include "base/source/fstreamer.h"
 #include "public.sdk/source/common/memorystream.h"
@@ -230,4 +231,19 @@ TEST_CASE("VST3 state publication is race-safe while processing continues") {
     for (std::size_t index = 0; index < final_output.size(); ++index) {
         REQUIRE(std::fabs(final_output[index] - expected_output[index]) < 1.0e-6F);
     }
+}
+
+TEST_CASE("VST3 processing keeps the shared C++ realtime contract") {
+    constexpr auto contract = solo_rig::DefaultRealtimeContract();
+    static_assert(solo_rig::IsRealtimeSafe(contract));
+    SoloRigProcessor processor;
+    Configure(processor, 32, 48000.0);
+    const auto output = ProcessBlock(processor, 0.18F);
+    for (const auto sample : output) {
+        REQUIRE(std::isfinite(sample));
+    }
+    REQUIRE(contract.process_allocates == false);
+    REQUIRE(contract.process_reads_files == false);
+    REQUIRE(contract.process_parses_json == false);
+    REQUIRE(contract.process_locks == false);
 }

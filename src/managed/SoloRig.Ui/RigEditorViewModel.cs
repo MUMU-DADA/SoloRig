@@ -47,6 +47,13 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private string moduleSearchText = string.Empty;
     private ModuleCatalogSnapshot? selectedCatalogModule;
     private string status = "Starting backend probe...";
+    private RealtimeContractSnapshot realtimeContract = EmptyRealtimeContract;
+    private WhiteboxStatusSnapshot whiteboxStatus = EmptyWhiteboxStatus;
+
+    private static RealtimeContractSnapshot EmptyRealtimeContract => new(
+        0, false, true, true, true, true, false, 0, 0, 0, 0, 0, 0.0, "backend unavailable");
+    private static WhiteboxStatusSnapshot EmptyWhiteboxStatus => new(
+        0, "unavailable", "unavailable", "unavailable", "backend unavailable");
 
     private static BackendSnapshot EmptySnapshot => new(
         0, true, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty,
@@ -120,6 +127,15 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         : $"Preset: {snapshot.SourcePath}{(snapshot.Dirty ? " *" : string.Empty)}";
     public string PerformanceStatus => $"性能/延迟: {snapshot.EstimatedCpuPercent:0.0}% CPU · {snapshot.TotalLatencySamples} samples";
     public string ResourceStatus => $"资源: {snapshot.ResourceStatus}";
+    public RealtimeContractSnapshot RealtimeContract => realtimeContract;
+    public WhiteboxStatusSnapshot WhiteboxStatus => whiteboxStatus;
+    public string RealtimeStatus => realtimeContract.ContractVersion == 0
+        ? "实时边界: unavailable"
+        : $"实时边界: {(realtimeContract.IsRealtimeSafe ? "C++ safe" : "拒绝/未就绪")} · " +
+          $"Prepare owns compile · {realtimeContract.SampleFormatText} · oversampling ≤{realtimeContract.MaximumOversampling}";
+    public string WhiteboxStatusText => whiteboxStatus.SchemaVersion == 0
+        ? "白盒状态: unavailable"
+        : $"白盒: {whiteboxStatus.RuntimeStatus} · 证据: {whiteboxStatus.EvidenceStatus}";
     public IReadOnlyList<string> PresetNames => ["SoloRig Default", snapshot.PresetName];
     public string Status { get => status; private set => Set(ref status, value); }
     public ICommand RefreshCommand { get; }
@@ -141,13 +157,19 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         try
         {
-            snapshot = backend.ReadSnapshot();
+            var nextSnapshot = backend.ReadSnapshot();
+            var nextRealtimeContract = backend.ReadRealtimeContract();
+            var nextWhiteboxStatus = backend.ReadWhiteboxStatus();
+            snapshot = nextSnapshot;
+            realtimeContract = nextRealtimeContract;
+            whiteboxStatus = nextWhiteboxStatus;
             RebuildCanvasProjections();
             Status = $"Backend probe OK | schema {snapshot.SchemaVersion} | theme {(snapshot.DarkTheme ? "dark" : "light")}";
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
                 nameof(SelectedNode), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
                 nameof(WindowTitle), nameof(AudioStatus), nameof(MidiStatus), nameof(FileStatus),
-                nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames));
+                nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames), nameof(RealtimeContract),
+                nameof(RealtimeStatus), nameof(WhiteboxStatus), nameof(WhiteboxStatusText));
         }
         catch (Exception exception)
         {

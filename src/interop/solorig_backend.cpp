@@ -1,6 +1,7 @@
 #include "interop/solorig_backend.h"
 
 #include "content/preset.hpp"
+#include "core/realtime_contract.hpp"
 #include "ui/rig_editor.hpp"
 
 #include <cmath>
@@ -115,6 +116,59 @@ SOLO_RIG_BACKEND_API void solorig_backend_destroy(SoloRigBackend* backend) {
 
 SOLO_RIG_BACKEND_API const char* solorig_backend_last_error_utf8(const SoloRigBackend* backend) {
     return backend == nullptr ? "invalid backend handle" : backend->last_error.c_str();
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_realtime_contract(
+    SoloRigBackend* backend,
+    SoloRigRealtimeContractView* out_contract) {
+    if (!ValidBackend(backend) || out_contract == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "backend and output realtime contract are required");
+    }
+    constexpr auto contract = solo_rig::DefaultRealtimeContract();
+    static constexpr char kThreadRule[] =
+        "Prepare/control thread owns compilation; audio Process is C++ only and never enters .NET";
+    out_contract->contract_version = 1U;
+    out_contract->process_noexcept = contract.process_noexcept ? 1U : 0U;
+    out_contract->process_allocates = contract.process_allocates ? 1U : 0U;
+    out_contract->process_reads_files = contract.process_reads_files ? 1U : 0U;
+    out_contract->process_parses_json = contract.process_parses_json ? 1U : 0U;
+    out_contract->process_locks = contract.process_locks ? 1U : 0U;
+    out_contract->prepare_owns_compilation = contract.prepare_owns_compilation ? 1U : 0U;
+    out_contract->maximum_oversampling = contract.maximum_oversampling;
+    // The editor backend is not an audio device. A host/standalone audio
+    // adapter fills these values when it prepares a real runtime.
+    out_contract->sample_rate_hz = contract.sample_rate_hz;
+    out_contract->max_block_size = contract.max_block_size;
+    out_contract->channel_count = contract.channel_count;
+    out_contract->declared_latency_samples = contract.declared_latency_samples;
+    out_contract->estimated_cpu_percent = contract.estimated_cpu_percent;
+    out_contract->thread_rule_utf8 = kThreadRule;
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_whitebox_status(
+    SoloRigBackend* backend,
+    SoloRigWhiteboxStatusView* out_status) {
+    if (!ValidBackend(backend) || out_status == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "backend and output whitebox status are required");
+    }
+    static constexpr char kGraphStatus[] = "M12 immutable circuit IR contract available";
+    static constexpr char kRuntimeStatus[] =
+        "M13 prepared runtime has a validated subset; WDF/full generic compiler remains unsupported";
+    static constexpr char kEvidenceStatus[] =
+        "M16 evidence schema is schema-only/blocked unless authorized inputs exist";
+    static constexpr char kDiagnostic[] =
+        "PedalKernel source/models and SPICE/golden data are unavailable or unauthorized; no equivalence claim";
+    out_status->schema_version = 1U;
+    out_status->graph_status_utf8 = kGraphStatus;
+    out_status->runtime_status_utf8 = kRuntimeStatus;
+    out_status->evidence_status_utf8 = kEvidenceStatus;
+    out_status->diagnostic_utf8 = kDiagnostic;
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
 }
 
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_snapshot_create(

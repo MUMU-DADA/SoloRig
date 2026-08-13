@@ -12,4 +12,6 @@
 - M2 快照额外返回 viewport、DPI、dirty、连接线和节点选中状态。C# 端将物理坐标按同一 `dpi_scale` 投影回 Avalonia 设备无关坐标，避免保存后位置漂移。
 - Save/Open 仍只能由显式 UI 命令触发；取消只更新 UI 状态，失败路径重新读取后端快照但保留原节点、布局、主题、来源和 dirty 状态。
 
-M1/M2 仅交付快照、节点/参数、布局编辑、主题、显式 Save/Open 和 MIDI 状态/映射读取；C# MIDI Learn/Program Change、真实 ASIO、VST3 UI 嵌入、实时 DSP 及通用电路求解均不在该 ABI 内。
+M17 额外提供两个控制线程诊断视图：`solorig_backend_realtime_contract` 返回 Prepare/Process 分界、无分配/无文件/无 JSON/无锁标志、过采样上限和线程规则；`solorig_backend_whitebox_status` 返回不可变图、受限运行时和 M16 证据链状态。两者只返回固定宽度结构和 DLL 静态 UTF-8 字符串，不进入音频回调，也不暴露 STL。独立程序没有真实 ASIO，因此 host 采样率、块大小、通道、延迟和 CPU 字段保持未配置，不伪造测量结果。
+
+M1/M2/M17 仍不交付 C# MIDI Learn/Program Change、真实 ASIO、多设备、VST3 C# UI 嵌入、通用 PedalKernel 等价电路求解或 1:1 白盒；M10 BJT/MNA 工作树继续保持未提交。

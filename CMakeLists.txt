@@ -216,6 +216,7 @@ if(BUILD_TESTING)
         tests/effect_descriptor_tests.cpp
         tests/audio_graph_tests.cpp
         tests/realtime_load_meter_tests.cpp
+        tests/realtime_contract_tests.cpp
         tests/diode_clipper_tests.cpp
         tests/digital_delay_tests.cpp
         tests/impulse_response_tests.cpp

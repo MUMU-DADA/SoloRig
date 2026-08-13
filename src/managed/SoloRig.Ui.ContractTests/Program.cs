@@ -6,6 +6,26 @@ Require(viewModel.Snapshot.Connections.Count == 1, "default snapshot exposes the
 Require(viewModel.MidiStatus.Contains("closed", StringComparison.OrdinalIgnoreCase), "startup MIDI remains closed");
 Require(viewModel.ModuleCatalog.Count >= 2, "module catalog exposes built-in modules");
 Require(viewModel.ModuleCatalog.Any(module => module.ModuleId == "org.mumu-dada.solorig.drive"), "catalog exposes Drive metadata");
+Require(viewModel.RealtimeContract.IsRealtimeSafe, "C ABI reports a C++-only, preallocated realtime boundary");
+Require(viewModel.RealtimeContract.MaximumOversampling is >= 1 and <= 16, "realtime contract bounds oversampling");
+Require(viewModel.RealtimeStatus.Contains("C++ safe", StringComparison.Ordinal), "realtime status is visible to the shared ViewModel");
+Require(viewModel.WhiteboxStatus.Diagnostic.Contains("PedalKernel", StringComparison.Ordinal), "whitebox status keeps the clean-room boundary visible");
+
+using (var lifecycleProbe = new BackendSession())
+{
+    Require(lifecycleProbe.ReadRealtimeContract().IsRealtimeSafe, "direct C ABI contract read succeeds");
+    lifecycleProbe.Dispose();
+    var disposedRejected = false;
+    try
+    {
+        _ = lifecycleProbe.ReadWhiteboxStatus();
+    }
+    catch (ObjectDisposedException)
+    {
+        disposedRejected = true;
+    }
+    Require(disposedRejected, "disposed backend rejects further status reads");
+}
 Require(viewModel.AddModule("org.mumu-dada.solorig.drive", "drive-extra", 640, 320), "module add uses the C ABI transaction");
 Require(viewModel.Snapshot.Nodes.Any(node => node.InstanceId == "drive-extra" && node.Parameters.Any(parameter => parameter.Id == "drive" && parameter.Value == 4.0F)),
     "added module receives validated defaults");

@@ -47,6 +47,11 @@ public sealed partial class MainWindow : Window
         ModuleCatalogList.ItemCount >= 2 && PerformanceText is not null &&
         PresetSelector is not null && PresetSelector.Bounds.Width > 0;
 
+    public bool HasM17VisualContent => HasM5VisualContent &&
+        RealtimeStatusText is not null && WhiteboxStatusText is not null &&
+        !string.IsNullOrWhiteSpace(RealtimeStatusText.Text) &&
+        !string.IsNullOrWhiteSpace(WhiteboxStatusText.Text);
+
     private void ViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
     {
         if (args.PropertyName == nameof(RigEditorViewModel.DarkTheme) && viewModel is not null)

@@ -27,6 +27,7 @@ typedef enum SoloRigStatus {
     SOLO_RIG_STATUS_FILE_ERROR = 4,
     SOLO_RIG_STATUS_INVALID_PRESET = 5,
     SOLO_RIG_STATUS_INTERNAL_ERROR = 6,
+    SOLO_RIG_STATUS_UNSUPPORTED = 7,
 } SoloRigStatus;
 
 typedef struct SoloRigSnapshotInfo {
@@ -95,6 +96,31 @@ typedef struct SoloRigBindingView {
     float maximum;
 } SoloRigBindingView;
 
+typedef struct SoloRigRealtimeContractView {
+    uint32_t contract_version;
+    uint32_t process_noexcept;
+    uint32_t process_allocates;
+    uint32_t process_reads_files;
+    uint32_t process_parses_json;
+    uint32_t process_locks;
+    uint32_t prepare_owns_compilation;
+    uint32_t maximum_oversampling;
+    uint32_t sample_rate_hz;
+    uint32_t max_block_size;
+    uint32_t channel_count;
+    uint32_t declared_latency_samples;
+    double estimated_cpu_percent;
+    const char* thread_rule_utf8;
+} SoloRigRealtimeContractView;
+
+typedef struct SoloRigWhiteboxStatusView {
+    uint32_t schema_version;
+    const char* graph_status_utf8;
+    const char* runtime_status_utf8;
+    const char* evidence_status_utf8;
+    const char* diagnostic_utf8;
+} SoloRigWhiteboxStatusView;
+
 // ABI contract:
 // - All strings are UTF-8 and NUL-terminated. Pointers returned through a
 //   snapshot remain valid until solorig_snapshot_destroy(snapshot).
@@ -109,6 +135,15 @@ typedef struct SoloRigBindingView {
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_create(SoloRigBackend** out_backend);
 SOLO_RIG_BACKEND_API void solorig_backend_destroy(SoloRigBackend* backend);
 SOLO_RIG_BACKEND_API const char* solorig_backend_last_error_utf8(const SoloRigBackend* backend);
+// These status views are control/UI-thread diagnostics. They do not expose
+// C++ objects and do not enter the audio callback. Realtime strings are static
+// UTF-8 storage owned by the DLL and remain valid for the process lifetime.
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_realtime_contract(
+    SoloRigBackend* backend,
+    SoloRigRealtimeContractView* out_contract);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_whitebox_status(
+    SoloRigBackend* backend,
+    SoloRigWhiteboxStatusView* out_status);
 
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_snapshot_create(
     SoloRigBackend* backend,

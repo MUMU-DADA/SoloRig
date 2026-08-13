@@ -175,3 +175,41 @@ TEST_CASE("C ABI explicit resource import identifies supported assets without st
     std::error_code cleanup;
     std::filesystem::remove(path, cleanup);
 }
+
+TEST_CASE("C ABI exposes explicit realtime and whitebox boundaries") {
+    SoloRigBackend* backend = nullptr;
+    REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);
+
+    SoloRigRealtimeContractView realtime{};
+    REQUIRE(solorig_backend_realtime_contract(backend, &realtime) == SOLO_RIG_STATUS_OK);
+    REQUIRE(realtime.contract_version == 1U);
+    REQUIRE(realtime.process_noexcept != 0U);
+    REQUIRE(realtime.process_allocates == 0U);
+    REQUIRE(realtime.process_reads_files == 0U);
+    REQUIRE(realtime.process_parses_json == 0U);
+    REQUIRE(realtime.process_locks == 0U);
+    REQUIRE(realtime.prepare_owns_compilation != 0U);
+    REQUIRE(realtime.maximum_oversampling >= 1U && realtime.maximum_oversampling <= 16U);
+    REQUIRE(realtime.thread_rule_utf8 != nullptr && std::string(realtime.thread_rule_utf8).find("audio") != std::string::npos);
+
+    SoloRigWhiteboxStatusView whitebox{};
+    REQUIRE(solorig_backend_whitebox_status(backend, &whitebox) == SOLO_RIG_STATUS_OK);
+    REQUIRE(whitebox.schema_version == 1U);
+    REQUIRE(whitebox.graph_status_utf8 != nullptr && *whitebox.graph_status_utf8 != '\0');
+    REQUIRE(whitebox.runtime_status_utf8 != nullptr && *whitebox.runtime_status_utf8 != '\0');
+    REQUIRE(whitebox.evidence_status_utf8 != nullptr && *whitebox.evidence_status_utf8 != '\0');
+    REQUIRE(whitebox.diagnostic_utf8 != nullptr && std::string(whitebox.diagnostic_utf8).find("PedalKernel") != std::string::npos);
+
+    REQUIRE(solorig_backend_realtime_contract(backend, nullptr) == SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    REQUIRE(std::string(solorig_backend_last_error_utf8(backend)).find("output") != std::string::npos);
+    REQUIRE(solorig_backend_whitebox_status(backend, nullptr) == SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    solorig_backend_destroy(backend);
+}
+
+TEST_CASE("C ABI null destruction and status pointers are safe") {
+    solorig_backend_destroy(nullptr);
+    solorig_snapshot_destroy(nullptr);
+    SoloRigRealtimeContractView realtime{};
+    REQUIRE(solorig_backend_realtime_contract(nullptr, &realtime) == SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    REQUIRE(solorig_backend_last_error_utf8(nullptr) != nullptr);
+}

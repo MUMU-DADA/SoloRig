@@ -153,9 +153,15 @@ function Import-VsDeveloperEnvironment {
         Fail-Layer -Layer "Tools" -Message ("找不到 Visual Studio 开发环境脚本: {0}" -f $vsDevCmd)
     }
     $command = 'call "' + $vsDevCmd + '" -arch=x64 -host_arch=x64 >nul 2>&1 && set'
-    $environmentLines = & cmd.exe /d /s /c $command
+    # StrictMode treats an empty native command result as an uninitialized
+    # variable on some PowerShell hosts; force an array so the diagnostic below
+    # is deterministic instead of reporting VariableIsUndefined.
+    $environmentLines = @(& cmd.exe /d /s /c $command)
     if ($LASTEXITCODE -ne 0) {
         Fail-Layer -Layer "Tools" -Message "Visual Studio C++ 开发环境初始化失败。"
+    }
+    if ($environmentLines.Count -eq 0) {
+        Fail-Layer -Layer "Tools" -Message "Visual Studio 开发环境没有返回任何环境变量。"
     }
     foreach ($line in $environmentLines) {
         $separator = $line.IndexOf('=')

@@ -22,15 +22,19 @@ public sealed class App : Application
             desktop.Exit += (_, _) => viewModel.Dispose();
             var args = desktop.Args ?? Array.Empty<string>();
             if (args.Contains("--m2-visual-probe", StringComparer.Ordinal) ||
-                args.Contains("--m5-visual-probe", StringComparer.Ordinal))
+                args.Contains("--m5-visual-probe", StringComparer.Ordinal) ||
+                args.Contains("--m17-visual-probe", StringComparer.Ordinal))
             {
                 var m5Probe = args.Contains("--m5-visual-probe", StringComparer.Ordinal);
+                var m17Probe = args.Contains("--m17-visual-probe", StringComparer.Ordinal);
                 var attempts = 0;
                 var probe = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
                 probe.Tick += (_, _) =>
                 {
                     attempts++;
-                    if ((m5Probe && mainWindow.HasM5VisualContent) || (!m5Probe && mainWindow.HasEditorVisualContent))
+                    if ((m17Probe && mainWindow.HasM17VisualContent) ||
+                        (!m17Probe && m5Probe && mainWindow.HasM5VisualContent) ||
+                        (!m17Probe && !m5Probe && mainWindow.HasEditorVisualContent))
                     {
                         probe.Stop();
                         desktop.Shutdown(0);
