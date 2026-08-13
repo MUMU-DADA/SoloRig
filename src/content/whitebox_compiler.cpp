@@ -166,6 +166,7 @@ WhiteboxCompileResult CompileWhiteboxGraphV2Json(std::string_view source) {
     }
 
     WhiteboxCompiledGraph graph;
+    graph.reference_ground_ = *ground;
     std::unordered_set<std::string> node_ids;
     for (const auto& node_value : *nodes_array) {
         const auto node = StringValue(&node_value);
@@ -266,6 +267,19 @@ WhiteboxCompileResult CompileWhiteboxGraphV2Json(std::string_view source) {
                 return Failure(WhiteboxCompileError::InvalidPin);
             }
             parsed_component.pins.push_back(*pin);
+        }
+        if (const auto value = NumberValue(Find(*component, "value")); value.has_value()) {
+            parsed_component.value = *value;
+        } else if (Find(*component, "value") != nullptr) {
+            return Failure(WhiteboxCompileError::NonFiniteValue);
+        }
+        if (const auto initial = NumberValue(Find(*component, "initial")); initial.has_value()) {
+            parsed_component.initial = *initial;
+        } else if (Find(*component, "initial") != nullptr) {
+            return Failure(WhiteboxCompileError::NonFiniteValue);
+        }
+        if (const auto group = StringValue(Find(*component, "nonlinearGroup")); group.has_value()) {
+            parsed_component.nonlinear_group = *group;
         }
         if (const auto model = StringValue(Find(*component, "modelReference")); model.has_value()) {
             parsed_component.model_reference = *model;

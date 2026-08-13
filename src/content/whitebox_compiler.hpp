@@ -77,6 +77,9 @@ struct WhiteboxComponent {
     std::string id;
     std::string kind;
     std::vector<std::string> pins;
+    std::optional<double> value;
+    std::optional<double> initial;
+    std::optional<std::string> nonlinear_group;
     std::optional<std::string> model_reference;
 };
 
@@ -121,6 +124,7 @@ public:
     }
     [[nodiscard]] WhiteboxTopologyClass Classification() const noexcept { return classification_; }
     [[nodiscard]] WhiteboxBackend Backend() const noexcept { return backend_; }
+    [[nodiscard]] std::string_view ReferenceGround() const noexcept { return reference_ground_; }
     // Prepare is a non-real-time ownership boundary. It creates a token from
     // validated immutable topology state; no JSON or file access is permitted
     // after this point.
@@ -136,6 +140,7 @@ private:
     std::vector<WhiteboxComponent> components_;
     std::vector<WhiteboxSubcircuit> subcircuits_;
     std::vector<WhiteboxModelReference> model_references_;
+    std::string reference_ground_;
     WhiteboxTopologyClass classification_{WhiteboxTopologyClass::Unknown};
     WhiteboxBackend backend_{WhiteboxBackend::Mna};
 };
