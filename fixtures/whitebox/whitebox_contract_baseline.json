@@ -1,0 +1,46 @@
+{
+  "contractVersion": 1,
+  "kind": "whitebox-compiler-runtime-contract",
+  "implementationStatus": "contract-only",
+  "sourceAndLicensing": {
+    "pedalKernelSource": "unavailable",
+    "modelDatabase": "unavailable",
+    "spiceAndGoldenData": "unavailable",
+    "licenseReview": "blocked-pending-AGPLv3-commercial-review"
+  },
+  "graph": {
+    "required": ["nodes", "pins", "ports", "supplies", "subcircuits", "modelReferences"],
+    "stableErrors": ["UnknownNode", "InvalidPin", "DuplicateId", "DanglingPort", "MissingModel", "UnsafeAssetPath"]
+  },
+  "topology": {
+    "classifications": ["series", "parallel", "spqr", "rigid"],
+    "unknownMustReject": true,
+    "cyclicFeedbackIsExplicit": true
+  },
+  "backends": {
+    "mna": {"status": "planned-contract", "requires": ["stamp-plan", "matrix-shape", "dc-state"]},
+    "wdf": {"status": "planned-contract", "requires": ["tree", "adaptors", "scattering-state"]},
+    "selection": "compile-time-or-prepare-time"
+  },
+  "nonlinearSolve": {
+    "groups": ["joint-device-group", "feedback-group"],
+    "dcOperatingPoint": "planned-contract",
+    "convergenceErrors": ["SingularMatrix", "NonFinite", "NonConvergent", "InvalidInitialState"]
+  },
+  "lowering": {
+    "stages": ["stage", "blockwise", "k-method"],
+    "behaviorModules": ["vco", "vca", "bbd", "spring"],
+    "status": "planned-contract"
+  },
+  "realtimeBoundary": {
+    "processReadsFiles": false,
+    "processParsesJson": false,
+    "processAllocates": false,
+    "processLocks": false,
+    "prepareOwnsCompilation": true,
+    "status": "required-not-yet-proven"
+  },
+  "evidence": {
+    "required": ["netlist", "dcOperatingPoint", "frequencyResponse", "staticCurve", "dynamicResponse", "spiceComparison", "goldenComparison", "convergence", "errorThreshold"]
+  }
+}

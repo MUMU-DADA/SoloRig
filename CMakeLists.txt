@@ -218,6 +218,7 @@ if(BUILD_TESTING)
         tests/tuner_tests.cpp
         tests/json_tests.cpp
         tests/circuit_v2_tests.cpp
+        tests/whitebox_contract_tests.cpp
         tests/module_package_tests.cpp
         tests/module_runtime_tests.cpp
         tests/rig_runtime_tests.cpp

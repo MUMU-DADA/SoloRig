@@ -1,0 +1,21 @@
+{
+  "fixtureVersion": 1,
+  "kind": "generic-whitebox-graph",
+  "implementationStatus": "contract-only",
+  "nodes": [
+    {"id": "in", "role": "signal"},
+    {"id": "vcc", "role": "supply"},
+    {"id": "out", "role": "signal"},
+    {"id": "0", "role": "reference-ground"}
+  ],
+  "ports": [
+    {"id": "input", "direction": "input", "node": "in"},
+    {"id": "output", "direction": "output", "node": "out"}
+  ],
+  "supplies": [{"id": "supply", "positive": "vcc", "negative": "0", "voltage": 9.0}],
+  "subcircuits": [{"id": "preamp", "ports": ["in", "out", "vcc", "0"], "modelReference": "pending:preamp"}],
+  "modelReferences": [{"id": "pending:preamp", "status": "missing-audited-source"}],
+  "expectedTopology": {"classification": "series", "feedback": "explicit-required"},
+  "expectedBackend": {"family": "mna-or-wdf", "selection": "prepare-time"},
+  "expectedResult": "pending-compiler-implementation"
+}

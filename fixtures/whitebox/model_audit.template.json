@@ -1,0 +1,14 @@
+{
+  "auditSchemaVersion": 1,
+  "status": "template-only",
+  "modelId": "pending:fill-before-use",
+  "deviceFamily": "pending",
+  "partNumber": "pending",
+  "modelKind": "spice-or-compact",
+  "parameters": [],
+  "defaults": {},
+  "source": {"uri": "", "version": "", "retrievedAt": ""},
+  "license": {"spdx": "", "permissionEvidence": "", "reviewStatus": "blocked"},
+  "validity": {"temperatureRange": [], "voltageRange": [], "currentRange": [], "notes": ""},
+  "evidenceRefs": []
+}

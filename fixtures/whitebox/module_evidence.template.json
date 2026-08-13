@@ -1,0 +1,14 @@
+{
+  "evidenceSchemaVersion": 1,
+  "status": "template-only",
+  "moduleId": "pending:fill-before-use",
+  "netlistRef": "",
+  "operatingPoint": {"fixture": "", "expected": [], "measured": [], "errorThreshold": null},
+  "frequencyResponse": {"fixture": "", "reference": "", "measured": [], "errorThreshold": null},
+  "staticCurve": {"fixture": "", "reference": "", "measured": [], "errorThreshold": null},
+  "dynamicResponse": {"fixture": "", "reference": "", "measured": [], "errorThreshold": null},
+  "spiceComparison": {"status": "blocked-no-authorized-reference", "reference": "", "errorThreshold": null},
+  "goldenComparison": {"status": "blocked-no-golden-data", "reference": "", "errorThreshold": null},
+  "convergence": {"iterations": [], "failureCases": ["SingularMatrix", "NonFinite", "NonConvergent"]},
+  "authorization": {"status": "blocked-pending-license-review"}
+}

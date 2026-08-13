@@ -1,0 +1,10 @@
+{
+  "fixtureVersion": 1,
+  "kind": "generic-whitebox-graph",
+  "implementationStatus": "contract-only",
+  "nodes": ["in", "out", "0"],
+  "ports": [{"id": "output", "direction": "output", "node": "out"}],
+  "components": [{"id": "q1", "pins": ["in", "out"], "modelReference": "../../untrusted/model.spice"}],
+  "expectedErrors": ["UnsafeAssetPath", "MissingModelAuthorization"],
+  "expectedResult": "reject-without-partial-runtime"
+}
