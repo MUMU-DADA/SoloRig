@@ -216,6 +216,34 @@ TEST_CASE("External analog v2 module uses the prepared inductor MNA runtime") {
     REQUIRE(std::isfinite(output.ChannelData(0)[0]));
 }
 
+TEST_CASE("External analog v2 module uses the prepared potentiometer MNA runtime") {
+    const auto directory = CreateRuntimePackage(R"({
+        "schemaVersion":1,"moduleId":"org.mumu-dada.solorig.external-pot-v2",
+        "displayName":"External Potentiometer v2","category":"analog-circuit","logicFile":"logic/main.json",
+        "ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}]
+    })",
+                                                R"({
+        "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","wiper","0"],
+        "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"wiper"}],
+        "components":[{"id":"p","type":"potentiometer","pins":["in","0","wiper"],"value":10000,
+          "potentiometer":{"position":0.5,"minimum":0,"maximum":1,"wiperNode":"wiper"}}],
+        "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    const auto package = solo_rig::LoadModulePackage(directory);
+    RemoveRuntimePackage(directory);
+    REQUIRE(package.package.has_value());
+    auto runtime = solo_rig::CreateModuleRuntime(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    solo_rig::AudioBuffer input(1, 8);
+    solo_rig::AudioBuffer output(1, 8);
+    input.ChannelData(0)[0] = 1.0F;
+    REQUIRE(processor->Prepare(TestFormat()));
+    processor->Process(input, output, 1);
+    REQUIRE(std::fabs(output.ChannelData(0)[0] - 0.5F) < 1.0e-5F);
+    REQUIRE(!processor->SetParameter("position", 0.75F));
+}
+
 TEST_CASE("External digital delay package executes declared delay feedback and mix operations") {
     const auto directory = CreateRuntimePackage(R"({
         "schemaVersion":1,

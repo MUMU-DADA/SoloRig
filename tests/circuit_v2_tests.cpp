@@ -82,6 +82,117 @@ TEST_CASE("circuit v2 parses supplies controls and measurement metadata") {
     REQUIRE(result.circuit->measurement_baseline.has_value());
 }
 
+TEST_CASE("circuit v2 parses parameterized potentiometer endpoints and wiper mapping") {
+    const auto result = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0",
+      "nodes":["in","wiper","0"],
+      "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"wiper"}],
+      "components":[{"id":"p","type":"potentiometer","pins":["in","0","wiper"],"value":10000,
+        "potentiometer":{"position":0.25,"minimum":0,"maximum":1,"wiperNode":"wiper"}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(result.errors.empty());
+    REQUIRE(result.circuit.has_value());
+    REQUIRE(result.circuit->components.front().value == 10000.0);
+    REQUIRE(result.circuit->components.front().potentiometer.has_value());
+    REQUIRE(result.circuit->components.front().potentiometer->position == 0.25);
+    REQUIRE(result.circuit->components.front().potentiometer->wiper_node == "wiper");
+
+    const auto invalid_range = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","wiper","0"],
+      "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"wiper"}],
+      "components":[{"id":"p","type":"potentiometer","pins":["in","0","wiper"],"value":10000,
+        "potentiometer":{"position":1.1,"minimum":0,"maximum":1,"wiperNode":"wiper"}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(!invalid_range.circuit.has_value());
+    REQUIRE(invalid_range.errors.front() == solo_rig::CircuitLoadError::InvalidValue);
+
+    const auto invalid_wiper = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","wiper","0"],
+      "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"wiper"}],
+      "components":[{"id":"p","type":"potentiometer","pins":["in","0","wiper"],"value":10000,
+        "potentiometer":{"position":0.5,"minimum":0,"maximum":1,"wiperNode":"missing"}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(!invalid_wiper.circuit.has_value());
+    REQUIRE(invalid_wiper.errors.front() == solo_rig::CircuitLoadError::InvalidNode ||
+            invalid_wiper.errors.front() == solo_rig::CircuitLoadError::InvalidPin);
+
+    const auto invalid_total = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","wiper","0"],
+      "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"wiper"}],
+      "components":[{"id":"p","type":"potentiometer","pins":["in","0","wiper"],"value":1e309,
+        "potentiometer":{"position":0.5,"minimum":0,"maximum":1,"wiperNode":"wiper"}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(!invalid_total.circuit.has_value());
+    REQUIRE(invalid_total.errors.front() == solo_rig::CircuitLoadError::InvalidJson ||
+            invalid_total.errors.front() == solo_rig::CircuitLoadError::InvalidValue);
+}
+
+TEST_CASE("MNA compiles a static potentiometer network and sweeps its prepared position") {
+    const auto make_circuit = [](double position) {
+        solo_rig::CircuitNetlist circuit{
+            .version = 2,
+            .schema = "circuit",
+            .reference_ground = "0",
+            .nodes = {"in", "wiper", "0"},
+            .ports = {{.id = "input", .direction = solo_rig::CircuitPortDirection::Input, .node = "in"},
+                      {.id = "output", .direction = solo_rig::CircuitPortDirection::Output, .node = "wiper"}},
+            .components = {{.id = "p",
+                            .type = solo_rig::CircuitComponentType::Potentiometer,
+                            .pins = {"in", "0", "wiper"},
+                            .value = 10000.0,
+                            .potentiometer = solo_rig::CircuitPotentiometerSpec{.position = position,
+                                                                                 .minimum = 0.0,
+                                                                                 .maximum = 1.0,
+                                                                                 .wiper_node = "wiper"}}},
+            .solver = {}};
+        return circuit;
+    };
+    for (const auto position : {0.0, 0.25, 0.5, 0.75, 1.0}) {
+        auto compiled = solo_rig::CompileMnaCircuit(make_circuit(position));
+        REQUIRE(compiled.circuit.has_value());
+        REQUIRE(compiled.circuit->Prepare(48000.0));
+        const auto first = compiled.circuit->Solve(1.0);
+        REQUIRE(first.Succeeded());
+        REQUIRE(std::fabs(first.output_voltage - (1.0 - position)) < 1.0e-6);
+        compiled.circuit->Reset();
+        const auto reset = compiled.circuit->Solve(1.0);
+        REQUIRE(reset.Succeeded());
+        REQUIRE(std::fabs(reset.output_voltage - first.output_voltage) < 1.0e-9);
+        REQUIRE(compiled.circuit->Prepare(48000.0));
+        const auto prepared_again = compiled.circuit->Solve(1.0);
+        REQUIRE(prepared_again.Succeeded());
+        REQUIRE(std::fabs(prepared_again.output_voltage - first.output_voltage) < 1.0e-9);
+    }
+}
+
+TEST_CASE("MNA rejects a potentiometer without a wiper and non-finite total resistance") {
+    solo_rig::CircuitNetlist no_wiper{
+        .version = 2,
+        .schema = "circuit",
+        .reference_ground = "0",
+        .nodes = {"in", "0"},
+        .ports = {{.id = "input", .direction = solo_rig::CircuitPortDirection::Input, .node = "in"},
+                  {.id = "output", .direction = solo_rig::CircuitPortDirection::Output, .node = "in"}},
+        .components = {{.id = "p",
+                        .type = solo_rig::CircuitComponentType::Potentiometer,
+                        .pins = {"in", "0"},
+                        .value = 10000.0,
+                        .potentiometer = solo_rig::CircuitPotentiometerSpec{}}},
+        .solver = {}};
+    const auto rejected = solo_rig::CompileMnaCircuit(no_wiper);
+    REQUIRE(!rejected.circuit.has_value());
+    REQUIRE(rejected.error == solo_rig::MnaCompileError::UnsupportedComponent);
+
+    no_wiper.components.front().value = std::numeric_limits<double>::infinity();
+    const auto invalid = solo_rig::CompileMnaCircuit(no_wiper);
+    REQUIRE(!invalid.circuit.has_value());
+    REQUIRE(invalid.error == solo_rig::MnaCompileError::InvalidValue);
+}
+
 TEST_CASE("circuit v2 rejects legacy and unknown versions") {
     const auto legacy = solo_rig::ParseCircuitV2Json(R"({"version":1,"schema":"circuit"})");
     REQUIRE(!legacy.circuit.has_value());

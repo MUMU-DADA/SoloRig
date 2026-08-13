@@ -353,17 +353,29 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         }
         if (component.type != CircuitComponentType::Resistor && component.type != CircuitComponentType::Capacitor &&
             component.type != CircuitComponentType::Inductor &&
-            component.type != CircuitComponentType::VoltageSource && component.type != CircuitComponentType::Diode) {
+            component.type != CircuitComponentType::VoltageSource && component.type != CircuitComponentType::Diode &&
+            component.type != CircuitComponentType::Potentiometer) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
         }
         if ((component.type == CircuitComponentType::Resistor || component.type == CircuitComponentType::Capacitor ||
              component.type == CircuitComponentType::Inductor ||
-             component.type == CircuitComponentType::VoltageSource) &&
+             component.type == CircuitComponentType::VoltageSource || component.type == CircuitComponentType::Potentiometer) &&
             (!component.value.has_value() || !std::isfinite(*component.value) ||
             ((component.type == CircuitComponentType::Resistor || component.type == CircuitComponentType::Capacitor ||
-              component.type == CircuitComponentType::Inductor) &&
+              component.type == CircuitComponentType::Inductor || component.type == CircuitComponentType::Potentiometer) &&
               *component.value <= 0.0))) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+        }
+        if (component.type == CircuitComponentType::Potentiometer) {
+            if (!component.potentiometer.has_value() || component.model.has_value() ||
+                !std::isfinite(component.potentiometer->position) ||
+                !std::isfinite(component.potentiometer->minimum) ||
+                !std::isfinite(component.potentiometer->maximum) ||
+                component.potentiometer->minimum >= component.potentiometer->maximum ||
+                component.potentiometer->position < component.potentiometer->minimum ||
+                component.potentiometer->position > component.potentiometer->maximum) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
         }
     }
 
@@ -406,11 +418,51 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
     }
     std::uint32_t branch{};
     std::uint32_t history{};
+    constexpr double kMinimumPotSegmentResistance = 1.0e-12;
     for (const auto& component : circuit.components) {
         const auto positive = FindNode(circuit, component.pins[0]);
         const auto negative = FindNode(circuit, component.pins[1]);
         if (positive == -2 || negative == -2 || positive == negative) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+        }
+        if (component.type == CircuitComponentType::Potentiometer) {
+            const auto& spec = *component.potentiometer;
+            std::string wiper_name;
+            if (spec.wiper_node.has_value()) {
+                wiper_name = *spec.wiper_node;
+            } else if (component.pins.size() == 3U) {
+                wiper_name = component.pins[2];
+            } else {
+                return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
+            }
+            const auto wiper = FindNode(circuit, wiper_name);
+            if (wiper < 0 || wiper == positive || wiper == negative) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+            }
+            const auto normalized = (spec.position - spec.minimum) / (spec.maximum - spec.minimum);
+            const auto total = *component.value;
+            const auto first_value = std::max(total * normalized, kMinimumPotSegmentResistance);
+            const auto second_value = std::max(total * (1.0 - normalized), kMinimumPotSegmentResistance);
+            if (!std::isfinite(first_value) || !std::isfinite(second_value)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+            prepared.elements_.push_back({.type = CircuitComponentType::Resistor,
+                                          .positive_node = positive,
+                                          .negative_node = wiper,
+                                          .branch_index = kNoIndex,
+                                          .history_index = kNoIndex,
+                                          .inductor_history_index = kNoIndex,
+                                          .value = first_value,
+                                          .initial = 0.0});
+            prepared.elements_.push_back({.type = CircuitComponentType::Resistor,
+                                          .positive_node = wiper,
+                                          .negative_node = negative,
+                                          .branch_index = kNoIndex,
+                                          .history_index = kNoIndex,
+                                          .inductor_history_index = kNoIndex,
+                                          .value = second_value,
+                                          .initial = 0.0});
+            continue;
         }
         MnaPreparedCircuit::Element element{.type = component.type,
                                             .positive_node = positive,

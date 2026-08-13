@@ -27,6 +27,7 @@ struct CircuitPotentiometerSpec {
     double position{0.5};
     double minimum{0.0};
     double maximum{1.0};
+    std::optional<std::string> wiper_node;
 };
 
 struct CircuitSwitchSpec {

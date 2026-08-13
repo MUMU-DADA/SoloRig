@@ -239,7 +239,8 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         if (!ids.insert(*id).second) {
             return Failure(CircuitLoadError::DuplicateId);
         }
-        if (pins->size() != 2U) {
+        const bool is_potentiometer = *type == CircuitComponentType::Potentiometer;
+        if (pins->size() != 2U && !(is_potentiometer && pins->size() == 3U)) {
             return Failure(CircuitLoadError::InvalidPin);
         }
         for (const auto& pin : *pins) {
@@ -301,11 +302,12 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         }
         if ((*type == CircuitComponentType::Resistor || *type == CircuitComponentType::Capacitor ||
              *type == CircuitComponentType::Inductor ||
-             *type == CircuitComponentType::VoltageSource) && !parsed_component.value.has_value()) {
+             *type == CircuitComponentType::VoltageSource || *type == CircuitComponentType::Potentiometer) &&
+            !parsed_component.value.has_value()) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         if ((*type == CircuitComponentType::Resistor || *type == CircuitComponentType::Capacitor ||
-             *type == CircuitComponentType::Inductor) &&
+             *type == CircuitComponentType::Inductor || *type == CircuitComponentType::Potentiometer) &&
             *parsed_component.value <= 0.0) {
             return Failure(CircuitLoadError::InvalidValue);
         }
@@ -328,9 +330,23 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                 *position < *minimum || *position > *maximum) {
                 return Failure(CircuitLoadError::InvalidValue);
             }
+            std::optional<std::string> wiper_node;
+            if (const auto* wiper = Find(*object_value, "wiperNode"); wiper != nullptr) {
+                wiper_node = StringValue(wiper);
+                if (!wiper_node.has_value() || !node_ids.contains(*wiper_node)) {
+                    return Failure(CircuitLoadError::InvalidNode);
+                }
+            }
+            if (pins->size() == 3U) {
+                if (wiper_node.has_value() && *wiper_node != pins->at(2)) {
+                    return Failure(CircuitLoadError::InvalidPin);
+                }
+                wiper_node = pins->at(2);
+            }
             parsed_component.potentiometer = CircuitPotentiometerSpec{.position = *position,
                                                                        .minimum = *minimum,
-                                                                       .maximum = *maximum};
+                                                                       .maximum = *maximum,
+                                                                       .wiper_node = std::move(wiper_node)};
         }
         if (const auto* switch_value = Find(*component, "switch"); switch_value != nullptr) {
             const auto* switch_object = switch_value->AsObject();
