@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "schema": "circuit",
+  "referenceGround": "0",
+  "nodes": ["in", "mid", "out", "0"],
+  "ports": [
+    {"id": "input", "direction": "input", "node": "in"},
+    {"id": "output", "direction": "output", "node": "out"}
+  ],
+  "supplies": [],
+  "components": [
+    {"id": "forward", "kind": "resistor", "pins": ["in", "mid"], "value": 1000},
+    {"id": "return", "kind": "resistor", "pins": ["mid", "out"], "value": 1000},
+    {"id": "feedback", "kind": "resistor", "pins": ["out", "in"], "value": 1000}
+  ],
+  "subcircuits": [],
+  "modelReferences": [],
+  "backend": {"preferred": "mna"}
+}

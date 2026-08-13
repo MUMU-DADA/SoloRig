@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "schema": "circuit",
+  "referenceGround": "0",
+  "nodes": ["in", "out", "0"],
+  "ports": [
+    {"id": "input", "direction": "input", "node": "in"},
+    {"id": "output", "direction": "output", "node": "out"}
+  ],
+  "supplies": [],
+  "components": [
+    {"id": "load", "kind": "resistor", "pins": ["in", "out"], "value": 1000}
+  ],
+  "subcircuits": [
+    {"id": "external-stage", "ports": ["in", "out"], "modelReference": "planned-stage"}
+  ],
+  "modelReferences": [
+    {"id": "planned-stage", "path": "models/planned-stage.json", "status": "blocked"}
+  ],
+  "backend": {"preferred": "mna"}
+}

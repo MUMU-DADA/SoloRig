@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "schema": "solorig-behavior-binding",
+  "modules": [
+    {"moduleId": "behavior-bbd", "kind": "bbd", "modelId": "blocked.bbd.template", "expected": "blocked"},
+    {"moduleId": "behavior-vco", "kind": "vco", "modelId": "blocked.vco.template", "expected": "blocked"},
+    {"moduleId": "behavior-vca", "kind": "vca", "modelId": "blocked.vca.template", "expected": "blocked"},
+    {"moduleId": "behavior-spring", "kind": "spring", "modelId": "blocked.spring.template", "expected": "blocked"}
+  ]
+}
