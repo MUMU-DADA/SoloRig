@@ -275,6 +275,42 @@ TEST_CASE("External analog v2 module uses the prepared VCCS MNA runtime") {
     REQUIRE(!processor->SetParameter("gain", 1.0F));
 }
 
+TEST_CASE("External analog v2 module uses the prepared BJT MNA runtime") {
+    const auto directory = CreateRuntimePackage(R"({
+        "schemaVersion":1,"moduleId":"org.mumu-dada.solorig.external-bjt-v2",
+        "displayName":"External BJT v2","category":"analog-circuit","logicFile":"logic/main.json",
+        "ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}]
+    })",
+                                                R"({
+        "version":2,"schema":"circuit","referenceGround":"0","nodes":["collector","base","vcc","0"],
+        "ports":[{"id":"input","direction":"input","node":"base"},{"id":"output","direction":"output","node":"collector"}],
+        "supplies":[{"id":"vcc","positive":"vcc","negative":"0","voltage":5}],
+        "components":[
+          {"id":"load","type":"resistor","pins":["vcc","collector"],"value":1000},
+          {"id":"q1","type":"bjt","pins":["collector","base","0"],
+           "bjtModel":{"kind":"ebers-moll","modelVersion":1,"polarity":"npn","saturationCurrent":1e-15,
+             "forwardBeta":100,"reverseBeta":1,"thermalVoltage":0.02585,"maxCurrent":0.005,"maxStep":10}}
+        ],
+        "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,
+          "convergence":{"maxIterations":64,"absoluteTolerance":1e-9,"relativeTolerance":1e-6}}
+    })");
+    const auto package = solo_rig::LoadModulePackage(directory);
+    RemoveRuntimePackage(directory);
+    REQUIRE(package.package.has_value());
+    auto runtime = solo_rig::CreateModuleRuntime(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    solo_rig::AudioBuffer input(1, 8);
+    solo_rig::AudioBuffer output(1, 8);
+    input.ChannelData(0)[0] = 0.6F;
+    REQUIRE(processor->Prepare(TestFormat()));
+    processor->Process(input, output, 1);
+    REQUIRE(std::isfinite(output.ChannelData(0)[0]));
+    REQUIRE(output.ChannelData(0)[0] >= 0.0F);
+    REQUIRE(output.ChannelData(0)[0] <= 5.0F);
+    REQUIRE(!processor->SetParameter("beta", 200.0F));
+}
+
 TEST_CASE("External digital delay package executes declared delay feedback and mix operations") {
     const auto directory = CreateRuntimePackage(R"({
         "schemaVersion":1,

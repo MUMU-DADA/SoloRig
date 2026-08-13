@@ -158,6 +158,78 @@ void StampIdealOpAmp(std::vector<double>& matrix,
     }
 }
 
+void StampBjt(std::vector<double>& matrix,
+              std::vector<double>& rhs,
+              std::uint32_t size,
+              const MnaPreparedCircuit::Element& element,
+              const std::vector<double>& guess) noexcept {
+    // Bounded Ebers-Moll companion model. The two junction exponentials are
+    // clamped to [-60, 60] and their currents are hard-limited at Prepare-time
+    // values; all arrays below are fixed-size so this stamp is allocation-free.
+    const auto collector = element.positive_node >= 0 ? guess[static_cast<std::size_t>(element.positive_node)] : 0.0;
+    const auto base = element.bjt_base_node >= 0 ? guess[static_cast<std::size_t>(element.bjt_base_node)] : 0.0;
+    const auto emitter = element.negative_node >= 0 ? guess[static_cast<std::size_t>(element.negative_node)] : 0.0;
+    const auto polarity = static_cast<double>(element.bjt_polarity);
+    const auto base_emitter = polarity * (base - emitter);
+    const auto base_collector = polarity * (base - collector);
+    const auto forward_exponent = std::clamp(base_emitter / element.bjt_thermal_voltage, -60.0, 60.0);
+    const auto reverse_exponent = std::clamp(base_collector / element.bjt_thermal_voltage, -60.0, 60.0);
+    const auto forward_exponential = std::exp(forward_exponent);
+    const auto reverse_exponential = std::exp(reverse_exponent);
+    auto forward_current = element.bjt_saturation_current * (forward_exponential - 1.0);
+    auto reverse_current = element.bjt_saturation_current * (reverse_exponential - 1.0);
+    auto forward_conductance = element.bjt_saturation_current / element.bjt_thermal_voltage * forward_exponential;
+    auto reverse_conductance = element.bjt_saturation_current / element.bjt_thermal_voltage * reverse_exponential;
+    if (forward_current > element.bjt_max_current) {
+        forward_current = element.bjt_max_current;
+        forward_conductance = 0.0;
+    } else if (forward_current < -element.bjt_max_current) {
+        forward_current = -element.bjt_max_current;
+        forward_conductance = 0.0;
+    }
+    if (reverse_current > element.bjt_max_current) {
+        reverse_current = element.bjt_max_current;
+        reverse_conductance = 0.0;
+    } else if (reverse_current < -element.bjt_max_current) {
+        reverse_current = -element.bjt_max_current;
+        reverse_conductance = 0.0;
+    }
+    const auto forward_alpha = element.bjt_forward_beta / (element.bjt_forward_beta + 1.0);
+    const auto reverse_alpha = element.bjt_reverse_beta / (element.bjt_reverse_beta + 1.0);
+    const auto collector_current = polarity * (forward_alpha * forward_current - reverse_current);
+    const auto emitter_current = polarity * (-forward_current + reverse_alpha * reverse_current);
+    const auto base_current = polarity * ((1.0 - forward_alpha) * forward_current +
+                                           (1.0 - reverse_alpha) * reverse_current);
+    const double currents[3] = {collector_current, base_current, emitter_current};
+    const double jacobian[3][3] = {
+        {reverse_conductance,
+         forward_alpha * forward_conductance - reverse_conductance,
+         -forward_alpha * forward_conductance},
+        {-(1.0 - reverse_alpha) * reverse_conductance,
+         (1.0 - forward_alpha) * forward_conductance + (1.0 - reverse_alpha) * reverse_conductance,
+         -(1.0 - forward_alpha) * forward_conductance},
+        {-reverse_alpha * reverse_conductance,
+         -forward_conductance + reverse_alpha * reverse_conductance,
+         forward_conductance},
+    };
+    const std::int32_t nodes[3] = {element.positive_node, element.bjt_base_node, element.negative_node};
+    const double voltages[3] = {collector, base, emitter};
+    for (std::size_t row = 0; row < 3U; ++row) {
+        if (nodes[row] < 0) {
+            continue;
+        }
+        double equivalent_current = currents[row];
+        for (std::size_t column = 0; column < 3U; ++column) {
+            equivalent_current -= jacobian[row][column] * voltages[column];
+            if (nodes[column] >= 0) {
+                matrix[static_cast<std::size_t>(nodes[row]) * size + static_cast<std::size_t>(nodes[column])] +=
+                    jacobian[row][column];
+            }
+        }
+        rhs[static_cast<std::size_t>(nodes[row])] -= equivalent_current;
+    }
+}
+
 void StampDiode(std::vector<double>& matrix,
                 std::vector<double>& rhs,
                 std::uint32_t size,
@@ -267,6 +339,9 @@ void MnaPreparedCircuit::Reset() noexcept {
         if (element.type == CircuitComponentType::Diode && element.positive_node >= 0) {
             solution_[element.positive_node] = element.initial;
         }
+        if (element.type == CircuitComponentType::Bjt && element.bjt_base_node >= 0) {
+            solution_[element.bjt_base_node] = element.initial;
+        }
     }
 }
 
@@ -281,7 +356,8 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
     const double conductance_scale = sample_rate_hz_ * static_cast<double>(oversampling_);
     for (std::uint32_t substep = 0; substep < oversampling_; ++substep) {
         const auto has_nonlinearity = std::any_of(elements_.begin(), elements_.end(), [](const auto& element) {
-            return element.type == CircuitComponentType::Diode || element.controlled_has_limits;
+            return element.type == CircuitComponentType::Diode || element.type == CircuitComponentType::Bjt ||
+                   element.controlled_has_limits;
         });
         bool converged = !has_nonlinearity;
         for (std::uint32_t iteration = 0; iteration < max_iterations_; ++iteration) {
@@ -314,6 +390,9 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                 case CircuitComponentType::Diode:
                     StampDiode(matrix_, rhs_, matrix_size_, element, newton_previous_);
                     break;
+                case CircuitComponentType::Bjt:
+                    StampBjt(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    break;
                 case CircuitComponentType::Vccs:
                     StampVccs(matrix_, rhs_, matrix_size_, element, newton_previous_);
                     break;
@@ -335,6 +414,7 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
             double maximum_delta = 0.0;
             double maximum_value = 1.0;
             bool step_exceeded = false;
+            double bjt_step_scale = 1.0;
             for (std::uint32_t index = 0; index < matrix_size_; ++index) {
                 maximum_value = std::max(maximum_value, std::fabs(solution_[index]));
                 maximum_delta = std::max(maximum_delta, std::fabs(solution_[index] - newton_previous_[index]));
@@ -349,11 +429,51 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                         step_exceeded = true;
                     }
                 }
+                if (element.type == CircuitComponentType::Bjt) {
+                    const auto polarity = static_cast<double>(element.bjt_polarity);
+                    const auto old_collector = element.positive_node >= 0 ? newton_previous_[element.positive_node] : 0.0;
+                    const auto old_base = element.bjt_base_node >= 0 ? newton_previous_[element.bjt_base_node] : 0.0;
+                    const auto old_emitter = element.negative_node >= 0 ? newton_previous_[element.negative_node] : 0.0;
+                    const auto new_collector = element.positive_node >= 0 ? solution_[element.positive_node] : 0.0;
+                    const auto new_base = element.bjt_base_node >= 0 ? solution_[element.bjt_base_node] : 0.0;
+                    const auto new_emitter = element.negative_node >= 0 ? solution_[element.negative_node] : 0.0;
+                    const auto old_be = polarity * (old_base - old_emitter);
+                    const auto old_bc = polarity * (old_base - old_collector);
+                    const auto new_be = polarity * (new_base - new_emitter);
+                    const auto new_bc = polarity * (new_base - new_collector);
+                    const auto be_delta = std::fabs(new_be - old_be);
+                    const auto bc_delta = std::fabs(new_bc - old_bc);
+                    if (be_delta > element.bjt_max_step || bc_delta > element.bjt_max_step) {
+                        const auto largest_junction_step = std::max(be_delta, bc_delta);
+                        if (largest_junction_step > 0.0 && std::isfinite(largest_junction_step)) {
+                            bjt_step_scale = std::min(bjt_step_scale, element.bjt_max_step / largest_junction_step);
+                        }
+                    }
+                }
             }
             if (step_exceeded) {
                 return {.error = MnaSolveError::NonConvergent};
             }
-            if (!has_nonlinearity || maximum_delta <= absolute_tolerance_ + relative_tolerance_ * maximum_value) {
+            // BJT junction steps are damped, rather than allocating a second
+            // trial vector. If the bounded iteration budget is exhausted the
+            // caller receives NonConvergent deterministically.
+            if (bjt_step_scale < 1.0) {
+                for (std::uint32_t index = 0; index < matrix_size_; ++index) {
+                    solution_[index] = newton_previous_[index] +
+                        bjt_step_scale * (solution_[index] - newton_previous_[index]);
+                }
+                maximum_delta = 0.0;
+                maximum_value = 1.0;
+                for (std::uint32_t index = 0; index < matrix_size_; ++index) {
+                    maximum_value = std::max(maximum_value, std::fabs(solution_[index]));
+                    maximum_delta = std::max(maximum_delta, std::fabs(solution_[index] - newton_previous_[index]));
+                }
+            }
+            // A limited junction step is progress, not convergence. Otherwise
+            // maxStep values below the numeric tolerance could falsely accept
+            // the initial guess without satisfying the undamped Newton system.
+            if (bjt_step_scale >= 1.0 &&
+                (!has_nonlinearity || maximum_delta <= absolute_tolerance_ + relative_tolerance_ * maximum_value)) {
                 converged = true;
                 break;
             }
@@ -423,8 +543,30 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             component.type != CircuitComponentType::Inductor &&
             component.type != CircuitComponentType::VoltageSource && component.type != CircuitComponentType::Diode &&
             component.type != CircuitComponentType::Potentiometer && component.type != CircuitComponentType::Vccs &&
-            component.type != CircuitComponentType::IdealOpAmp) {
+            component.type != CircuitComponentType::IdealOpAmp && component.type != CircuitComponentType::Bjt) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
+        }
+        if (component.type == CircuitComponentType::Bjt) {
+            if (component.pins.size() != 3U || !component.bjt_model.has_value() || component.value.has_value() ||
+                component.tolerance.has_value() || component.model.has_value() || component.diode_model.has_value() ||
+                component.potentiometer.has_value() || component.controlled_source.has_value() ||
+                component.switch_spec.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            const auto& bjt = *component.bjt_model;
+            if (bjt.kind != "ebers-moll" || bjt.model_version != 1U ||
+                (bjt.polarity != "npn" && bjt.polarity != "pnp")) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            if (!std::isfinite(bjt.saturation_current) || !std::isfinite(bjt.forward_beta) ||
+                !std::isfinite(bjt.reverse_beta) || !std::isfinite(bjt.thermal_voltage) ||
+                !std::isfinite(bjt.max_current) || !std::isfinite(bjt.max_step) ||
+                bjt.saturation_current <= 0.0 || bjt.saturation_current > 1.0 || bjt.forward_beta <= 0.0 ||
+                bjt.forward_beta > 1.0e6 || bjt.reverse_beta <= 0.0 || bjt.reverse_beta > 1.0e6 ||
+                bjt.thermal_voltage <= 0.0 || bjt.thermal_voltage > 1.0 || bjt.max_current <= 0.0 ||
+                bjt.max_current > 1.0e6 || bjt.max_step <= 0.0 || bjt.max_step > 10.0) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
         }
         if ((component.type == CircuitComponentType::Resistor || component.type == CircuitComponentType::Capacitor ||
              component.type == CircuitComponentType::Inductor ||
@@ -510,9 +652,43 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
     constexpr double kMinimumPotSegmentResistance = 1.0e-12;
     for (const auto& component : circuit.components) {
         const auto positive = FindNode(circuit, component.pins[0]);
-        const auto negative = FindNode(circuit, component.pins[1]);
+        const auto negative = FindNode(circuit, component.pins[component.type == CircuitComponentType::Bjt ? 2U : 1U]);
         if (positive == -2 || negative == -2 || positive == negative) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+        }
+        if (component.type == CircuitComponentType::Bjt) {
+            const auto base = FindNode(circuit, component.pins[1]);
+            if (base == -2 || base == positive || base == negative) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+            }
+            const auto& bjt = *component.bjt_model;
+            MnaPreparedCircuit::Element element{.type = CircuitComponentType::Bjt,
+                                                .positive_node = positive,
+                                                .negative_node = negative,
+                                                .control_positive_node = -1,
+                                                .control_negative_node = -1,
+                                                .bjt_base_node = base,
+                                                .branch_index = kNoIndex,
+                                                .history_index = kNoIndex,
+                                                .inductor_history_index = kNoIndex,
+                                                .value = 0.0,
+                                                .initial = component.initial.value_or(0.0),
+                                                .diode_saturation_current = 0.0,
+                                                .diode_thermal_voltage = 0.0,
+                                                .diode_max_step = 0.0,
+                                                .controlled_gain = 0.0,
+                                                .controlled_minimum = 0.0,
+                                                .controlled_maximum = 0.0,
+                                                .controlled_has_limits = false,
+                                                .bjt_polarity = bjt.polarity == "npn" ? 1 : -1,
+                                                .bjt_saturation_current = bjt.saturation_current,
+                                                .bjt_forward_beta = bjt.forward_beta,
+                                                .bjt_reverse_beta = bjt.reverse_beta,
+                                                .bjt_thermal_voltage = bjt.thermal_voltage,
+                                                .bjt_max_current = bjt.max_current,
+                                                .bjt_max_step = bjt.max_step};
+            prepared.elements_.push_back(element);
+            continue;
         }
         if (component.type == CircuitComponentType::Potentiometer) {
             const auto& spec = *component.potentiometer;

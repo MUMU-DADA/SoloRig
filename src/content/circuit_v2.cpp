@@ -78,6 +78,9 @@ std::optional<CircuitComponentType> ComponentType(std::string_view text) {
     if (text == "ideal-op-amp") {
         return CircuitComponentType::IdealOpAmp;
     }
+    if (text == "bjt") {
+        return CircuitComponentType::Bjt;
+    }
     if (text == "switch") {
         return CircuitComponentType::Switch;
     }
@@ -247,8 +250,9 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         }
         const bool is_potentiometer = *type == CircuitComponentType::Potentiometer;
         const bool is_controlled_source = *type == CircuitComponentType::Vccs || *type == CircuitComponentType::IdealOpAmp;
+        const bool is_bjt = *type == CircuitComponentType::Bjt;
         if (pins->size() != 2U && !(is_potentiometer && pins->size() == 3U) &&
-            !(is_controlled_source && pins->size() == 4U)) {
+            !(is_controlled_source && pins->size() == 4U) && !(is_bjt && pins->size() == 3U)) {
             return Failure(CircuitLoadError::InvalidPin);
         }
         for (const auto& pin : *pins) {
@@ -407,6 +411,43 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         if (is_controlled_source && !parsed_component.controlled_source.has_value()) {
+            return Failure(CircuitLoadError::InvalidValue);
+        }
+        if (is_bjt) {
+            const auto* bjt_value = Find(*component, "bjtModel");
+            const auto* bjt = bjt_value == nullptr ? nullptr : bjt_value->AsObject();
+            const auto kind = bjt == nullptr ? std::nullopt : StringValue(Find(*bjt, "kind"));
+            const auto model_version = bjt == nullptr ? std::nullopt : UnsignedValue(Find(*bjt, "modelVersion"));
+            const auto polarity = bjt == nullptr ? std::nullopt : StringValue(Find(*bjt, "polarity"));
+            const auto saturation = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "saturationCurrent"));
+            const auto forward_beta = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "forwardBeta"));
+            const auto reverse_beta = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "reverseBeta"));
+            const auto thermal = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "thermalVoltage"));
+            const auto max_current = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "maxCurrent"));
+            const auto max_step = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "maxStep"));
+            if (bjt == nullptr || !kind.has_value() || *kind != "ebers-moll" || !model_version.has_value() ||
+                *model_version != 1U || !polarity.has_value() || (*polarity != "npn" && *polarity != "pnp") ||
+                !saturation.has_value() || *saturation <= 0.0 || !forward_beta.has_value() || *forward_beta <= 0.0 ||
+                !reverse_beta.has_value() || *reverse_beta <= 0.0 || !thermal.has_value() || *thermal <= 0.0 ||
+                !max_current.has_value() || *max_current <= 0.0 || !max_step.has_value() || *max_step <= 0.0 ||
+                *saturation > 1.0 || *forward_beta > 1.0e6 || *reverse_beta > 1.0e6 || *thermal > 1.0 ||
+                *max_current > 1.0e6 || *max_step > 10.0 || parsed_component.value.has_value() ||
+                parsed_component.tolerance.has_value() || parsed_component.model.has_value() ||
+                parsed_component.diode_model.has_value() || parsed_component.potentiometer.has_value() ||
+                parsed_component.controlled_source.has_value() || parsed_component.switch_spec.has_value()) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            parsed_component.bjt_model = CircuitBjtModel{.kind = *kind,
+                                                         .model_version = *model_version,
+                                                         .polarity = *polarity,
+                                                         .saturation_current = *saturation,
+                                                         .forward_beta = *forward_beta,
+                                                         .reverse_beta = *reverse_beta,
+                                                         .thermal_voltage = *thermal,
+                                                         .max_current = *max_current,
+                                                         .max_step = *max_step};
+        }
+        if (is_bjt && !parsed_component.bjt_model.has_value()) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         circuit.components.push_back(std::move(parsed_component));

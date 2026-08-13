@@ -277,6 +277,208 @@ TEST_CASE("MNA applies ideal op amp output limits and reports controlled-source 
     REQUIRE(singular_compiled.circuit->Solve(1.0).error == solo_rig::MnaSolveError::SingularMatrix);
 }
 
+TEST_CASE("circuit v2 parses BJT Ebers-Moll fields and rejects unsafe model ranges") {
+    const auto result = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["c","b","e","0"],
+      "ports":[{"id":"output","direction":"output","node":"c"}],
+      "components":[{"id":"q1","type":"bjt","pins":["c","b","e"],
+        "bjtModel":{"kind":"ebers-moll","modelVersion":1,"polarity":"npn",
+          "saturationCurrent":1e-15,"forwardBeta":100,"reverseBeta":1,"thermalVoltage":0.02585,
+          "maxCurrent":0.01,"maxStep":1}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(result.errors.empty());
+    REQUIRE(result.circuit.has_value());
+    REQUIRE(result.circuit->components.front().type == solo_rig::CircuitComponentType::Bjt);
+    REQUIRE(result.circuit->components.front().bjt_model->polarity == "npn");
+    REQUIRE(result.circuit->components.front().bjt_model->forward_beta == 100.0);
+
+    const auto invalid = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["c","b","e","0"],
+      "ports":[{"id":"output","direction":"output","node":"c"}],
+      "components":[{"id":"q1","type":"bjt","pins":["c","b","e"],
+        "bjtModel":{"kind":"ebers-moll","modelVersion":2,"polarity":"sideways",
+          "saturationCurrent":-1,"forwardBeta":0,"reverseBeta":1,"thermalVoltage":0,
+          "maxCurrent":0,"maxStep":0}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(!invalid.circuit.has_value());
+    REQUIRE(invalid.errors.front() == solo_rig::CircuitLoadError::InvalidValue);
+
+    const auto ambiguous = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["c","b","e","0"],
+      "ports":[{"id":"output","direction":"output","node":"c"}],
+      "components":[{"id":"q1","type":"bjt","pins":["c","b","e"],"value":1,
+        "bjtModel":{"kind":"ebers-moll","modelVersion":1,"polarity":"pnp",
+          "saturationCurrent":1e-15,"forwardBeta":100,"reverseBeta":1,"thermalVoltage":0.02585,
+          "maxCurrent":0.01,"maxStep":1}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(!ambiguous.circuit.has_value());
+    REQUIRE(ambiguous.errors.front() == solo_rig::CircuitLoadError::InvalidValue);
+}
+
+TEST_CASE("MNA solves BJT common-emitter cutoff active and saturated bias points") {
+    const auto make_circuit = [] {
+        solo_rig::CircuitNetlist circuit{
+            .version = 2,
+            .schema = "circuit",
+            .reference_ground = "0",
+            .nodes = {"collector", "base", "vcc", "0"},
+            .ports = {{.id = "input", .direction = solo_rig::CircuitPortDirection::Input, .node = "base"},
+                      {.id = "output", .direction = solo_rig::CircuitPortDirection::Output, .node = "collector"}},
+            .supplies = {{.id = "vcc", .positive_node = "vcc", .negative_node = "0", .voltage = 5.0}},
+            .components = {{.id = "collector-load",
+                            .type = solo_rig::CircuitComponentType::Resistor,
+                            .pins = {"vcc", "collector"},
+                            .value = 1000.0},
+                           {.id = "q1",
+                            .type = solo_rig::CircuitComponentType::Bjt,
+                            .pins = {"collector", "base", "0"},
+                            .initial = 0.0,
+                            .bjt_model = solo_rig::CircuitBjtModel{.kind = "ebers-moll",
+                                                                     .model_version = 1,
+                                                                     .polarity = "npn",
+                                                                     .saturation_current = 1.0e-15,
+                                                                     .forward_beta = 100.0,
+                                                                     .reverse_beta = 1.0,
+                                                                     .thermal_voltage = 0.02585,
+                                                                     .max_current = 0.005,
+                                                                     .max_step = 10.0}}},
+            .solver = {.method = "modified-nodal-analysis",
+                       .integration = "backward-euler",
+                       .oversampling = 1,
+                       .convergence = {.max_iterations = 64,
+                                       .absolute_tolerance = 1.0e-9,
+                                       .relative_tolerance = 1.0e-6}}};
+        return circuit;
+    };
+    auto solve = [&](double base_voltage) {
+        auto circuit = make_circuit();
+        auto compiled = solo_rig::CompileMnaCircuit(circuit);
+        REQUIRE(compiled.circuit.has_value());
+        REQUIRE(compiled.circuit->Prepare(48000.0));
+        const auto first = compiled.circuit->Solve(base_voltage);
+        REQUIRE(first.Succeeded());
+        compiled.circuit->Reset();
+        const auto reset = compiled.circuit->Solve(base_voltage);
+        REQUIRE(reset.Succeeded());
+        REQUIRE(std::fabs(reset.output_voltage - first.output_voltage) < 1.0e-8);
+        REQUIRE(compiled.circuit->Prepare(48000.0));
+        const auto prepared_again = compiled.circuit->Solve(base_voltage);
+        REQUIRE(prepared_again.Succeeded());
+        REQUIRE(std::fabs(prepared_again.output_voltage - first.output_voltage) < 1.0e-8);
+        return first.output_voltage;
+    };
+    const auto cutoff = solve(0.0);
+    const auto active = solve(0.6);
+    const auto saturated = solve(0.8);
+    REQUIRE(cutoff > active);
+    REQUIRE(active > saturated);
+    REQUIRE(cutoff > 4.9);
+    REQUIRE(saturated < 0.5);
+    for (const auto base_voltage : {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8}) {
+        REQUIRE(std::isfinite(solve(base_voltage)));
+    }
+}
+
+TEST_CASE("MNA BJT PNP response mirrors the NPN common-emitter reference") {
+    const auto solve = [](std::string polarity, double supply_voltage, double base_voltage) {
+        solo_rig::CircuitNetlist circuit{
+            .version = 2,
+            .schema = "circuit",
+            .reference_ground = "0",
+            .nodes = {"collector", "base", "rail", "0"},
+            .ports = {{.id = "input", .direction = solo_rig::CircuitPortDirection::Input, .node = "base"},
+                      {.id = "output", .direction = solo_rig::CircuitPortDirection::Output, .node = "collector"}},
+            .supplies = {{.id = "rail", .positive_node = "rail", .negative_node = "0", .voltage = supply_voltage}},
+            .components = {{.id = "collector-load",
+                            .type = solo_rig::CircuitComponentType::Resistor,
+                            .pins = {"rail", "collector"},
+                            .value = 1000.0},
+                           {.id = "q1",
+                            .type = solo_rig::CircuitComponentType::Bjt,
+                            .pins = {"collector", "base", "0"},
+                            .bjt_model = solo_rig::CircuitBjtModel{.kind = "ebers-moll",
+                                                                     .model_version = 1,
+                                                                     .polarity = std::move(polarity),
+                                                                     .saturation_current = 1.0e-15,
+                                                                     .forward_beta = 100.0,
+                                                                     .reverse_beta = 1.0,
+                                                                     .thermal_voltage = 0.02585,
+                                                                     .max_current = 0.005,
+                                                                     .max_step = 10.0}}},
+            .solver = {.method = "modified-nodal-analysis",
+                       .integration = "backward-euler",
+                       .oversampling = 1,
+                       .convergence = {.max_iterations = 64,
+                                       .absolute_tolerance = 1.0e-9,
+                                       .relative_tolerance = 1.0e-6}}};
+        auto compiled = solo_rig::CompileMnaCircuit(circuit);
+        REQUIRE(compiled.circuit.has_value());
+        REQUIRE(compiled.circuit->Prepare(48000.0));
+        const auto result = compiled.circuit->Solve(base_voltage);
+        REQUIRE(result.Succeeded());
+        return result.output_voltage;
+    };
+    for (const auto magnitude : {0.0, 0.4, 0.6, 0.8}) {
+        const auto npn = solve("npn", 5.0, magnitude);
+        const auto pnp = solve("pnp", -5.0, -magnitude);
+        REQUIRE(std::fabs(npn + pnp) < 1.0e-8);
+    }
+}
+
+TEST_CASE("MNA BJT rejects non-finite, non-convergent and singular configurations") {
+    solo_rig::CircuitNetlist circuit{
+        .version = 2,
+        .schema = "circuit",
+        .reference_ground = "0",
+        .nodes = {"collector", "base", "0"},
+        .ports = {{.id = "input", .direction = solo_rig::CircuitPortDirection::Input, .node = "base"},
+                  {.id = "output", .direction = solo_rig::CircuitPortDirection::Output, .node = "collector"}},
+        .components = {{.id = "q1",
+                        .type = solo_rig::CircuitComponentType::Bjt,
+                        .pins = {"collector", "base", "0"},
+                        .bjt_model = solo_rig::CircuitBjtModel{.kind = "ebers-moll",
+                                                                 .polarity = "npn",
+                                                                 .saturation_current = 1.0e-15,
+                                                                 .forward_beta = 100.0,
+                                                                 .reverse_beta = 1.0,
+                                                                 .thermal_voltage = 0.02585,
+                                                                 .max_current = 0.005,
+                                                                 .max_step = 0.5}},
+                       {.id = "collector-load",
+                        .type = solo_rig::CircuitComponentType::Resistor,
+                        .pins = {"collector", "0"},
+                        .value = 1000.0}},
+        .solver = {.method = "modified-nodal-analysis",
+                   .integration = "backward-euler",
+                   .oversampling = 1,
+                   .convergence = {.max_iterations = 1,
+                                   .absolute_tolerance = 1.0e-14,
+                                   .relative_tolerance = 1.0e-14}}};
+    circuit.components.front().bjt_model->saturation_current = std::numeric_limits<double>::infinity();
+    const auto invalid = solo_rig::CompileMnaCircuit(circuit);
+    REQUIRE(!invalid.circuit.has_value());
+    REQUIRE(invalid.error == solo_rig::MnaCompileError::InvalidValue);
+
+    circuit.components.front().bjt_model->saturation_current = 1.0e-15;
+    circuit.components.front().bjt_model->max_step = 1.0e-20;
+    auto nonconvergent = solo_rig::CompileMnaCircuit(circuit);
+    REQUIRE(nonconvergent.circuit.has_value());
+    REQUIRE(nonconvergent.circuit->Prepare(48000.0));
+    const auto nonconvergent_result = nonconvergent.circuit->Solve(2.0);
+    REQUIRE(nonconvergent_result.error == solo_rig::MnaSolveError::NonConvergent);
+
+    circuit.components.front().bjt_model->max_step = 1.0;
+    circuit.solver.convergence.max_iterations = 64;
+    circuit.components.pop_back();
+    auto singular = solo_rig::CompileMnaCircuit(circuit);
+    REQUIRE(singular.circuit.has_value());
+    REQUIRE(singular.circuit->Prepare(48000.0));
+    REQUIRE(singular.circuit->Solve(0.5).error == solo_rig::MnaSolveError::SingularMatrix);
+}
+
 TEST_CASE("MNA compiles a static potentiometer network and sweeps its prepared position") {
     const auto make_circuit = [](double position) {
         solo_rig::CircuitNetlist circuit{

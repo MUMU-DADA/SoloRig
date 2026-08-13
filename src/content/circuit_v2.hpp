@@ -22,6 +22,7 @@ enum class CircuitComponentType {
     Potentiometer,
     Vccs,
     IdealOpAmp,
+    Bjt,
     Switch,
 };
 
@@ -38,6 +39,18 @@ struct CircuitControlledSourceSpec {
     double gain{};
     std::optional<double> minimum;
     std::optional<double> maximum;
+};
+
+struct CircuitBjtModel {
+    std::string kind{"ebers-moll"};
+    std::uint32_t model_version{1};
+    std::string polarity{"npn"};
+    double saturation_current{1.0e-15};
+    double forward_beta{100.0};
+    double reverse_beta{1.0};
+    double thermal_voltage{0.02585};
+    double max_current{1.0e-2};
+    double max_step{1.0};
 };
 
 struct CircuitSwitchSpec {
@@ -76,6 +89,7 @@ struct CircuitComponent {
     std::optional<CircuitDiodeModel> diode_model;
     std::optional<CircuitPotentiometerSpec> potentiometer;
     std::optional<CircuitControlledSourceSpec> controlled_source;
+    std::optional<CircuitBjtModel> bjt_model;
     std::optional<CircuitSwitchSpec> switch_spec;
 };
 
