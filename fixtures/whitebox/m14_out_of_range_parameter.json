@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "schema": "solorig-model-audit",
+  "modelId": "test.out-of-range.parameter",
+  "deviceFamily": "test-mathematical",
+  "partNumber": "test-only",
+  "modelKind": "test-mathematical",
+  "runtimeStatus": "approved",
+  "parameters": [
+    {"id": "gain", "default": 5.0, "min": 0.0, "max": 4.0, "unit": "1"}
+  ],
+  "source": {"origin": "SoloRig", "version": "m14", "integrity": "self:test"},
+  "license": {"spdx": "MIT", "permissionEvidence": "self", "reviewStatus": "approved"},
+  "applicability": [{"quantity": "temperature", "min": -1.0, "max": 1.0, "unit": "C"}],
+  "evidenceRefs": ["test:out-of-range"]
+}

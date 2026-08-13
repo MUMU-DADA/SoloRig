@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "schema": "solorig-model-audit",
+  "modelId": "test.math.cubic.v1",
+  "deviceFamily": "test-mathematical",
+  "partNumber": "test-only-no-commercial-part",
+  "modelKind": "test-mathematical",
+  "runtimeStatus": "approved",
+  "parameters": [
+    {"id": "gain", "default": 1.0, "min": 0.0, "max": 4.0, "unit": "1"}
+  ],
+  "source": {
+    "origin": "SoloRig clean-room test fixture",
+    "version": "m14-clean-room-v1",
+    "integrity": "self:m14-test-fixture-v1"
+  },
+  "license": {
+    "spdx": "MIT",
+    "permissionEvidence": "self-authored-test-fixture",
+    "reviewStatus": "approved"
+  },
+  "applicability": [
+    {"quantity": "temperature", "min": -40.0, "max": 85.0, "unit": "C"}
+  ],
+  "evidenceRefs": ["test:m14-clean-room-contract"]
+}

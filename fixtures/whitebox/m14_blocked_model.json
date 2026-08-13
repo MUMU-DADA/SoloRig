@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "schema": "solorig-model-audit",
+  "modelId": "blocked.example.diode.v1",
+  "deviceFamily": "diode",
+  "partNumber": "unprovided-example",
+  "modelKind": "diode",
+  "runtimeStatus": "blocked",
+  "parameters": [
+    {"id": "saturationCurrent", "default": 1e-12, "min": 1e-18, "max": 1e-3, "unit": "A"}
+  ],
+  "source": {
+    "origin": "placeholder; no external data",
+    "version": "blocked-template-v1",
+    "integrity": "self:blocked-template"
+  },
+  "license": {
+    "spdx": "",
+    "permissionEvidence": "",
+    "reviewStatus": "pending"
+  },
+  "applicability": [
+    {"quantity": "temperature", "min": -40.0, "max": 125.0, "unit": "C"}
+  ],
+  "evidenceRefs": ["blocked:no-authorized-model-data"]
+}

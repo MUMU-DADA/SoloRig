@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "schema": "solorig-model-audit",
+  "modelId": "test.wrong.version",
+  "deviceFamily": "test-mathematical",
+  "partNumber": "test-only",
+  "modelKind": "test-mathematical",
+  "runtimeStatus": "approved",
+  "parameters": [],
+  "source": {"origin": "SoloRig", "version": "m14", "integrity": "self:test"},
+  "license": {"spdx": "MIT", "permissionEvidence": "self", "reviewStatus": "approved"},
+  "applicability": [{"quantity": "temperature", "min": -1.0, "max": 1.0, "unit": "C"}],
+  "evidenceRefs": ["test:wrong-version"]
+}
