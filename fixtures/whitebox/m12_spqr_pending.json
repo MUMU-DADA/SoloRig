@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "schema": "circuit",
+  "referenceGround": "0",
+  "nodes": ["in", "mid", "out", "0"],
+  "ports": [
+    {"id": "input", "direction": "input", "node": "in"},
+    {"id": "output", "direction": "output", "node": "out"}
+  ],
+  "supplies": [],
+  "components": [
+    {"id": "edge-a", "kind": "generic-edge", "pins": ["in", "mid"]},
+    {"id": "edge-b", "kind": "generic-edge", "pins": ["mid", "out"]},
+    {"id": "edge-c", "kind": "generic-edge", "pins": ["out", "in"]}
+  ],
+  "subcircuits": [],
+  "modelReferences": [],
+  "backend": {"preferred": "mna"},
+  "expected": {"classification": "spqr", "error": "UnsupportedTopology"}
+}

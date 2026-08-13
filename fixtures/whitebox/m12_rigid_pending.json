@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "schema": "circuit",
+  "referenceGround": "0",
+  "nodes": ["in", "control", "out", "0"],
+  "ports": [
+    {"id": "input", "direction": "input", "node": "in"},
+    {"id": "output", "direction": "output", "node": "out"}
+  ],
+  "supplies": [],
+  "components": [
+    {"id": "controlled", "kind": "generic-multi-pin", "pins": ["in", "control", "out"]}
+  ],
+  "subcircuits": [],
+  "modelReferences": [],
+  "backend": {"preferred": "mna"},
+  "expected": {"classification": "rigid", "error": "UnsupportedTopology"}
+}

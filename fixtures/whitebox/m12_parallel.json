@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "schema": "circuit",
+  "referenceGround": "0",
+  "nodes": ["in", "out", "0"],
+  "ports": [
+    {"id": "input", "direction": "input", "node": "in"},
+    {"id": "output", "direction": "output", "node": "out"}
+  ],
+  "supplies": [],
+  "components": [
+    {"id": "edge-a", "kind": "generic-edge", "pins": ["in", "out"]},
+    {"id": "edge-b", "kind": "generic-edge", "pins": ["in", "out"]}
+  ],
+  "subcircuits": [],
+  "modelReferences": [],
+  "backend": {"preferred": "wdf"}
+}
