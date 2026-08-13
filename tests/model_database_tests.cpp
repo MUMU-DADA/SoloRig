@@ -88,8 +88,7 @@ TEST_CASE("M14 rejects missing fields, nonfinite values, ranges, version and unk
 
 TEST_CASE("M14 exposes explicit blocked contracts for every protected device family") {
     const auto contracts = solo_rig::ModelKindContracts();
-    for (const auto kind : {solo_rig::ModelKind::Diode, solo_rig::ModelKind::Zener,
-                            solo_rig::ModelKind::Bjt, solo_rig::ModelKind::Jfet,
+    for (const auto kind : {solo_rig::ModelKind::Bjt, solo_rig::ModelKind::Jfet,
                             solo_rig::ModelKind::Mosfet, solo_rig::ModelKind::Opamp,
                             solo_rig::ModelKind::Ota, solo_rig::ModelKind::Triode,
                             solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
@@ -105,4 +104,42 @@ TEST_CASE("M14 exposes explicit blocked contracts for every protected device fam
                                         });
     REQUIRE(test_kind != contracts.end());
     REQUIRE(test_kind->availability == solo_rig::ModelAvailability::Approved);
+}
+
+TEST_CASE("M18-C1 registers only self-authored clean-room diode and Zener families") {
+    for (const auto fixture : {"m18c1_cleanroom_diode_model.json", "m18c1_cleanroom_zener_model.json"}) {
+        const auto parsed = solo_rig::ParseModelAuditJson(ReadFixture(fixture));
+        REQUIRE(parsed.error == std::nullopt);
+        REQUIRE(parsed.model.has_value());
+        REQUIRE(parsed.model->part_number.find("no-commercial-part") != std::string::npos);
+        REQUIRE(parsed.model->source.origin.find("self-authored clean-room") != std::string::npos);
+        const auto built = solo_rig::BuildModelDatabase(ReadFixture(fixture));
+        REQUIRE(built.error == std::nullopt);
+        REQUIRE(built.database.has_value());
+        REQUIRE(built.database->Lookup(parsed.model->model_id).model.has_value());
+    }
+
+    const auto untrusted = solo_rig::ParseModelAuditJson(ReadFixture("m18c1_untrusted_diode_model.json"));
+    REQUIRE(untrusted.model.has_value());
+    const auto rejected = solo_rig::BuildModelDatabase(ReadFixture("m18c1_untrusted_diode_model.json"));
+    REQUIRE(!rejected.database.has_value());
+    REQUIRE(rejected.error == solo_rig::ModelAuditError::MissingModelAuthorization);
+
+    const auto contracts = solo_rig::ModelKindContracts();
+    for (const auto kind : {solo_rig::ModelKind::Diode, solo_rig::ModelKind::Zener}) {
+        const auto found = std::find_if(contracts.begin(), contracts.end(),
+                                        [kind](const auto& contract) { return contract.kind == kind; });
+        REQUIRE(found != contracts.end());
+        REQUIRE(found->availability == solo_rig::ModelAvailability::Approved);
+    }
+    for (const auto kind : {solo_rig::ModelKind::Bjt, solo_rig::ModelKind::Jfet,
+                            solo_rig::ModelKind::Mosfet, solo_rig::ModelKind::Opamp,
+                            solo_rig::ModelKind::Ota, solo_rig::ModelKind::Triode,
+                            solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
+                            solo_rig::ModelKind::TransformerCore}) {
+        const auto found = std::find_if(contracts.begin(), contracts.end(),
+                                        [kind](const auto& contract) { return contract.kind == kind; });
+        REQUIRE(found != contracts.end());
+        REQUIRE(found->availability == solo_rig::ModelAvailability::Blocked);
+    }
 }

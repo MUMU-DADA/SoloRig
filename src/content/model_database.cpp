@@ -63,7 +63,17 @@ std::optional<ModelLicenseReviewStatus> ParseReviewStatus(std::string_view value
 }
 
 bool IsApprovedKind(ModelKind kind) {
-    return kind == ModelKind::TestMathematical;
+    return kind == ModelKind::Diode || kind == ModelKind::Zener ||
+           kind == ModelKind::TestMathematical;
+}
+
+bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
+    if (model.kind != ModelKind::Diode && model.kind != ModelKind::Zener) {
+        return true;
+    }
+    return model.part_number.find("no-commercial-part") != std::string::npos &&
+           model.source.origin.find("self-authored clean-room") != std::string::npos &&
+           model.license.permission_evidence == "self-authored-clean-room";
 }
 
 } // namespace
@@ -88,8 +98,8 @@ const char* ModelKindName(ModelKind kind) noexcept {
 
 std::vector<ModelKindContract> ModelKindContracts() {
     return {
-        {ModelKind::Diode, ModelAvailability::Blocked},
-        {ModelKind::Zener, ModelAvailability::Blocked},
+        {ModelKind::Diode, ModelAvailability::Approved},
+        {ModelKind::Zener, ModelAvailability::Approved},
         {ModelKind::Bjt, ModelAvailability::Blocked},
         {ModelKind::Jfet, ModelAvailability::Blocked},
         {ModelKind::Mosfet, ModelAvailability::Blocked},
@@ -251,6 +261,9 @@ ModelAuditParseResult ParseModelAuditJson(std::string_view source) {
 
 std::optional<ModelAuditError> ModelDatabase::Register(ModelAuditRecord model) {
     if (model.license.review_status != ModelLicenseReviewStatus::Approved) {
+        return ModelAuditError::MissingModelAuthorization;
+    }
+    if (!IsAuthorizedCleanRoomDevice(model)) {
         return ModelAuditError::MissingModelAuthorization;
     }
     if (model.availability != ModelAvailability::Approved || !IsApprovedKind(model.kind)) {

@@ -10,6 +10,15 @@ namespace {
 
 constexpr std::uint32_t kNoIndex = std::numeric_limits<std::uint32_t>::max();
 
+std::optional<double> ModelParameter(const ModelAuditRecord& model, std::string_view id) {
+    const auto parameter = std::find_if(model.parameters.begin(), model.parameters.end(),
+                                        [id](const auto& candidate) { return candidate.id == id; });
+    if (parameter == model.parameters.end()) {
+        return std::nullopt;
+    }
+    return parameter->default_value;
+}
+
 std::int32_t FindNode(const CircuitNetlist& circuit, std::string_view node) {
     if (node == circuit.reference_ground) {
         return -1;
@@ -238,11 +247,14 @@ void StampDiode(std::vector<double>& matrix,
     const auto positive = element.positive_node >= 0 ? guess[static_cast<std::size_t>(element.positive_node)] : 0.0;
     const auto negative = element.negative_node >= 0 ? guess[static_cast<std::size_t>(element.negative_node)] : 0.0;
     const auto voltage = positive - negative;
-    const auto forward = std::exp(std::clamp(voltage / element.diode_thermal_voltage, -60.0, 60.0));
-    const auto current = element.diode_saturation_current * (forward - 1.0);
-    const auto conductance = element.diode_saturation_current / element.diode_thermal_voltage * forward;
-    const auto equivalent_current = current - conductance * voltage;
-    StampConductance(matrix, size, element.positive_node, element.negative_node, conductance);
+    const auto evaluation = EvaluateNonlinearDevice(element.nonlinear_model, voltage);
+    if (!evaluation.Succeeded()) {
+        StampConductance(matrix, size, element.positive_node, element.negative_node,
+                         std::numeric_limits<double>::quiet_NaN());
+        return;
+    }
+    const auto equivalent_current = evaluation.current - evaluation.jacobian * voltage;
+    StampConductance(matrix, size, element.positive_node, element.negative_node, evaluation.jacobian);
     StampCurrent(rhs, element.positive_node, element.negative_node, -equivalent_current);
 }
 
@@ -413,8 +425,7 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
             }
             double maximum_delta = 0.0;
             double maximum_value = 1.0;
-            bool step_exceeded = false;
-            double bjt_step_scale = 1.0;
+            double nonlinear_step_scale = 1.0;
             for (std::uint32_t index = 0; index < matrix_size_; ++index) {
                 maximum_value = std::max(maximum_value, std::fabs(solution_[index]));
                 maximum_delta = std::max(maximum_delta, std::fabs(solution_[index] - newton_previous_[index]));
@@ -425,8 +436,11 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     const auto old_negative = element.negative_node >= 0 ? newton_previous_[element.negative_node] : 0.0;
                     const auto new_positive = element.positive_node >= 0 ? solution_[element.positive_node] : 0.0;
                     const auto new_negative = element.negative_node >= 0 ? solution_[element.negative_node] : 0.0;
-                    if (std::fabs((new_positive - new_negative) - (old_positive - old_negative)) > element.diode_max_step) {
-                        step_exceeded = true;
+                    const auto junction_step = std::fabs(
+                        (new_positive - new_negative) - (old_positive - old_negative));
+                    if (junction_step > element.nonlinear_model.max_step && std::isfinite(junction_step)) {
+                        nonlinear_step_scale = std::min(
+                            nonlinear_step_scale, element.nonlinear_model.max_step / junction_step);
                     }
                 }
                 if (element.type == CircuitComponentType::Bjt) {
@@ -446,21 +460,19 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     if (be_delta > element.bjt_max_step || bc_delta > element.bjt_max_step) {
                         const auto largest_junction_step = std::max(be_delta, bc_delta);
                         if (largest_junction_step > 0.0 && std::isfinite(largest_junction_step)) {
-                            bjt_step_scale = std::min(bjt_step_scale, element.bjt_max_step / largest_junction_step);
+                            nonlinear_step_scale = std::min(
+                                nonlinear_step_scale, element.bjt_max_step / largest_junction_step);
                         }
                     }
                 }
             }
-            if (step_exceeded) {
-                return {.error = MnaSolveError::NonConvergent};
-            }
-            // BJT junction steps are damped, rather than allocating a second
+            // Nonlinear junction steps are damped, rather than allocating a second
             // trial vector. If the bounded iteration budget is exhausted the
             // caller receives NonConvergent deterministically.
-            if (bjt_step_scale < 1.0) {
+            if (nonlinear_step_scale < 1.0) {
                 for (std::uint32_t index = 0; index < matrix_size_; ++index) {
                     solution_[index] = newton_previous_[index] +
-                        bjt_step_scale * (solution_[index] - newton_previous_[index]);
+                        nonlinear_step_scale * (solution_[index] - newton_previous_[index]);
                 }
                 maximum_delta = 0.0;
                 maximum_value = 1.0;
@@ -472,7 +484,7 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
             // A limited junction step is progress, not convergence. Otherwise
             // maxStep values below the numeric tolerance could falsely accept
             // the initial guess without satisfying the undamped Newton system.
-            if (bjt_step_scale >= 1.0 &&
+            if (nonlinear_step_scale >= 1.0 &&
                 (!has_nonlinearity || maximum_delta <= absolute_tolerance_ + relative_tolerance_ * maximum_value)) {
                 converged = true;
                 break;
@@ -673,9 +685,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                                 .inductor_history_index = kNoIndex,
                                                 .value = 0.0,
                                                 .initial = component.initial.value_or(0.0),
-                                                .diode_saturation_current = 0.0,
-                                                .diode_thermal_voltage = 0.0,
-                                                .diode_max_step = 0.0,
+                                                .nonlinear_model = {},
                                                 .controlled_gain = 0.0,
                                                 .controlled_minimum = 0.0,
                                                 .controlled_maximum = 0.0,
@@ -746,9 +756,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                                 .inductor_history_index = kNoIndex,
                                                 .value = 0.0,
                                                 .initial = 0.0,
-                                                .diode_saturation_current = 0.0,
-                                                .diode_thermal_voltage = 0.0,
-                                                .diode_max_step = 0.0,
+                                                .nonlinear_model = {},
                                                 .controlled_gain = controlled.gain,
                                                 .controlled_minimum = controlled.minimum.value_or(0.0),
                                                 .controlled_maximum = controlled.maximum.value_or(0.0),
@@ -769,9 +777,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                             .inductor_history_index = kNoIndex,
                                             .value = component.value.value_or(0.0),
                                             .initial = component.initial.value_or(0.0),
-                                            .diode_saturation_current = 0.0,
-                                            .diode_thermal_voltage = 0.0,
-                                            .diode_max_step = 0.0};
+                                            .nonlinear_model = {}};
         if (component.type == CircuitComponentType::VoltageSource) {
             element.branch_index = non_ground_nodes + branch++;
         }
@@ -784,16 +790,24 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             element.history_index = history++;
         }
         if (component.type == CircuitComponentType::Diode) {
-            if (!component.diode_model.has_value() || component.diode_model->kind != "shockley" ||
-                !std::isfinite(component.diode_model->saturation_current) ||
-                !std::isfinite(component.diode_model->thermal_voltage) ||
-                !std::isfinite(component.diode_model->max_step) || component.diode_model->saturation_current <= 0.0 ||
-                component.diode_model->thermal_voltage <= 0.0 || component.diode_model->max_step <= 0.0) {
+            if (!component.diode_model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            if (component.diode_model->model_version != 1U) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
-            element.diode_saturation_current = component.diode_model->saturation_current;
-            element.diode_thermal_voltage = component.diode_model->thermal_voltage;
-            element.diode_max_step = component.diode_model->max_step;
+            element.nonlinear_model = {
+                .kind = component.diode_model->kind == "shockley" ? NonlinearDeviceKind::Diode
+                                                                  : NonlinearDeviceKind::Zener,
+                .saturation_current = component.diode_model->saturation_current,
+                .thermal_voltage = component.diode_model->thermal_voltage,
+                .breakdown_voltage = component.diode_model->breakdown_voltage,
+                .breakdown_current = component.diode_model->breakdown_current,
+                .breakdown_slope = component.diode_model->breakdown_slope,
+                .max_step = component.diode_model->max_step};
+            if (!ValidateNonlinearDeviceModel(element.nonlinear_model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
         }
         prepared.elements_.push_back(element);
     }
@@ -822,6 +836,48 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
     }
     prepared.capacitor_history_.assign(history, 0.0);
     return {.circuit = std::move(prepared), .error = std::nullopt};
+}
+
+MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDatabase& model_database) {
+    CircuitNetlist bound = circuit;
+    for (auto& component : bound.components) {
+        if (component.type != CircuitComponentType::Diode || component.diode_model.has_value()) {
+            continue;
+        }
+        if (!component.model.has_value()) {
+            return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+        }
+        const auto diode = model_database.Bind({*component.model, ModelKind::Diode});
+        const auto zener = diode.model.has_value()
+            ? ModelLookupResult{} : model_database.Bind({*component.model, ModelKind::Zener});
+        const auto* record = diode.model.has_value() ? &*diode.model
+            : (zener.model.has_value() ? &*zener.model : nullptr);
+        if (record == nullptr) {
+            return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+        }
+        const auto saturation = ModelParameter(*record, "saturation-current");
+        const auto thermal = ModelParameter(*record, "thermal-voltage");
+        const auto max_step = ModelParameter(*record, "max-step");
+        const auto breakdown_voltage = ModelParameter(*record, "breakdown-voltage");
+        const auto breakdown_current = ModelParameter(*record, "breakdown-current");
+        const auto breakdown_slope = ModelParameter(*record, "breakdown-slope");
+        const bool is_zener = record->kind == ModelKind::Zener;
+        if (!saturation.has_value() || !thermal.has_value() || !max_step.has_value() ||
+            (is_zener && (!breakdown_voltage.has_value() || !breakdown_current.has_value() ||
+                           !breakdown_slope.has_value()))) {
+            return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+        }
+        component.diode_model = CircuitDiodeModel{
+            .kind = is_zener ? "zener" : "shockley",
+            .model_version = 1U,
+            .saturation_current = *saturation,
+            .thermal_voltage = *thermal,
+            .breakdown_voltage = breakdown_voltage.value_or(0.0),
+            .breakdown_current = breakdown_current.value_or(0.0),
+            .breakdown_slope = breakdown_slope.value_or(0.0),
+            .max_step = *max_step};
+    }
+    return CompileMnaCircuit(bound);
 }
 
 } // namespace solo_rig

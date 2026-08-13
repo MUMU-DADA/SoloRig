@@ -1,0 +1,60 @@
+{
+    "version": 2,
+    "schema": "circuit",
+    "referenceGround": "0",
+    "nodes": [
+        "in",
+        "out",
+        "0"
+    ],
+    "ports": [
+        {
+            "id": "input",
+            "direction": "input",
+            "node": "in"
+        },
+        {
+            "id": "output",
+            "direction": "output",
+            "node": "out"
+        }
+    ],
+    "components": [
+        {
+            "id": "z",
+            "type": "diode",
+            "pins": [
+                "out",
+                "0"
+            ],
+            "model": {
+                "kind": "zener",
+                "saturationCurrent": 1.0e-12,
+                "thermalVoltage": 0.02585,
+                "breakdownVoltage": 5.1,
+                "breakdownCurrent": 1.0e-6,
+                "breakdownSlope": 0.1,
+                "maxStep": 2.0
+            }
+        },
+        {
+            "id": "r",
+            "type": "resistor",
+            "pins": [
+                "in",
+                "out"
+            ],
+            "value": 10000
+        }
+    ],
+    "solver": {
+        "method": "modified-nodal-analysis",
+        "integration": "backward-euler",
+        "oversampling": 1,
+        "convergence": {
+            "maxIterations": 64,
+            "absoluteTolerance": 1.0e-10,
+            "relativeTolerance": 1.0e-8
+        }
+    }
+}

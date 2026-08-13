@@ -1,12 +1,28 @@
 #include "content/circuit_v2.hpp"
+#include "content/model_database.hpp"
 #include "dsp/mna_solver.hpp"
 #include "test_framework.hpp"
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <sstream>
+#include <stdexcept>
 #include <string_view>
 
 namespace {
+
+std::string ReadFixture(std::string_view name) {
+    const auto path = std::filesystem::path(SOLO_RIG_SOURCE_DIRECTORY) / "fixtures" / "whitebox" / name;
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) {
+        throw std::runtime_error("cannot open M18-C1 fixture: " + path.string());
+    }
+    std::ostringstream source;
+    source << stream.rdbuf();
+    return source.str();
+}
 
 constexpr std::string_view kDivider = R"({
   "version":2,
@@ -782,6 +798,126 @@ TEST_CASE("MNA rejects non-finite prepared diode model values before Prepare") {
     const auto compiled = solo_rig::CompileMnaCircuit(circuit);
     REQUIRE(!compiled.circuit.has_value());
     REQUIRE(compiled.error == solo_rig::MnaCompileError::InvalidModel);
+}
+
+TEST_CASE("M18-C1 fixtures bind diode and Zener models through circuit v2") {
+    const auto diode = solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_diode_forward.json"));
+    REQUIRE(diode.circuit.has_value());
+    REQUIRE(diode.circuit->components.front().diode_model.has_value());
+    REQUIRE(diode.circuit->components.front().diode_model->kind == "shockley");
+    const auto zener = solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_zener_breakdown.json"));
+    REQUIRE(zener.circuit.has_value());
+    REQUIRE(zener.circuit->components.front().diode_model.has_value());
+    REQUIRE(zener.circuit->components.front().diode_model->kind == "zener");
+    REQUIRE(zener.circuit->components.front().diode_model->breakdown_voltage == 5.1);
+    const auto invalid = solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_invalid_zener.json"));
+    REQUIRE(!invalid.circuit.has_value());
+    REQUIRE(invalid.errors.front() == solo_rig::CircuitLoadError::InvalidValue);
+}
+
+TEST_CASE("M18-C1 approved model references bind during MNA Prepare and unauthorized references fail") {
+    const auto diode_database = solo_rig::BuildModelDatabase(ReadFixture("m18c1_cleanroom_diode_model.json"));
+    REQUIRE(diode_database.database.has_value());
+    const auto diode_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_diode_reference.json"));
+    REQUIRE(diode_graph.circuit.has_value());
+    REQUIRE(!diode_graph.circuit->components.front().diode_model.has_value());
+    const auto without_database = solo_rig::CompileMnaCircuit(*diode_graph.circuit);
+    REQUIRE(without_database.error == solo_rig::MnaCompileError::MissingModelAuthorization);
+    auto diode = solo_rig::CompileMnaCircuit(*diode_graph.circuit, *diode_database.database);
+    REQUIRE(diode.circuit.has_value());
+    REQUIRE(diode.circuit->Prepare(48000.0));
+    REQUIRE(diode.circuit->Solve(1.0).Succeeded());
+
+    const auto zener_database = solo_rig::BuildModelDatabase(ReadFixture("m18c1_cleanroom_zener_model.json"));
+    REQUIRE(zener_database.database.has_value());
+    const auto zener_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_zener_reference.json"));
+    REQUIRE(zener_graph.circuit.has_value());
+    auto zener = solo_rig::CompileMnaCircuit(*zener_graph.circuit, *zener_database.database);
+    REQUIRE(zener.circuit.has_value());
+    REQUIRE(zener.circuit->Prepare(48000.0));
+    const auto reverse = zener.circuit->Solve(-10.0);
+    REQUIRE(reverse.Succeeded());
+    REQUIRE(reverse.output_voltage < -5.0);
+
+    solo_rig::ModelDatabase empty;
+    const auto unauthorized = solo_rig::CompileMnaCircuit(*zener_graph.circuit, empty);
+    REQUIRE(unauthorized.error == solo_rig::MnaCompileError::MissingModelAuthorization);
+}
+
+TEST_CASE("M18-C1 prepared nonlinear Solve is a noexcept preallocated boundary") {
+    static_assert(noexcept(std::declval<solo_rig::MnaPreparedCircuit&>().Solve(0.0)));
+    constexpr auto contract = solo_rig::MnaPreparedCircuit::ProcessContract();
+    static_assert(contract.process_noexcept);
+    static_assert(!contract.process_allocates);
+    static_assert(!contract.process_reads_files);
+    static_assert(!contract.process_parses_json);
+    static_assert(!contract.process_locks);
+    static_assert(contract.prepare_owns_compilation);
+    REQUIRE(solo_rig::IsRealtimeSafe(contract));
+    auto compiled = solo_rig::CompileMnaCircuit(
+        *solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_zener_breakdown.json")).circuit);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(192000.0));
+    for (int sample = 0; sample < 1024; ++sample) {
+        const auto solved = compiled.circuit->Solve(sample % 2 == 0 ? -10.0 : 1.0);
+        REQUIRE(solved.Succeeded());
+    }
+}
+
+TEST_CASE("M18-C1 MNA solves forward conduction reverse breakdown and zero bias") {
+    auto diode_compiled = solo_rig::CompileMnaCircuit(
+        *solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_diode_forward.json")).circuit);
+    REQUIRE(diode_compiled.circuit.has_value());
+    REQUIRE(diode_compiled.circuit->Prepare(48000.0));
+    const auto zero = diode_compiled.circuit->Solve(0.0);
+    const auto forward = diode_compiled.circuit->Solve(1.0);
+    REQUIRE(zero.Succeeded());
+    REQUIRE(std::fabs(zero.output_voltage) < 1.0e-12);
+    REQUIRE(forward.Succeeded());
+    REQUIRE(forward.output_voltage > 0.4);
+    REQUIRE(forward.output_voltage < 0.8);
+
+    auto zener_compiled = solo_rig::CompileMnaCircuit(
+        *solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_zener_breakdown.json")).circuit);
+    REQUIRE(zener_compiled.circuit.has_value());
+    REQUIRE(zener_compiled.circuit->Prepare(48000.0));
+    const auto reverse = zener_compiled.circuit->Solve(-10.0);
+    REQUIRE(reverse.Succeeded());
+    REQUIRE(reverse.output_voltage < -5.0);
+    REQUIRE(reverse.output_voltage > -6.5);
+}
+
+TEST_CASE("M18-C1 dynamic diode path matches an independent backward-Euler reference and Reset") {
+    auto compiled = solo_rig::CompileMnaCircuit(
+        *solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_diode_dynamic.json")).circuit);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(1000.0));
+    double history = 0.1;
+    for (const double input : {1.0, 1.0, -0.25, 0.5}) {
+        auto reference = history;
+        for (int iteration = 0; iteration < 64; ++iteration) {
+            const auto exponential = std::exp(reference / 0.02585);
+            const auto current = 1.0e-12 * (exponential - 1.0);
+            const auto jacobian = 1.0e-12 / 0.02585 * exponential;
+            const auto residual = (reference - input) / 1000.0 +
+                1.0e-6 * 1000.0 * (reference - history) + current;
+            const auto next = reference - residual / (1.0 / 1000.0 + 1.0e-6 * 1000.0 + jacobian);
+            if (std::fabs(next - reference) < 1.0e-13) {
+                reference = next;
+                break;
+            }
+            reference = next;
+        }
+        const auto solved = compiled.circuit->Solve(input);
+        REQUIRE(solved.Succeeded());
+        REQUIRE(std::fabs(solved.output_voltage - reference) < 1.0e-9);
+        history = reference;
+    }
+    compiled.circuit->Reset();
+    const auto reset = compiled.circuit->Solve(1.0);
+    REQUIRE(reset.Succeeded());
+    REQUIRE(reset.output_voltage > 0.1);
+    REQUIRE(reset.output_voltage < 0.6);
 }
 
 TEST_CASE("circuit v2 parses inductor parameters and rejects invalid values") {

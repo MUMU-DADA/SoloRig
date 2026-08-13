@@ -56,6 +56,7 @@ add_library(solo_rig_core STATIC
     src/core/rig_runtime.cpp
     src/dsp/diode_clipper.cpp
     src/dsp/mna_solver.cpp
+    src/dsp/nonlinear_device.cpp
     src/dsp/digital_delay.cpp
     src/dsp/impulse_response.cpp
     src/dsp/nam_processor.cpp
@@ -220,6 +221,7 @@ if(BUILD_TESTING)
         tests/realtime_contract_tests.cpp
         tests/wdf_runtime_tests.cpp
         tests/diode_clipper_tests.cpp
+        tests/nonlinear_device_tests.cpp
         tests/digital_delay_tests.cpp
         tests/impulse_response_tests.cpp
         tests/nam_processor_tests.cpp

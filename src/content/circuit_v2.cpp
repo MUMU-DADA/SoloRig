@@ -292,21 +292,44 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                 }
             } else if (const auto* model_object = model->AsObject(); model_object != nullptr) {
                 const auto kind = StringValue(Find(*model_object, "kind"));
+                const auto model_version = Find(*model_object, "modelVersion") == nullptr
+                    ? std::optional<std::uint32_t>(1U) : UnsignedValue(Find(*model_object, "modelVersion"));
                 const auto saturation = Find(*model_object, "saturationCurrent") == nullptr
                     ? std::optional<double>(1.0e-9) : NumberValue(Find(*model_object, "saturationCurrent"));
                 const auto thermal = Find(*model_object, "thermalVoltage") == nullptr
                     ? std::optional<double>(0.02585) : NumberValue(Find(*model_object, "thermalVoltage"));
                 const auto max_step = Find(*model_object, "maxStep") == nullptr
                     ? std::optional<double>(1.0) : NumberValue(Find(*model_object, "maxStep"));
-                if (*type != CircuitComponentType::Diode || !kind.has_value() || *kind != "shockley" ||
-                    !saturation.has_value() || !thermal.has_value() || !max_step.has_value() ||
-                    *saturation <= 0.0 || *thermal <= 0.0 || *max_step <= 0.0) {
+                const auto breakdown_voltage = Find(*model_object, "breakdownVoltage") == nullptr
+                    ? std::optional<double>{} : NumberValue(Find(*model_object, "breakdownVoltage"));
+                const auto breakdown_current = Find(*model_object, "breakdownCurrent") == nullptr
+                    ? std::optional<double>{} : NumberValue(Find(*model_object, "breakdownCurrent"));
+                const auto breakdown_slope = Find(*model_object, "breakdownSlope") == nullptr
+                    ? std::optional<double>{} : NumberValue(Find(*model_object, "breakdownSlope"));
+                const bool is_shockley = kind.has_value() && *kind == "shockley";
+                const bool is_zener = kind.has_value() && *kind == "zener";
+                const bool has_breakdown = breakdown_voltage.has_value() || breakdown_current.has_value() ||
+                    breakdown_slope.has_value();
+                if (*type != CircuitComponentType::Diode || (!is_shockley && !is_zener) ||
+                    !model_version.has_value() || *model_version != 1U || !saturation.has_value() ||
+                    !thermal.has_value() || !max_step.has_value() || *saturation <= 0.0 || *saturation > 1.0e-3 ||
+                    *thermal < 1.0e-6 || *thermal > 1.0 || *max_step < 1.0e-6 || *max_step > 10.0 ||
+                    (is_shockley && has_breakdown) ||
+                    (is_zener && (!breakdown_voltage.has_value() || !breakdown_current.has_value() ||
+                                  !breakdown_slope.has_value() || *breakdown_voltage < 0.1 ||
+                                  *breakdown_voltage > 100.0 || *breakdown_current < 1.0e-12 ||
+                                  *breakdown_current > 1.0 || *breakdown_slope < 1.0e-6 ||
+                                  *breakdown_slope > 10.0))) {
                     return Failure(CircuitLoadError::InvalidValue);
                 }
-                parsed_component.model = "inline-shockley";
+                parsed_component.model = is_shockley ? "inline-shockley" : "inline-zener";
                 parsed_component.diode_model = CircuitDiodeModel{.kind = *kind,
+                                                                   .model_version = *model_version,
                                                                    .saturation_current = *saturation,
                                                                    .thermal_voltage = *thermal,
+                                                                   .breakdown_voltage = breakdown_voltage.value_or(0.0),
+                                                                   .breakdown_current = breakdown_current.value_or(0.0),
+                                                                   .breakdown_slope = breakdown_slope.value_or(0.0),
                                                                    .max_step = *max_step};
             } else {
                 return Failure(CircuitLoadError::InvalidValue);
@@ -329,9 +352,9 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         if (*type == CircuitComponentType::Diode && !parsed_component.model.has_value()) {
             return Failure(CircuitLoadError::MissingModel);
         }
-        if (*type == CircuitComponentType::Diode && !parsed_component.diode_model.has_value()) {
-            return Failure(CircuitLoadError::InvalidValue);
-        }
+        // A safe string model is retained as an unresolved reference. The
+        // Prepare-time MNA overload accepting ModelDatabase must authorize and
+        // bind it before a runtime can be constructed.
 
         if (is_controlled_source) {
             const auto* controlled = Find(*component, "controlledSource");

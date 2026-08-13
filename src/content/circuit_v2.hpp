@@ -60,8 +60,12 @@ struct CircuitSwitchSpec {
 
 struct CircuitDiodeModel {
     std::string kind{"shockley"};
+    std::uint32_t model_version{1};
     double saturation_current{1.0e-9};
     double thermal_voltage{0.02585};
+    double breakdown_voltage{};
+    double breakdown_current{};
+    double breakdown_slope{};
     double max_step{1.0};
 };
 

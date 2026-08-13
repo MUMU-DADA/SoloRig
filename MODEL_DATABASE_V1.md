@@ -27,6 +27,7 @@ M14 只实现 SoloRig 自有的审计元数据、注册/查找边界和阻塞语
 1. `license.reviewStatus != approved` 返回 `MissingModelAuthorization`。
 2. `runtimeStatus != approved` 或器件族契约为 blocked/planned 时返回 `Blocked`。
 3. 只有数据库中的记录可由 `Lookup`/`Bind(modelId, expectedKind)` 返回；未知标识返回 `UnknownModel`，类型不符返回 `ModelKindMismatch`。
-4. 当前唯一允许进入数据库的运行时记录是无商业归属的 `test-mathematical` fixture。二极管/Zener、BJT、JFET、MOSFET、运放/OTA、三极管/五极管、vari-mu、变压器/磁芯均保留 blocked 契约，不能静默退化为已有 MNA 器件。
+4. M18-C1 允许无商业归属、self-authored clean-room 且许可证审核通过的 `diode`、`zener` 和 `test-mathematical` 记录进入数据库。diode/Zener 的 Register 还强制要求来源包含 `self-authored clean-room`、型号标识包含 `no-commercial-part` 且 permission evidence 为 `self-authored-clean-room`；来源不明或伪装商业型号稳定返回 `MissingModelAuthorization`。BJT、JFET、MOSFET、运放/OTA、三极管/五极管、vari-mu、变压器/磁芯仍保持 blocked，不能静默退化为已有实验器件。
+5. `CompileMnaCircuit(circuit, database)` 是 M18-C1 的 Prepare-time 引用绑定入口：安全字符串 `model` 必须由数据库按 `modelId` 和 diode/Zener 类型绑定，参数只取已审计默认值并编译为 POD 运行时模型；无数据库、未知、类型不符或未授权引用返回 `MissingModelAuthorization`，不进入音频路径。
 
-模型数据库只建立控制线程/Prepare 阶段的审计和绑定对象；M13 `Process` 不读取数据库文件、不解析 JSON、不进行动态分配或锁操作。
+模型数据库只建立控制线程/Prepare 阶段的审计和绑定对象；`Solve`/模块 `Process` 不持有数据库、不读取文件、不解析 JSON、不进行动态分配或锁操作。inline Shockley/Zener 对象仍是 circuit v2 的 clean-room 数学模型兼容入口，但不能被解释为具体商业型号或数据库授权证据。

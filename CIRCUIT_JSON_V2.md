@@ -45,7 +45,7 @@
 | `capacitor` | 支持 | 支持 | backward-Euler 电压历史，`initial` 为伏特 |
 | `inductor` | 支持 | 支持 | backward-Euler 分支电流历史，`value` 为亨利、`initial` 为安培 |
 | `voltage-source` | 支持 | 支持 | 额外 MNA branch unknown，`value` 为伏特 |
-| `diode` | 支持 | 支持 | 有界 Shockley Newton；字符串 `silicon`/`shockley` 或 inline 模型对象 |
+| `diode` | 支持 | 支持 | M18-C1 统一 IV/Jacobian + 有界 Newton；inline `shockley`/`zener` clean-room 数学模型，或经 `ModelDatabase` 审计的安全字符串引用 |
 | `potentiometer` | 支持 | 支持静态位置 | `value` 为总阻值；`potentiometer.position/minimum/maximum` 定义位置，`wiperNode` 或第三引脚定义滑片；Compile 时展开为两个预编译电阻 |
 | `vccs` | 支持 | 支持 | 四引脚 `[out+, out-, control+, control-]`；`controlledSource.kind=vccs`、`modelVersion=1`、有限 `gain`，可选电流限幅 |
 | `ideal-op-amp` | 支持 | 支持基础理想 VCVS | 四引脚 `[out+, out-, non-inverting, inverting]`；有限正 `gain`，可选输出电压限幅；不是非理想芯片模型 |
@@ -60,4 +60,6 @@ BJT 使用受限的 Ebers-Moll 端电流和显式 Jacobian 印章：`forwardBeta
 
 模块加载器对旧的 `schemaVersion: 1` + `kind: "analog-circuit"` 保持原受限 RC/二极管适配器；v2 读取根对象的 `version: 2`。未知版本、缺失字段、重复 ID、非法节点/引脚、范围值、缺失模型和危险路径均拒绝加载。v1 不会被静默转换为 v2，v2 也不会回退到旧硬编码拓扑。
 
-本版本仍不宣称通用器件覆盖、真实设备 1:1 校准、实时参数控制电位器、开关/受控源控制、非理想运放芯片、JFET/MOSFET、真空管、结电容、热反馈、供电下垂或测量基线自动校准；这些属于后续独立范围。M10 只归档上述受限 BJT Ebers-Moll 实验路径，超出安全范围或不收敛时明确拒绝；它不是 M18-C 的替代品。M9 的 VCCS/基础理想运放、M8 静态电位器、M7 线性电感 backward-Euler 与受限 diode Newton、NAM/原生 DSP 路径不受影响。
+M18-C1 的 Zener 使用 self-authored 双指数静态数学契约，参数包括正向饱和电流/热电压、反向击穿电压/电流/斜率和最大 Newton 步长；这不是商业器件参数。安全字符串引用只有通过 `CompileMnaCircuit(circuit, ModelDatabase)` 才能在 Prepare 阶段绑定，普通编译稳定返回 `MissingModelAuthorization`；inline 模型对象不经过数据库，必须按本规范范围校验且只代表 generic clean-room 数学模型。
+
+本版本仍不宣称通用器件覆盖、真实设备 1:1 校准、实时参数控制电位器、开关/受控源控制、非理想运放芯片、JFET/MOSFET、真空管、结电容、热反馈、供电下垂或测量基线自动校准；这些属于后续独立范围。M10 只归档上述受限 BJT Ebers-Moll 实验路径，超出安全范围或不收敛时明确拒绝；它不是 M18-C 的替代品。M9 的 VCCS/基础理想运放、M8 静态电位器、M7 线性电感 backward-Euler、NAM/原生 DSP 路径不受影响。

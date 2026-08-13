@@ -1,6 +1,9 @@
 #pragma once
 
 #include "content/circuit_v2.hpp"
+#include "content/model_database.hpp"
+#include "core/realtime_contract.hpp"
+#include "dsp/nonlinear_device.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -16,6 +19,7 @@ enum class MnaCompileError {
     InvalidValue,
     InvalidSolver,
     InvalidModel,
+    MissingModelAuthorization,
     InvalidConvergence,
 };
 
@@ -44,6 +48,9 @@ public:
     // Compile/Prepare owns all storage; Solve is the real-time-safe sample step
     // and only mutates preallocated matrices, RHS, solution and dynamic histories.
     [[nodiscard]] MnaSolveResult Solve(double input_voltage) noexcept;
+    [[nodiscard]] static constexpr RealtimeContract ProcessContract() noexcept {
+        return DefaultRealtimeContract();
+    }
     void Reset() noexcept;
 
 public:
@@ -59,9 +66,7 @@ public:
         std::uint32_t inductor_history_index{UINT32_MAX};
         double value{};
         double initial{};
-        double diode_saturation_current{};
-        double diode_thermal_voltage{};
-        double diode_max_step{};
+        NonlinearDeviceModel nonlinear_model{};
         double controlled_gain{};
         double controlled_minimum{};
         double controlled_maximum{};
@@ -105,5 +110,7 @@ struct MnaCompileResult {
 };
 
 [[nodiscard]] MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit);
+[[nodiscard]] MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit,
+                                                 const ModelDatabase& model_database);
 
 } // namespace solo_rig

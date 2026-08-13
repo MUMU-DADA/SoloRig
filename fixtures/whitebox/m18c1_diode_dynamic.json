@@ -1,0 +1,69 @@
+{
+    "version": 2,
+    "schema": "circuit",
+    "referenceGround": "0",
+    "nodes": [
+        "in",
+        "out",
+        "0"
+    ],
+    "ports": [
+        {
+            "id": "input",
+            "direction": "input",
+            "node": "in"
+        },
+        {
+            "id": "output",
+            "direction": "output",
+            "node": "out"
+        }
+    ],
+    "components": [
+        {
+            "id": "r",
+            "type": "resistor",
+            "pins": [
+                "in",
+                "out"
+            ],
+            "value": 1000
+        },
+        {
+            "id": "c",
+            "type": "capacitor",
+            "pins": [
+                "out",
+                "0"
+            ],
+            "value": 1.0e-6,
+            "initial": 0.1
+        },
+        {
+            "id": "d",
+            "type": "diode",
+            "pins": [
+                "out",
+                "0"
+            ],
+            "initial": 0.1,
+            "model": {
+                "kind": "shockley",
+                "modelVersion": 1,
+                "saturationCurrent": 1.0e-12,
+                "thermalVoltage": 0.02585,
+                "maxStep": 1.0
+            }
+        }
+    ],
+    "solver": {
+        "method": "modified-nodal-analysis",
+        "integration": "backward-euler",
+        "oversampling": 1,
+        "convergence": {
+            "maxIterations": 64,
+            "absoluteTolerance": 1.0e-12,
+            "relativeTolerance": 1.0e-10
+        }
+    }
+}
