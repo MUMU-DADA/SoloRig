@@ -2,6 +2,7 @@
 
 #include "dsp/digital_delay.hpp"
 #include "dsp/diode_clipper.hpp"
+#include "dsp/mna_solver.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -292,6 +293,63 @@ private:
     bool prepared_{};
 };
 
+class MnaCircuitRuntime final : public ModuleRuntimeProcessor {
+public:
+    MnaCircuitRuntime(std::uint32_t declared_latency_samples, MnaPreparedCircuit blueprint)
+        : declared_latency_samples_(declared_latency_samples), blueprint_(std::move(blueprint)) {}
+
+    bool Prepare(const AudioFormat& format) override {
+        if (!format.Validate().empty()) {
+            return false;
+        }
+        channel_circuits_.clear();
+        channel_circuits_.reserve(format.channel_count);
+        for (std::uint32_t channel = 0; channel < format.channel_count; ++channel) {
+            channel_circuits_.push_back(blueprint_);
+            if (!channel_circuits_.back().Prepare(format.sample_rate_hz)) {
+                channel_circuits_.clear();
+                prepared_ = false;
+                return false;
+            }
+        }
+        prepared_ = !channel_circuits_.empty();
+        return prepared_;
+    }
+
+    void Process(const AudioBuffer& input, AudioBuffer& output, std::uint32_t sample_count) noexcept override {
+        if (!prepared_ || sample_count > input.Capacity() || sample_count > output.Capacity() ||
+            input.ChannelCount() != channel_circuits_.size() || output.ChannelCount() != channel_circuits_.size()) {
+            return;
+        }
+        for (std::uint32_t channel = 0; channel < channel_circuits_.size(); ++channel) {
+            const auto* source = input.ChannelData(channel);
+            auto* destination = output.ChannelData(channel);
+            for (std::uint32_t sample = 0; sample < sample_count; ++sample) {
+                const auto solved = channel_circuits_[channel].Solve(source[sample]);
+                destination[sample] = solved.Succeeded() ? static_cast<float>(solved.output_voltage) : 0.0F;
+            }
+        }
+    }
+
+    [[nodiscard]] std::uint32_t DeclaredLatencySamples() const noexcept override {
+        return declared_latency_samples_;
+    }
+
+    [[nodiscard]] bool SetParameter(std::string_view, float) noexcept override {
+        return false;
+    }
+
+    [[nodiscard]] std::optional<float> ParameterValue(std::string_view) const noexcept override {
+        return std::nullopt;
+    }
+
+private:
+    std::uint32_t declared_latency_samples_{};
+    MnaPreparedCircuit blueprint_;
+    std::vector<MnaPreparedCircuit> channel_circuits_;
+    bool prepared_{};
+};
+
 std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateAnalogRuntime(const ModulePackage& package,
                                                                                                const AnalogCircuitLogic& logic) {
     std::optional<float> resistance;
@@ -391,6 +449,18 @@ std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> Create
         package.descriptor.declared_latency_samples, std::move(parameters), std::move(operations), uses_delay));
 }
 
+std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateMnaRuntime(
+    const ModulePackage& package,
+    const CircuitNetlist& circuit) {
+    const auto compiled = CompileMnaCircuit(circuit);
+    if (!compiled.circuit.has_value()) {
+        return compiled.error == MnaCompileError::UnsupportedComponent ? ModuleRuntimeError::UnsupportedCircuit
+                                                                        : ModuleRuntimeError::UnsupportedAnalogTopology;
+    }
+    return std::unique_ptr<ModuleRuntimeProcessor>(std::make_unique<MnaCircuitRuntime>(
+        package.descriptor.declared_latency_samples, *compiled.circuit));
+}
+
 } // namespace
 
 std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateModuleRuntime(const ModulePackage& package) {
@@ -401,6 +471,10 @@ std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> Create
     if (const auto* algorithm = std::get_if<DigitalAlgorithmLogic>(&package.logic)) {
         return package.descriptor.category == EffectCategory::DigitalAlgorithm ? CreateDigitalRuntime(package, *algorithm)
                                                                                 : ModuleRuntimeError::LogicCategoryMismatch;
+    }
+    if (const auto* circuit = std::get_if<CircuitNetlist>(&package.logic)) {
+        return package.descriptor.category == EffectCategory::AnalogCircuit ? CreateMnaRuntime(package, *circuit)
+                                                                             : ModuleRuntimeError::LogicCategoryMismatch;
     }
     return package.logic.index() == 0U ? ModuleRuntimeError::MissingLogic : ModuleRuntimeError::UnsupportedCategory;
 }

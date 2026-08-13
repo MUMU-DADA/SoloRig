@@ -270,9 +270,26 @@ std::optional<ModulePackageLoadError> ParseModuleLogic(const std::filesystem::pa
     }
 
     const auto& object = *parsed.value->AsObject();
-    const auto schema_version = ReadUnsigned(object, "schemaVersion");
+    const auto schema_version = ReadUnsigned(object, "schemaVersion").has_value()
+        ? ReadUnsigned(object, "schemaVersion")
+        : ReadUnsigned(object, "version");
     const auto kind = ReadString(object, "kind");
-    if (!schema_version.has_value() || !kind.has_value()) {
+    if (!schema_version.has_value()) {
+        return ModulePackageLoadError::InvalidLogicDefinition;
+    }
+    if (*schema_version == 2U && descriptor.category == EffectCategory::AnalogCircuit) {
+        const auto circuit = ParseCircuitV2Json(logic_source);
+        if (!circuit.circuit.has_value()) {
+            return std::any_of(circuit.errors.begin(), circuit.errors.end(), [](CircuitLoadError error) {
+                return error == CircuitLoadError::UnsupportedVersion;
+            })
+                ? ModulePackageLoadError::InvalidLogicSchema
+                : ModulePackageLoadError::InvalidLogicDefinition;
+        }
+        logic = *circuit.circuit;
+        return std::nullopt;
+    }
+    if (!kind.has_value()) {
         return ModulePackageLoadError::InvalidLogicDefinition;
     }
     if (*schema_version != 1U) {

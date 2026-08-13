@@ -55,11 +55,13 @@ add_library(solo_rig_core STATIC
     src/core/realtime_load_meter.cpp
     src/core/rig_runtime.cpp
     src/dsp/diode_clipper.cpp
+    src/dsp/mna_solver.cpp
     src/dsp/digital_delay.cpp
     src/dsp/impulse_response.cpp
     src/dsp/nam_processor.cpp
     src/dsp/tuner.cpp
     src/content/json.cpp
+    src/content/circuit_v2.cpp
     src/content/module_package.cpp
     src/content/module_runtime.cpp
     src/content/preset.cpp
@@ -215,6 +217,7 @@ if(BUILD_TESTING)
         tests/quality_policy_tests.cpp
         tests/tuner_tests.cpp
         tests/json_tests.cpp
+        tests/circuit_v2_tests.cpp
         tests/module_package_tests.cpp
         tests/module_runtime_tests.cpp
         tests/rig_runtime_tests.cpp

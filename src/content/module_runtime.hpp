@@ -18,6 +18,7 @@ enum class ModuleRuntimeError {
     UnsupportedDigitalOperation,
     InvalidDigitalTopology,
     InvalidInitialParameterValue,
+    UnsupportedCircuit,
 };
 
 // A concrete instance of an external module package. Parameter changes must

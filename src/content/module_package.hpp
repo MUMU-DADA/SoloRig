@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/effect_descriptor.hpp"
+#include "content/circuit_v2.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -60,7 +61,7 @@ struct DigitalAlgorithmLogic {
     std::vector<DigitalAlgorithmOperation> operations;
 };
 
-using ModuleLogic = std::variant<std::monostate, AnalogCircuitLogic, DigitalAlgorithmLogic>;
+using ModuleLogic = std::variant<std::monostate, AnalogCircuitLogic, CircuitNetlist, DigitalAlgorithmLogic>;
 
 enum class ModulePackageLoadError {
     MissingManifest,

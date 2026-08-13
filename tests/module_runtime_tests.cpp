@@ -113,6 +113,43 @@ TEST_CASE("External analog module package instantiates a supported MNA diode cli
     REQUIRE(output.ChannelData(0)[0] < 0.71F);
 }
 
+TEST_CASE("External analog v2 module uses the unified linear MNA runtime") {
+    const auto directory = CreateRuntimePackage(R"({
+        "schemaVersion":1,
+        "moduleId":"org.mumu-dada.solorig.external-linear-divider",
+        "displayName":"External Linear Divider",
+        "category":"analog-circuit",
+        "logicFile":"logic/main.json",
+        "ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}]
+    })",
+                                                R"({
+        "version":2,
+        "schema":"circuit",
+        "referenceGround":"0",
+        "nodes":["in","out","0"],
+        "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],
+        "components":[
+            {"id":"series","type":"resistor","pins":["in","out"],"value":1000},
+            {"id":"load","type":"resistor","pins":["out","0"],"value":1000}
+        ],
+        "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    const auto package = solo_rig::LoadModulePackage(directory);
+    RemoveRuntimePackage(directory);
+    REQUIRE(package.package.has_value());
+    REQUIRE(std::holds_alternative<solo_rig::CircuitNetlist>(package.package->logic));
+
+    auto runtime = solo_rig::CreateModuleRuntime(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    solo_rig::AudioBuffer input(1, 8);
+    solo_rig::AudioBuffer output(1, 8);
+    input.ChannelData(0)[0] = 1.0F;
+    REQUIRE(processor->Prepare(TestFormat()));
+    processor->Process(input, output, 1);
+    REQUIRE(std::fabs(output.ChannelData(0)[0] - 0.5F) < 1.0e-6F);
+}
+
 TEST_CASE("External digital delay package executes declared delay feedback and mix operations") {
     const auto directory = CreateRuntimePackage(R"({
         "schemaVersion":1,
