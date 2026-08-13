@@ -24,7 +24,12 @@ internal struct NativeSnapshotInfo
     public IntPtr AudioStatus;
     public IntPtr FileStatus;
     public IntPtr MidiStatus;
+    public double ViewportWidth;
+    public double ViewportHeight;
+    public double DpiScale;
+    public byte Dirty;
     public uint NodeCount;
+    public uint ConnectionCount;
     public uint BindingCount;
 }
 
@@ -46,6 +51,17 @@ internal struct NativeParameterView
 {
     public IntPtr ParameterId;
     public float Value;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeConnectionView
+{
+    public IntPtr SourceInstanceId;
+    public IntPtr DestinationInstanceId;
+    public double SourceX;
+    public double SourceY;
+    public double DestinationX;
+    public double DestinationY;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -90,6 +106,10 @@ internal static class NativeMethods
         IntPtr snapshot, uint nodeIndex, uint parameterIndex, out NativeParameterView parameter);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_snapshot_connection(
+        IntPtr snapshot, uint index, out NativeConnectionView connection);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_snapshot_binding(
         IntPtr snapshot, uint index, out NativeBindingView binding);
 
@@ -100,6 +120,22 @@ internal static class NativeMethods
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_set_theme_dark(IntPtr backend, byte dark);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_set_viewport(
+        IntPtr backend, double width, double height, double dpiScale);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_select_at(IntPtr backend, double x, double y);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_begin_drag(IntPtr backend, double x, double y);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_drag_to(IntPtr backend, double x, double y, byte snapToGrid);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern void solorig_backend_end_drag(IntPtr backend);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_save_utf8(
@@ -139,6 +175,13 @@ public sealed record NodeSnapshot(
 {
     public string LayoutText => $"Layout: ({LayoutX:0}, {LayoutY:0})";
 }
+public sealed record ConnectionSnapshot(
+    string SourceInstanceId,
+    string DestinationInstanceId,
+    double SourceX,
+    double SourceY,
+    double DestinationX,
+    double DestinationY);
 public sealed record BindingSnapshot(
     uint MessageType,
     uint Channel,
@@ -156,7 +199,12 @@ public sealed record BackendSnapshot(
     string AudioStatus,
     string FileStatus,
     string MidiStatus,
+    double ViewportWidth,
+    double ViewportHeight,
+    double DpiScale,
+    bool Dirty,
     IReadOnlyList<NodeSnapshot> Nodes,
+    IReadOnlyList<ConnectionSnapshot> Connections,
     IReadOnlyList<BindingSnapshot> Bindings);
 
 public sealed class BackendSession : IDisposable
@@ -190,6 +238,14 @@ public sealed class BackendSession : IDisposable
                     NativeMethods.Utf8(node.InstanceId), NativeMethods.Utf8(node.ModuleId), node.LayoutX, node.LayoutY,
                     node.Selected != 0, node.Unresolved != 0, NativeMethods.Utf8(node.Diagnostic), parameters));
             }
+            var connections = new List<ConnectionSnapshot>((int)info.ConnectionCount);
+            for (uint connectionIndex = 0; connectionIndex < info.ConnectionCount; connectionIndex++)
+            {
+                Ensure(NativeMethods.solorig_snapshot_connection(snapshot, connectionIndex, out var connection), "snapshot connection");
+                connections.Add(new ConnectionSnapshot(
+                    NativeMethods.Utf8(connection.SourceInstanceId), NativeMethods.Utf8(connection.DestinationInstanceId),
+                    connection.SourceX, connection.SourceY, connection.DestinationX, connection.DestinationY));
+            }
             var bindings = new List<BindingSnapshot>((int)info.BindingCount);
             for (uint bindingIndex = 0; bindingIndex < info.BindingCount; bindingIndex++)
             {
@@ -199,7 +255,8 @@ public sealed class BackendSession : IDisposable
             }
             return new BackendSnapshot(info.SchemaVersion, info.DarkTheme != 0, NativeMethods.Utf8(info.PresetId),
                 NativeMethods.Utf8(info.PresetName), NativeMethods.Utf8(info.SourcePath), NativeMethods.Utf8(info.AudioStatus),
-                NativeMethods.Utf8(info.FileStatus), NativeMethods.Utf8(info.MidiStatus), nodes, bindings);
+                NativeMethods.Utf8(info.FileStatus), NativeMethods.Utf8(info.MidiStatus), info.ViewportWidth,
+                info.ViewportHeight, info.DpiScale, info.Dirty != 0, nodes, connections, bindings);
         }
         finally
         {
@@ -218,6 +275,18 @@ public sealed class BackendSession : IDisposable
     }
 
     public void SetTheme(bool dark) => Ensure(NativeMethods.solorig_backend_set_theme_dark(handle, dark ? (byte)1 : (byte)0), "set theme");
+
+    public void SetViewport(double width, double height, double dpiScale) =>
+        Ensure(NativeMethods.solorig_backend_set_viewport(handle, width, height, dpiScale), "set viewport");
+
+    public void SelectAt(double x, double y) => Ensure(NativeMethods.solorig_backend_select_at(handle, x, y), "select node");
+
+    public void BeginDrag(double x, double y) => Ensure(NativeMethods.solorig_backend_begin_drag(handle, x, y), "begin drag");
+
+    public void DragTo(double x, double y, bool snapToGrid) =>
+        Ensure(NativeMethods.solorig_backend_drag_to(handle, x, y, snapToGrid ? (byte)1 : (byte)0), "drag node");
+
+    public void EndDrag() => NativeMethods.solorig_backend_end_drag(handle);
 
     public void Save(string path) => Ensure(NativeMethods.solorig_backend_save_utf8(handle, path), "save preset");
 

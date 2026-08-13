@@ -38,7 +38,12 @@ typedef struct SoloRigSnapshotInfo {
     const char* audio_status_utf8;
     const char* file_status_utf8;
     const char* midi_status_utf8;
+    double viewport_width;
+    double viewport_height;
+    double dpi_scale;
+    uint8_t dirty;
     uint32_t node_count;
+    uint32_t connection_count;
     uint32_t binding_count;
 } SoloRigSnapshotInfo;
 
@@ -57,6 +62,15 @@ typedef struct SoloRigParameterView {
     const char* parameter_id_utf8;
     float value;
 } SoloRigParameterView;
+
+typedef struct SoloRigConnectionView {
+    const char* source_instance_id_utf8;
+    const char* destination_instance_id_utf8;
+    double source_x;
+    double source_y;
+    double destination_x;
+    double destination_y;
+} SoloRigConnectionView;
 
 typedef struct SoloRigBindingView {
     uint32_t message_type;
@@ -99,6 +113,10 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_parameter(
     uint32_t node_index,
     uint32_t parameter_index,
     SoloRigParameterView* out_parameter);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_connection(
+    const SoloRigSnapshot* snapshot,
+    uint32_t index,
+    SoloRigConnectionView* out_connection);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_binding(
     const SoloRigSnapshot* snapshot,
     uint32_t index,
@@ -112,6 +130,25 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_parameter_utf8(
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark(
     SoloRigBackend* backend,
     uint8_t dark);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_viewport(
+    SoloRigBackend* backend,
+    double width,
+    double height,
+    double dpi_scale);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_select_at(
+    SoloRigBackend* backend,
+    double x,
+    double y);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_begin_drag(
+    SoloRigBackend* backend,
+    double x,
+    double y);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_drag_to(
+    SoloRigBackend* backend,
+    double x,
+    double y,
+    uint8_t snap_to_grid);
+SOLO_RIG_BACKEND_API void solorig_backend_end_drag(SoloRigBackend* backend);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_save_utf8(
     SoloRigBackend* backend,
     const char* path_utf8);

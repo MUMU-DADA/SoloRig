@@ -41,6 +41,11 @@ bool ValidText(const char* text) noexcept {
     return text != nullptr && *text != '\0';
 }
 
+bool ValidViewport(double width, double height, double dpi_scale) noexcept {
+    return std::isfinite(width) && std::isfinite(height) && std::isfinite(dpi_scale) &&
+           width > 0.0 && height > 0.0 && dpi_scale > 0.0;
+}
+
 std::filesystem::path PathFromUtf8(const char* text) {
     const auto length = std::char_traits<char>::length(text);
     std::u8string utf8;
@@ -152,7 +157,12 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_info(
     out_info->file_status_utf8 = snapshot->scene.file_status.c_str();
     static constexpr char kMidiClosed[] = "MIDI closed; no device access on startup";
     out_info->midi_status_utf8 = kMidiClosed;
+    out_info->viewport_width = snapshot->scene.viewport_width;
+    out_info->viewport_height = snapshot->scene.viewport_height;
+    out_info->dpi_scale = snapshot->scene.dpi_scale;
+    out_info->dirty = snapshot->scene.dirty ? 1U : 0U;
     out_info->node_count = static_cast<uint32_t>(snapshot->scene.nodes.size());
+    out_info->connection_count = static_cast<uint32_t>(snapshot->scene.connections.size());
     out_info->binding_count = snapshot->preset.midi_bindings.has_value()
         ? static_cast<uint32_t>(snapshot->preset.midi_bindings->size()) : 0U;
     return SOLO_RIG_STATUS_OK;
@@ -191,6 +201,23 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_parameter(
     std::advance(iterator, parameter_index);
     out_parameter->parameter_id_utf8 = iterator->first.c_str();
     out_parameter->value = iterator->second;
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_connection(
+    const SoloRigSnapshot* snapshot,
+    uint32_t index,
+    SoloRigConnectionView* out_connection) {
+    if (snapshot == nullptr || out_connection == nullptr || index >= snapshot->scene.connections.size()) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    const auto& connection = snapshot->scene.connections[index];
+    out_connection->source_instance_id_utf8 = connection.source_instance_id.c_str();
+    out_connection->destination_instance_id_utf8 = connection.destination_instance_id.c_str();
+    out_connection->source_x = connection.source.x;
+    out_connection->source_y = connection.source.y;
+    out_connection->destination_x = connection.destination.x;
+    out_connection->destination_y = connection.destination.y;
     return SOLO_RIG_STATUS_OK;
 }
 
@@ -237,6 +264,69 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark(
     backend->editor.SetThemeMode(dark != 0U);
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_viewport(
+    SoloRigBackend* backend,
+    double width,
+    double height,
+    double dpi_scale) {
+    if (!ValidBackend(backend) || !ValidViewport(width, height, dpi_scale)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "finite positive viewport and DPI are required");
+    }
+    backend->editor.SetViewport(width, height, dpi_scale);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_select_at(
+    SoloRigBackend* backend,
+    double x,
+    double y) {
+    if (!ValidBackend(backend) || !std::isfinite(x) || !std::isfinite(y)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "finite editor coordinates are required");
+    }
+    if (!backend->editor.SelectAt({.x = x, .y = y})) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "no node was found at the editor coordinate");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_begin_drag(
+    SoloRigBackend* backend,
+    double x,
+    double y) {
+    if (!ValidBackend(backend) || !std::isfinite(x) || !std::isfinite(y)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "finite editor coordinates are required");
+    }
+    if (!backend->editor.BeginDrag({.x = x, .y = y})) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "no node was found at the editor coordinate");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_drag_to(
+    SoloRigBackend* backend,
+    double x,
+    double y,
+    uint8_t snap_to_grid) {
+    if (!ValidBackend(backend) || snap_to_grid > 1U || !std::isfinite(x) || !std::isfinite(y)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "finite coordinates and a 0/1 snap flag are required");
+    }
+    if (!backend->editor.DragTo({.x = x, .y = y}, snap_to_grid != 0U)) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "no active node drag exists");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API void solorig_backend_end_drag(SoloRigBackend* backend) {
+    if (ValidBackend(backend)) {
+        backend->editor.EndDrag();
+        backend->last_error.clear();
+    }
 }
 
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_save_utf8(
