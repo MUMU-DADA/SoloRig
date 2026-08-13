@@ -131,6 +131,152 @@ TEST_CASE("circuit v2 parses parameterized potentiometer endpoints and wiper map
             invalid_total.errors.front() == solo_rig::CircuitLoadError::InvalidValue);
 }
 
+TEST_CASE("circuit v2 parses VCCS and ideal op amp contracts and rejects invalid controls") {
+    const auto result = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["out","cp","cn","0"],
+      "ports":[{"id":"output","direction":"output","node":"out"}],
+      "components":[
+        {"id":"g","type":"vccs","pins":["out","0","cp","cn"],
+         "controlledSource":{"kind":"vccs","modelVersion":1,"gain":0.001,"minimum":-1,"maximum":1}},
+        {"id":"a","type":"ideal-op-amp","pins":["out","0","cp","cn"],
+         "controlledSource":{"kind":"ideal-op-amp","modelVersion":1,"gain":100000,"minimum":-12,"maximum":12}}
+      ],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(result.errors.empty());
+    REQUIRE(result.circuit.has_value());
+    REQUIRE(result.circuit->components.at(0).controlled_source->kind == "vccs");
+    REQUIRE(result.circuit->components.at(0).controlled_source->gain == 0.001);
+    REQUIRE(result.circuit->components.at(1).controlled_source->kind == "ideal-op-amp");
+    REQUIRE(result.circuit->components.at(1).controlled_source->maximum == 12.0);
+
+    const auto bad_kind = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["out","cp","cn","0"],
+      "ports":[{"id":"output","direction":"output","node":"out"}],
+      "components":[{"id":"g","type":"vccs","pins":["out","0","cp","cn"],
+        "controlledSource":{"kind":"ideal-op-amp","modelVersion":1,"gain":1}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(!bad_kind.circuit.has_value());
+    REQUIRE(bad_kind.errors.front() == solo_rig::CircuitLoadError::InvalidValue);
+
+    const auto bad_range = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["out","cp","cn","0"],
+      "ports":[{"id":"output","direction":"output","node":"out"}],
+      "components":[{"id":"g","type":"vccs","pins":["out","0","cp","cn"],
+        "controlledSource":{"kind":"vccs","modelVersion":2,"gain":1,"minimum":1,"maximum":-1}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(!bad_range.circuit.has_value());
+    REQUIRE(bad_range.errors.front() == solo_rig::CircuitLoadError::InvalidValue);
+}
+
+TEST_CASE("MNA solves VCCS and ideal op amp inverting and non-inverting feedback networks") {
+    const auto make_vccs = [] {
+        solo_rig::CircuitNetlist circuit{
+            .version = 2,
+            .schema = "circuit",
+            .reference_ground = "0",
+            .nodes = {"in", "out", "0"},
+            .ports = {{.id = "input", .direction = solo_rig::CircuitPortDirection::Input, .node = "in"},
+                      {.id = "output", .direction = solo_rig::CircuitPortDirection::Output, .node = "out"}},
+            .components = {{.id = "g",
+                            .type = solo_rig::CircuitComponentType::Vccs,
+                            .pins = {"out", "0", "in", "0"},
+                            .controlled_source = solo_rig::CircuitControlledSourceSpec{.kind = "vccs",
+                                                                                          .gain = 0.001}},
+                           {.id = "load",
+                            .type = solo_rig::CircuitComponentType::Resistor,
+                            .pins = {"out", "0"},
+                            .value = 1000.0}},
+            .solver = {}};
+        return circuit;
+    };
+    auto vccs = solo_rig::CompileMnaCircuit(make_vccs());
+    REQUIRE(vccs.circuit.has_value());
+    REQUIRE(vccs.circuit->Prepare(48000.0));
+    REQUIRE(std::fabs(vccs.circuit->Solve(1.0).output_voltage - 1.0) < 1.0e-6);
+
+    const auto make_opamp = [](bool inverting) {
+        solo_rig::CircuitNetlist circuit{
+            .version = 2,
+            .schema = "circuit",
+            .reference_ground = "0",
+            .nodes = {"in", "out", "fb", "0"},
+            .ports = {{.id = "input", .direction = solo_rig::CircuitPortDirection::Input, .node = "in"},
+                      {.id = "output", .direction = solo_rig::CircuitPortDirection::Output, .node = "out"}},
+            .components = {{.id = "a",
+                            .type = solo_rig::CircuitComponentType::IdealOpAmp,
+                            .pins = {"out", "0", inverting ? "0" : "in", "fb"},
+                            .controlled_source = solo_rig::CircuitControlledSourceSpec{.kind = "ideal-op-amp",
+                                                                                          .gain = 100000.0}},
+                           {.id = "feedback",
+                            .type = solo_rig::CircuitComponentType::Resistor,
+                            .pins = {"out", "fb"},
+                            .value = 10000.0},
+                           {.id = "input-network",
+                            .type = solo_rig::CircuitComponentType::Resistor,
+                            .pins = {inverting ? "in" : "fb", inverting ? "fb" : "0"},
+                            .value = 10000.0},
+                           {.id = "bias",
+                            .type = solo_rig::CircuitComponentType::Resistor,
+                            .pins = {"fb", "0"},
+                            .value = 10000.0}},
+            .solver = {}};
+        if (!inverting) {
+            circuit.components.pop_back();
+        }
+        return circuit;
+    };
+    auto non_inverting = solo_rig::CompileMnaCircuit(make_opamp(false));
+    REQUIRE(non_inverting.circuit.has_value());
+    REQUIRE(non_inverting.circuit->Prepare(48000.0));
+    REQUIRE(std::fabs(non_inverting.circuit->Solve(1.0).output_voltage - 2.0) < 5.0e-4);
+    auto inverting = solo_rig::CompileMnaCircuit(make_opamp(true));
+    REQUIRE(inverting.circuit.has_value());
+    REQUIRE(inverting.circuit->Prepare(48000.0));
+    REQUIRE(std::fabs(inverting.circuit->Solve(1.0).output_voltage + 1.0) < 5.0e-4);
+}
+
+TEST_CASE("MNA applies ideal op amp output limits and reports controlled-source singularity") {
+    solo_rig::CircuitNetlist limited{
+        .version = 2,
+        .schema = "circuit",
+        .reference_ground = "0",
+        .nodes = {"in", "out", "0"},
+        .ports = {{.id = "input", .direction = solo_rig::CircuitPortDirection::Input, .node = "in"},
+                  {.id = "output", .direction = solo_rig::CircuitPortDirection::Output, .node = "out"}},
+        .components = {{.id = "a",
+                        .type = solo_rig::CircuitComponentType::IdealOpAmp,
+                        .pins = {"out", "0", "in", "out"},
+                        .controlled_source = solo_rig::CircuitControlledSourceSpec{.kind = "ideal-op-amp",
+                                                                                      .gain = 100.0,
+                                                                                      .minimum = -0.5,
+                                                                                      .maximum = 0.5},
+                        }},
+        .solver = {}};
+    auto compiled = solo_rig::CompileMnaCircuit(limited);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(48000.0));
+    const auto limited_output = compiled.circuit->Solve(2.0);
+    REQUIRE(limited_output.Succeeded());
+    REQUIRE(std::fabs(limited_output.output_voltage - 0.5) < 1.0e-6);
+
+    limited.components.front().controlled_source->gain = std::numeric_limits<double>::infinity();
+    const auto invalid = solo_rig::CompileMnaCircuit(limited);
+    REQUIRE(!invalid.circuit.has_value());
+    REQUIRE(invalid.error == solo_rig::MnaCompileError::InvalidValue);
+
+    solo_rig::CircuitNetlist singular = limited;
+    singular.components.front().type = solo_rig::CircuitComponentType::Vccs;
+    singular.components.front().pins = {"out", "0", "in", "0"};
+    singular.components.front().controlled_source = solo_rig::CircuitControlledSourceSpec{.kind = "vccs", .gain = 1.0};
+    auto singular_compiled = solo_rig::CompileMnaCircuit(singular);
+    REQUIRE(singular_compiled.circuit.has_value());
+    REQUIRE(singular_compiled.circuit->Prepare(48000.0));
+    REQUIRE(singular_compiled.circuit->Solve(1.0).error == solo_rig::MnaSolveError::SingularMatrix);
+}
+
 TEST_CASE("MNA compiles a static potentiometer network and sweeps its prepared position") {
     const auto make_circuit = [](double position) {
         solo_rig::CircuitNetlist circuit{

@@ -20,6 +20,8 @@ enum class CircuitComponentType {
     VoltageSource,
     Diode,
     Potentiometer,
+    Vccs,
+    IdealOpAmp,
     Switch,
 };
 
@@ -28,6 +30,14 @@ struct CircuitPotentiometerSpec {
     double minimum{0.0};
     double maximum{1.0};
     std::optional<std::string> wiper_node;
+};
+
+struct CircuitControlledSourceSpec {
+    std::string kind;
+    std::uint32_t model_version{1};
+    double gain{};
+    std::optional<double> minimum;
+    std::optional<double> maximum;
 };
 
 struct CircuitSwitchSpec {
@@ -65,6 +75,7 @@ struct CircuitComponent {
     std::optional<std::string> model;
     std::optional<CircuitDiodeModel> diode_model;
     std::optional<CircuitPotentiometerSpec> potentiometer;
+    std::optional<CircuitControlledSourceSpec> controlled_source;
     std::optional<CircuitSwitchSpec> switch_spec;
 };
 

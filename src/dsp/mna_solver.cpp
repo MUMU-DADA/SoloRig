@@ -96,6 +96,68 @@ void StampInductor(std::vector<double>& matrix,
     rhs[branch] -= inductance_over_dt * previous_current;
 }
 
+void StampVccs(std::vector<double>& matrix,
+               std::vector<double>& rhs,
+               std::uint32_t size,
+               const MnaPreparedCircuit::Element& element,
+               const std::vector<double>& guess) noexcept {
+    const auto control_positive = element.control_positive_node >= 0
+        ? guess[static_cast<std::size_t>(element.control_positive_node)] : 0.0;
+    const auto control_negative = element.control_negative_node >= 0
+        ? guess[static_cast<std::size_t>(element.control_negative_node)] : 0.0;
+    const auto control_voltage = control_positive - control_negative;
+    const auto raw_current = element.controlled_gain * control_voltage;
+    if (element.controlled_has_limits &&
+        (raw_current < element.controlled_minimum || raw_current > element.controlled_maximum)) {
+        StampCurrent(rhs, element.positive_node, element.negative_node,
+                     std::clamp(raw_current, element.controlled_minimum, element.controlled_maximum));
+        return;
+    }
+    if (element.positive_node >= 0 && element.control_positive_node >= 0) {
+        matrix[static_cast<std::size_t>(element.positive_node) * size +
+               static_cast<std::size_t>(element.control_positive_node)] -= element.controlled_gain;
+    }
+    if (element.positive_node >= 0 && element.control_negative_node >= 0) {
+        matrix[static_cast<std::size_t>(element.positive_node) * size +
+               static_cast<std::size_t>(element.control_negative_node)] += element.controlled_gain;
+    }
+    if (element.negative_node >= 0 && element.control_positive_node >= 0) {
+        matrix[static_cast<std::size_t>(element.negative_node) * size +
+               static_cast<std::size_t>(element.control_positive_node)] += element.controlled_gain;
+    }
+    if (element.negative_node >= 0 && element.control_negative_node >= 0) {
+        matrix[static_cast<std::size_t>(element.negative_node) * size +
+               static_cast<std::size_t>(element.control_negative_node)] -= element.controlled_gain;
+    }
+}
+
+void StampIdealOpAmp(std::vector<double>& matrix,
+                     std::vector<double>& rhs,
+                     std::uint32_t size,
+                     const MnaPreparedCircuit::Element& element,
+                     const std::vector<double>& guess) noexcept {
+    StampVoltageSource(matrix, rhs, size, element.positive_node, element.negative_node,
+                       element.branch_index, 0.0);
+    const auto control_positive = element.control_positive_node >= 0
+        ? guess[static_cast<std::size_t>(element.control_positive_node)] : 0.0;
+    const auto control_negative = element.control_negative_node >= 0
+        ? guess[static_cast<std::size_t>(element.control_negative_node)] : 0.0;
+    const auto raw_output = element.controlled_gain * (control_positive - control_negative);
+    if (element.controlled_has_limits &&
+        (raw_output < element.controlled_minimum || raw_output > element.controlled_maximum)) {
+        rhs[element.branch_index] += std::clamp(raw_output, element.controlled_minimum, element.controlled_maximum);
+        return;
+    }
+    if (element.control_positive_node >= 0) {
+        matrix[static_cast<std::size_t>(element.branch_index) * size +
+               static_cast<std::size_t>(element.control_positive_node)] -= element.controlled_gain;
+    }
+    if (element.control_negative_node >= 0) {
+        matrix[static_cast<std::size_t>(element.branch_index) * size +
+               static_cast<std::size_t>(element.control_negative_node)] += element.controlled_gain;
+    }
+}
+
 void StampDiode(std::vector<double>& matrix,
                 std::vector<double>& rhs,
                 std::uint32_t size,
@@ -218,10 +280,10 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
     MnaSolveResult result;
     const double conductance_scale = sample_rate_hz_ * static_cast<double>(oversampling_);
     for (std::uint32_t substep = 0; substep < oversampling_; ++substep) {
-        const auto has_diode = std::any_of(elements_.begin(), elements_.end(), [](const auto& element) {
-            return element.type == CircuitComponentType::Diode;
+        const auto has_nonlinearity = std::any_of(elements_.begin(), elements_.end(), [](const auto& element) {
+            return element.type == CircuitComponentType::Diode || element.controlled_has_limits;
         });
-        bool converged = !has_diode;
+        bool converged = !has_nonlinearity;
         for (std::uint32_t iteration = 0; iteration < max_iterations_; ++iteration) {
             std::copy(solution_.begin(), solution_.end(), newton_previous_.begin());
             std::fill(matrix_.begin(), matrix_.end(), 0.0);
@@ -251,6 +313,12 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     break;
                 case CircuitComponentType::Diode:
                     StampDiode(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    break;
+                case CircuitComponentType::Vccs:
+                    StampVccs(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    break;
+                case CircuitComponentType::IdealOpAmp:
+                    StampIdealOpAmp(matrix_, rhs_, matrix_size_, element, newton_previous_);
                     break;
                 case CircuitComponentType::Potentiometer:
                 case CircuitComponentType::Switch:
@@ -285,7 +353,7 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
             if (step_exceeded) {
                 return {.error = MnaSolveError::NonConvergent};
             }
-            if (!has_diode || maximum_delta <= absolute_tolerance_ + relative_tolerance_ * maximum_value) {
+            if (!has_nonlinearity || maximum_delta <= absolute_tolerance_ + relative_tolerance_ * maximum_value) {
                 converged = true;
                 break;
             }
@@ -354,7 +422,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         if (component.type != CircuitComponentType::Resistor && component.type != CircuitComponentType::Capacitor &&
             component.type != CircuitComponentType::Inductor &&
             component.type != CircuitComponentType::VoltageSource && component.type != CircuitComponentType::Diode &&
-            component.type != CircuitComponentType::Potentiometer) {
+            component.type != CircuitComponentType::Potentiometer && component.type != CircuitComponentType::Vccs &&
+            component.type != CircuitComponentType::IdealOpAmp) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
         }
         if ((component.type == CircuitComponentType::Resistor || component.type == CircuitComponentType::Capacitor ||
@@ -377,6 +446,22 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
             }
         }
+        if (component.type == CircuitComponentType::Vccs || component.type == CircuitComponentType::IdealOpAmp) {
+            if (!component.controlled_source.has_value() || component.pins.size() != 4U || component.model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            const auto& controlled = *component.controlled_source;
+            const auto expected_kind = component.type == CircuitComponentType::Vccs ? "vccs" : "ideal-op-amp";
+            if (controlled.kind != expected_kind || controlled.model_version != 1U ||
+                !std::isfinite(controlled.gain) || std::fabs(controlled.gain) > 1.0e12 ||
+                (component.type == CircuitComponentType::IdealOpAmp && controlled.gain <= 0.0) ||
+                controlled.minimum.has_value() != controlled.maximum.has_value() ||
+                (controlled.minimum.has_value() &&
+                 (!std::isfinite(*controlled.minimum) || !std::isfinite(*controlled.maximum) ||
+                  *controlled.minimum > *controlled.maximum))) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+        }
     }
 
     std::uint32_t non_ground_nodes{};
@@ -393,7 +478,11 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
             return component.type == CircuitComponentType::Inductor;
         }));
-    const auto branch_count = voltage_source_count + inductor_count;
+    const auto controlled_voltage_source_count = static_cast<std::uint32_t>(std::count_if(
+        circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
+            return component.type == CircuitComponentType::IdealOpAmp;
+        }));
+    const auto branch_count = voltage_source_count + inductor_count + controlled_voltage_source_count;
     if (non_ground_nodes + branch_count == 0U) {
         return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
     }
@@ -464,9 +553,41 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                           .initial = 0.0});
             continue;
         }
+        if (component.type == CircuitComponentType::Vccs || component.type == CircuitComponentType::IdealOpAmp) {
+            const auto control_positive = FindNode(circuit, component.pins[2]);
+            const auto control_negative = FindNode(circuit, component.pins[3]);
+            if (control_positive == -2 || control_negative == -2) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+            }
+            const auto& controlled = *component.controlled_source;
+            MnaPreparedCircuit::Element element{.type = component.type,
+                                                .positive_node = positive,
+                                                .negative_node = negative,
+                                                .control_positive_node = control_positive,
+                                                .control_negative_node = control_negative,
+                                                .branch_index = kNoIndex,
+                                                .history_index = kNoIndex,
+                                                .inductor_history_index = kNoIndex,
+                                                .value = 0.0,
+                                                .initial = 0.0,
+                                                .diode_saturation_current = 0.0,
+                                                .diode_thermal_voltage = 0.0,
+                                                .diode_max_step = 0.0,
+                                                .controlled_gain = controlled.gain,
+                                                .controlled_minimum = controlled.minimum.value_or(0.0),
+                                                .controlled_maximum = controlled.maximum.value_or(0.0),
+                                                .controlled_has_limits = controlled.minimum.has_value()};
+            if (component.type == CircuitComponentType::IdealOpAmp) {
+                element.branch_index = non_ground_nodes + branch++;
+            }
+            prepared.elements_.push_back(element);
+            continue;
+        }
         MnaPreparedCircuit::Element element{.type = component.type,
                                             .positive_node = positive,
                                             .negative_node = negative,
+                                            .control_positive_node = -1,
+                                            .control_negative_node = -1,
                                             .branch_index = kNoIndex,
                                             .history_index = kNoIndex,
                                             .inductor_history_index = kNoIndex,
@@ -509,6 +630,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         prepared.elements_.push_back({.type = CircuitComponentType::VoltageSource,
                                       .positive_node = positive,
                                       .negative_node = negative,
+                                      .control_positive_node = -1,
+                                      .control_negative_node = -1,
                                       .branch_index = non_ground_nodes + branch++,
                                       .history_index = kNoIndex,
                                       .inductor_history_index = kNoIndex,

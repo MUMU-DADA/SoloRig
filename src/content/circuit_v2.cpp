@@ -72,6 +72,12 @@ std::optional<CircuitComponentType> ComponentType(std::string_view text) {
     if (text == "potentiometer") {
         return CircuitComponentType::Potentiometer;
     }
+    if (text == "vccs") {
+        return CircuitComponentType::Vccs;
+    }
+    if (text == "ideal-op-amp") {
+        return CircuitComponentType::IdealOpAmp;
+    }
     if (text == "switch") {
         return CircuitComponentType::Switch;
     }
@@ -240,7 +246,9 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             return Failure(CircuitLoadError::DuplicateId);
         }
         const bool is_potentiometer = *type == CircuitComponentType::Potentiometer;
-        if (pins->size() != 2U && !(is_potentiometer && pins->size() == 3U)) {
+        const bool is_controlled_source = *type == CircuitComponentType::Vccs || *type == CircuitComponentType::IdealOpAmp;
+        if (pins->size() != 2U && !(is_potentiometer && pins->size() == 3U) &&
+            !(is_controlled_source && pins->size() == 4U)) {
             return Failure(CircuitLoadError::InvalidPin);
         }
         for (const auto& pin : *pins) {
@@ -321,6 +329,37 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             return Failure(CircuitLoadError::InvalidValue);
         }
 
+        if (is_controlled_source) {
+            const auto* controlled = Find(*component, "controlledSource");
+            const auto* controlled_object = controlled == nullptr ? nullptr : controlled->AsObject();
+            const auto kind = controlled_object == nullptr ? std::nullopt : StringValue(Find(*controlled_object, "kind"));
+            const auto model_version = controlled_object == nullptr
+                ? std::nullopt
+                : UnsignedValue(Find(*controlled_object, "modelVersion"));
+            const auto gain = controlled_object == nullptr ? std::nullopt : NumberValue(Find(*controlled_object, "gain"));
+            const auto minimum = controlled_object == nullptr || Find(*controlled_object, "minimum") == nullptr
+                ? std::optional<double>{}
+                : NumberValue(Find(*controlled_object, "minimum"));
+            const auto maximum = controlled_object == nullptr || Find(*controlled_object, "maximum") == nullptr
+                ? std::optional<double>{}
+                : NumberValue(Find(*controlled_object, "maximum"));
+            const auto expected_kind = *type == CircuitComponentType::Vccs ? "vccs" : "ideal-op-amp";
+            const bool has_any_limit = minimum.has_value() || maximum.has_value();
+            const bool has_complete_limits = minimum.has_value() && maximum.has_value();
+            if (controlled_object == nullptr || !kind.has_value() || *kind != expected_kind ||
+                !model_version.has_value() || *model_version != 1U || !gain.has_value() ||
+                (*type == CircuitComponentType::IdealOpAmp && *gain <= 0.0) ||
+                (has_any_limit && !has_complete_limits) ||
+                (has_complete_limits && *minimum > *maximum)) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            parsed_component.controlled_source = CircuitControlledSourceSpec{.kind = *kind,
+                                                                              .model_version = *model_version,
+                                                                              .gain = *gain,
+                                                                              .minimum = minimum,
+                                                                              .maximum = maximum};
+        }
+
         if (const auto* potentiometer = Find(*component, "potentiometer"); potentiometer != nullptr) {
             const auto* object_value = potentiometer->AsObject();
             const auto position = object_value == nullptr ? std::nullopt : NumberValue(Find(*object_value, "position"));
@@ -365,6 +404,9 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         if (*type == CircuitComponentType::Switch && !parsed_component.switch_spec.has_value()) {
+            return Failure(CircuitLoadError::InvalidValue);
+        }
+        if (is_controlled_source && !parsed_component.controlled_source.has_value()) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         circuit.components.push_back(std::move(parsed_component));

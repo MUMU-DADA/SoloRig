@@ -51,6 +51,8 @@ public:
         CircuitComponentType type{CircuitComponentType::Resistor};
         std::int32_t positive_node{-1};
         std::int32_t negative_node{-1};
+        std::int32_t control_positive_node{-1};
+        std::int32_t control_negative_node{-1};
         std::uint32_t branch_index{};
         std::uint32_t history_index{UINT32_MAX};
         std::uint32_t inductor_history_index{UINT32_MAX};
@@ -59,6 +61,10 @@ public:
         double diode_saturation_current{};
         double diode_thermal_voltage{};
         double diode_max_step{};
+        double controlled_gain{};
+        double controlled_minimum{};
+        double controlled_maximum{};
+        bool controlled_has_limits{};
     };
 
 private:
