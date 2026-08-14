@@ -10,12 +10,21 @@ param(
     [string]$SourceDirectory,
 
     [Parameter()]
-    [switch]$SkipTests
+    [switch]$SkipTests,
+
+    [Parameter()]
+    [switch]$Incremental,
+
+    [Parameter()]
+    [ValidateRange(0, 256)]
+    [int]$ParallelJobs = 0
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $script:BuildLogPath = $null
+$script:OriginalConsoleCodePage = $null
+$script:CodePageTool = $null
 
 function Fail-Layer {
     param(
@@ -99,9 +108,38 @@ function Find-CMakeTool {
     return $null
 }
 
+function Find-NinjaTool {
+    param([Parameter(Mandatory = $true)][string]$VsInstall)
+    $fromPath = Find-CommandPath -Name "ninja.exe"
+    if ($null -ne $fromPath) {
+        return $fromPath
+    }
+    $candidate = Join-Path $VsInstall "Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
+    if (Test-Path -LiteralPath $candidate) {
+        return $candidate
+    }
+    return $null
+}
+
 function Resolve-FullPath {
     param([Parameter(Mandatory = $true)][string]$Path)
     return [IO.Path]::GetFullPath($Path)
+}
+
+function Use-Utf8NativeCodePage {
+    $codePageTool = Find-CommandPath -Name "chcp.com"
+    if ($null -eq $codePageTool) {
+        return
+    }
+    $originalCodePage = [Console]::InputEncoding.CodePage
+    if ($originalCodePage -eq 65001) {
+        return
+    }
+    & $codePageTool 65001 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $script:OriginalConsoleCodePage = $originalCodePage
+        $script:CodePageTool = $codePageTool
+    }
 }
 
 function Assert-SafeBuildDirectory {
@@ -133,11 +171,16 @@ function Find-Artifact {
 }
 
 function Select-CMakeGenerator {
-    param([Parameter(Mandatory = $true)][string]$CMake)
-    if ($null -ne (Get-Command nmake.exe -ErrorAction SilentlyContinue)) {
-        return "NMake Makefiles"
-    }
+    param(
+        [Parameter(Mandatory = $true)][string]$CMake,
+        [Parameter(Mandatory = $true)][string]$VsInstall
+    )
     $help = (& $CMake --help 2>&1 | Out-String)
+    $ninja = Find-NinjaTool -VsInstall $VsInstall
+    if ($null -ne $ninja -and $help -match "(?m)^\s*\*?\s*Ninja\s*=") {
+        $env:PATH = "{0};{1}" -f (Split-Path -Parent $ninja), $env:PATH
+        return "Ninja"
+    }
     foreach ($candidate in @("Visual Studio 18 2026", "Visual Studio 17 2022")) {
         if ($help -match [regex]::Escape($candidate)) {
             return $candidate
@@ -182,13 +225,6 @@ function Import-VsDeveloperEnvironment {
             }
         }
     }
-    $toolRoot = Join-Path $VsInstall "VC\Tools\MSVC"
-    $nativeTool = Get-ChildItem -LiteralPath $toolRoot -Recurse -File -Filter "nmake.exe" -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -match "HostX64\\x64" } |
-        Select-Object -First 1
-    if ($null -ne $nativeTool) {
-        $env:PATH = "{0};{1}" -f $nativeTool.DirectoryName, $env:PATH
-    }
     $sdkRoot = $env:WindowsSdkDir
     $sdkVersion = $env:WindowsSDKVersion
     if (-not [string]::IsNullOrWhiteSpace($sdkRoot) -and -not [string]::IsNullOrWhiteSpace($sdkVersion)) {
@@ -203,8 +239,8 @@ function Import-VsDeveloperEnvironment {
             }
         }
     }
-    if ($null -eq (Get-Command nmake.exe -ErrorAction SilentlyContinue)) {
-        Fail-Layer -Layer "Tools" -Message "Visual Studio 开发环境已加载，但找不到 x64 nmake.exe。"
+    if ($null -eq (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+        Fail-Layer -Layer "Tools" -Message "Visual Studio 开发环境已加载，但找不到 x64 cl.exe。"
     }
     Write-Host ("已加载 Visual Studio x64 开发环境: {0}" -f $VsInstall)
 }
@@ -265,13 +301,44 @@ try {
         Fail-Layer -Layer "Tools" -Message "CMake 选择了 Visual Studio 生成器，但找不到对应的 VS 安装路径。"
     }
     Import-VsDeveloperEnvironment -VsInstall $vsInstall
-    $generator = Select-CMakeGenerator -CMake $cmake
+    # CMake decodes MSVC /showIncludes using the active console code page.
+    # UTF-8 prevents a localized prefix from becoming mojibake in rules.ninja.
+    Use-Utf8NativeCodePage
+    $generator = Select-CMakeGenerator -CMake $cmake -VsInstall $vsInstall
 
-    if (Test-Path -LiteralPath $outputBuildRoot) {
+    $reuseBuildCache = $false
+    if ($Incremental -and $sourceMode -eq "repository-clone") {
+        Fail-Layer -Layer "Configuration" -Message "临时浅克隆的源码目录每次都会变化，不能使用 -Incremental。"
+    }
+    if ($Incremental -and (Test-Path -LiteralPath $outputBuildRoot)) {
+        $cachePath = Join-Path $outputBuildRoot "CMakeCache.txt"
+        if (Test-Path -LiteralPath $cachePath) {
+            $cachedGeneratorLine = Get-Content -LiteralPath $cachePath |
+                Where-Object { $_ -like "CMAKE_GENERATOR:INTERNAL=*" } |
+                Select-Object -First 1
+            $cachedSourceLine = Get-Content -LiteralPath $cachePath |
+                Where-Object { $_ -like "CMAKE_HOME_DIRECTORY:INTERNAL=*" } |
+                Select-Object -First 1
+            $cachedGenerator = if ($null -eq $cachedGeneratorLine) { "" } else { ($cachedGeneratorLine -split "=", 2)[1] }
+            $cachedSource = if ($null -eq $cachedSourceLine) { "" } else { ($cachedSourceLine -split "=", 2)[1] }
+            if ($cachedGenerator -eq $generator -and
+                -not [string]::IsNullOrWhiteSpace($cachedSource) -and
+                (Resolve-FullPath -Path $cachedSource) -eq $sourceRoot) {
+                $reuseBuildCache = $true
+            } else {
+                Write-Host ("增量缓存与当前配置不兼容，将重建一次（缓存生成器: {0}，当前生成器: {1}）。" -f $cachedGenerator, $generator) -ForegroundColor Yellow
+            }
+        }
+    }
+
+    if (-not $reuseBuildCache -and (Test-Path -LiteralPath $outputBuildRoot)) {
         Write-Host ("清理项目 build 目录: {0}" -f $outputBuildRoot)
         Remove-Item -LiteralPath $outputBuildRoot -Recurse -Force
     }
     New-Item -ItemType Directory -Path $outputBuildRoot -Force | Out-Null
+    if ($reuseBuildCache) {
+        Write-Host ("复用增量构建缓存: {0}" -f $outputBuildRoot) -ForegroundColor Cyan
+    }
     $script:BuildLogPath = Join-Path $outputBuildRoot "build.log"
     Set-Content -LiteralPath $script:BuildLogPath -Value ("SoloRig build started {0}" -f [DateTime]::UtcNow.ToString("o")) -Encoding UTF8
 
@@ -288,9 +355,9 @@ try {
         $cmakeConfigureArguments += @("-A", "x64")
     }
     Invoke-Tool -Layer "CMake configure" -Executable $cmake -Arguments $cmakeConfigureArguments
-    $cmakeBuildArguments = @("--build", $outputBuildRoot, "--config", "Release")
-    if ($generator -notlike "NMake*") {
-        $cmakeBuildArguments += @("--parallel", "4")
+    $cmakeBuildArguments = @("--build", $outputBuildRoot, "--config", "Release", "--parallel")
+    if ($ParallelJobs -gt 0) {
+        $cmakeBuildArguments += @($ParallelJobs.ToString())
     }
     Invoke-Tool -Layer "CMake build" -Executable $cmake -Arguments $cmakeBuildArguments
 
@@ -378,6 +445,9 @@ try {
         sourceDirectory = $sourceRoot
         buildDirectory = $outputBuildRoot
         generator = $generator
+        incrementalRequested = [bool]$Incremental
+        buildCacheReused = $reuseBuildCache
+        parallelJobs = if ($ParallelJobs -gt 0) { $ParallelJobs } else { "native-default" }
         testsExecuted = (-not $SkipTests)
         artifacts = [ordered]@{
             backend = $backendDll.FullName
@@ -399,5 +469,8 @@ catch {
 finally {
     if ($null -ne $downloadRoot -and (Test-Path -LiteralPath $downloadRoot)) {
         Remove-Item -LiteralPath $downloadRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $script:CodePageTool -and $null -ne $script:OriginalConsoleCodePage) {
+        & $script:CodePageTool $script:OriginalConsoleCodePage | Out-Null
     }
 }

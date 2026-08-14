@@ -76,10 +76,16 @@ if ([string]::IsNullOrWhiteSpace($branch)) {
 }
 
 try {
-    # 两次同源执行验证每次都清理并重新配置/编译，而不是复用旧 manifest。
+    # 用探针验证默认执行会清理旧 build，再用一次快速增量执行验证缓存复用。
+    New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
+    $cleanProbe = Join-Path $buildRoot ".self-test-clean-probe"
+    Set-Content -LiteralPath $cleanProbe -Value "default build must remove this file"
     Invoke-BuildScript -Arguments @("-SkipTests")
+    if (Test-Path -LiteralPath $cleanProbe) {
+        throw "默认构建没有清理旧 build 目录。"
+    }
     $first = Read-Manifest
-    if ($first.sourceMode -ne "current-source" -or $first.testsExecuted) {
+    if ($first.sourceMode -ne "current-source" -or $first.testsExecuted -or $first.incrementalRequested -or $first.buildCacheReused) {
         throw "首次 -SkipTests manifest 的 sourceMode/testsExecuted 不符合预期。"
     }
     $firstRunId = [string]$first.buildRunId
@@ -95,9 +101,14 @@ try {
         }
     }
 
-    Invoke-BuildScript -Arguments @("-SkipTests")
+    $incrementalProbe = Join-Path $buildRoot ".self-test-incremental-probe"
+    Set-Content -LiteralPath $incrementalProbe -Value "incremental build must preserve this file"
+    Invoke-BuildScript -Arguments @("-SkipTests", "-Incremental")
+    if (-not (Test-Path -LiteralPath $incrementalProbe)) {
+        throw "增量构建意外清理了 build 目录。"
+    }
     $second = Read-Manifest
-    if ($second.sourceMode -ne "current-source" -or $second.testsExecuted) {
+    if ($second.sourceMode -ne "current-source" -or $second.testsExecuted -or -not $second.incrementalRequested -or -not $second.buildCacheReused) {
         throw "第二次 -SkipTests manifest 的 sourceMode/testsExecuted 不符合预期。"
     }
     if ([string]$second.buildRunId -eq $firstRunId) {
@@ -110,7 +121,7 @@ try {
     if ($requirementsExistedBefore -and -not (Test-Path -LiteralPath $requirementsPath)) {
         throw "构建自测意外删除了用户原始需求文件。"
     }
-    Write-Host "构建脚本自测通过：重复重建、同步日志、下载参数安全边界均已验证。" -ForegroundColor Green
+    Write-Host "构建脚本自测通过：默认清理、增量缓存、同步日志、下载参数安全边界均已验证。" -ForegroundColor Green
 }
 finally {
     if (-not $KeepBuildOutput -and (Test-Path -LiteralPath $buildRoot)) {
