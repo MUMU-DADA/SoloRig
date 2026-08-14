@@ -1,0 +1,7 @@
+{
+  "version":2,"schema":"circuit","referenceGround":"0",
+  "nodes":["d","g","s","0"],
+  "ports":[{"id":"input","direction":"input","node":"g"},{"id":"output","direction":"output","node":"d"}],
+  "components":[{"id":"j","type":"jfet","pins":["d","g","s"],"model":"unknown.jfet.reference"},{"id":"rd","type":"resistor","pins":["d","0"],"value":1000.0},{"id":"rs","type":"resistor","pins":["s","0"],"value":1000.0}],
+  "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","convergence":{"maxIterations":64,"absoluteTolerance":1.0e-10,"relativeTolerance":1.0e-8}}
+}

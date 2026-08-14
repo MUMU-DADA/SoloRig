@@ -199,6 +199,38 @@ void StampBjt(std::vector<double>& matrix,
     }
 }
 
+void StampJfet(std::vector<double>& matrix,
+               std::vector<double>& rhs,
+               std::uint32_t size,
+               const MnaPreparedCircuit::Element& element,
+               const std::vector<double>& guess) noexcept {
+    const auto drain = element.positive_node >= 0 ? guess[static_cast<std::size_t>(element.positive_node)] : 0.0;
+    const auto gate = element.jfet_gate_node >= 0 ? guess[static_cast<std::size_t>(element.jfet_gate_node)] : 0.0;
+    const auto source = element.negative_node >= 0 ? guess[static_cast<std::size_t>(element.negative_node)] : 0.0;
+    const auto evaluation = EvaluateNonlinearJfet(element.nonlinear_jfet_model, drain, gate, source);
+    if (!evaluation.Succeeded()) {
+        StampConductance(matrix, size, element.positive_node, element.negative_node,
+                         std::numeric_limits<double>::quiet_NaN());
+        return;
+    }
+    const std::int32_t nodes[3] = {element.positive_node, element.jfet_gate_node, element.negative_node};
+    const double voltages[3] = {drain, gate, source};
+    for (std::size_t row = 0; row < 3U; ++row) {
+        if (nodes[row] < 0) {
+            continue;
+        }
+        double equivalent_current = evaluation.currents[row];
+        for (std::size_t column = 0; column < 3U; ++column) {
+            equivalent_current -= evaluation.jacobian[row][column] * voltages[column];
+            if (nodes[column] >= 0) {
+                matrix[static_cast<std::size_t>(nodes[row]) * size + static_cast<std::size_t>(nodes[column])] +=
+                    evaluation.jacobian[row][column];
+            }
+        }
+        rhs[static_cast<std::size_t>(nodes[row])] -= equivalent_current;
+    }
+}
+
 void StampDiode(std::vector<double>& matrix,
                 std::vector<double>& rhs,
                 std::uint32_t size,
@@ -314,6 +346,9 @@ void MnaPreparedCircuit::Reset() noexcept {
         if (element.type == CircuitComponentType::Bjt && element.bjt_base_node >= 0) {
             solution_[element.bjt_base_node] = element.initial;
         }
+        if (element.type == CircuitComponentType::Jfet && element.jfet_gate_node >= 0) {
+            solution_[element.jfet_gate_node] = element.initial;
+        }
     }
 }
 
@@ -329,6 +364,7 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
     for (std::uint32_t substep = 0; substep < oversampling_; ++substep) {
         const auto has_nonlinearity = std::any_of(elements_.begin(), elements_.end(), [](const auto& element) {
             return element.type == CircuitComponentType::Diode || element.type == CircuitComponentType::Bjt ||
+                   element.type == CircuitComponentType::Jfet ||
                    element.controlled_has_limits;
         });
         bool converged = !has_nonlinearity;
@@ -364,6 +400,9 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     break;
                 case CircuitComponentType::Bjt:
                     StampBjt(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    break;
+                case CircuitComponentType::Jfet:
+                    StampJfet(matrix_, rhs_, matrix_size_, element, newton_previous_);
                     break;
                 case CircuitComponentType::Vccs:
                     StampVccs(matrix_, rhs_, matrix_size_, element, newton_previous_);
@@ -424,6 +463,23 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                             nonlinear_step_scale = std::min(
                                 nonlinear_step_scale, element.nonlinear_bjt_model.max_step / largest_junction_step);
                         }
+                    }
+                }
+                if (element.type == CircuitComponentType::Jfet) {
+                    const auto old_drain = element.positive_node >= 0 ? newton_previous_[element.positive_node] : 0.0;
+                    const auto old_gate = element.jfet_gate_node >= 0 ? newton_previous_[element.jfet_gate_node] : 0.0;
+                    const auto old_source = element.negative_node >= 0 ? newton_previous_[element.negative_node] : 0.0;
+                    const auto new_drain = element.positive_node >= 0 ? solution_[element.positive_node] : 0.0;
+                    const auto new_gate = element.jfet_gate_node >= 0 ? solution_[element.jfet_gate_node] : 0.0;
+                    const auto new_source = element.negative_node >= 0 ? solution_[element.negative_node] : 0.0;
+                    const auto gate_source_delta = std::fabs(
+                        (new_gate - new_source) - (old_gate - old_source));
+                    const auto drain_source_delta = std::fabs(
+                        (new_drain - new_source) - (old_drain - old_source));
+                    const auto largest_step = std::max(gate_source_delta, drain_source_delta);
+                    if (largest_step > element.nonlinear_jfet_model.max_step && std::isfinite(largest_step)) {
+                        nonlinear_step_scale = std::min(
+                            nonlinear_step_scale, element.nonlinear_jfet_model.max_step / largest_step);
                     }
                 }
             }
@@ -516,7 +572,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             component.type != CircuitComponentType::Inductor &&
             component.type != CircuitComponentType::VoltageSource && component.type != CircuitComponentType::Diode &&
             component.type != CircuitComponentType::Potentiometer && component.type != CircuitComponentType::Vccs &&
-            component.type != CircuitComponentType::IdealOpAmp && component.type != CircuitComponentType::Bjt) {
+            component.type != CircuitComponentType::IdealOpAmp && component.type != CircuitComponentType::Bjt &&
+            component.type != CircuitComponentType::Jfet) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
         }
         if (component.type == CircuitComponentType::Bjt) {
@@ -541,6 +598,31 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 bjt.forward_beta > 1.0e6 || bjt.reverse_beta <= 0.0 || bjt.reverse_beta > 1.0e6 ||
                 bjt.thermal_voltage <= 0.0 || bjt.thermal_voltage > 1.0 || bjt.max_current <= 0.0 ||
                 bjt.max_current > 1.0e6 || bjt.max_step <= 0.0 || bjt.max_step > 10.0) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+        }
+        if (component.type == CircuitComponentType::Jfet) {
+            if (component.pins.size() != 3U || (!component.jfet_model.has_value() && !component.model.has_value()) ||
+                component.value.has_value() || component.tolerance.has_value() || component.diode_model.has_value() ||
+                component.potentiometer.has_value() || component.controlled_source.has_value() ||
+                component.bjt_model.has_value() || component.switch_spec.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            if (component.model.has_value() && !component.jfet_model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& jfet = *component.jfet_model;
+            if (jfet.kind != "square-law" || jfet.model_version != 1U ||
+                (jfet.polarity != "n-channel" && jfet.polarity != "p-channel")) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            const NonlinearJfetModel model{
+                .polarity = jfet.polarity == "n-channel" ? JfetPolarity::NChannel : JfetPolarity::PChannel,
+                .pinch_off_voltage = jfet.pinch_off_voltage,
+                .transconductance_parameter = jfet.transconductance_parameter,
+                .max_current = jfet.max_current,
+                .max_step = jfet.max_step};
+            if (!ValidateNonlinearJfetModel(model)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
             }
         }
@@ -628,7 +710,9 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
     constexpr double kMinimumPotSegmentResistance = 1.0e-12;
     for (const auto& component : circuit.components) {
         const auto positive = FindNode(circuit, component.pins[0]);
-        const auto negative = FindNode(circuit, component.pins[component.type == CircuitComponentType::Bjt ? 2U : 1U]);
+        const bool is_three_terminal = component.type == CircuitComponentType::Bjt ||
+            component.type == CircuitComponentType::Jfet;
+        const auto negative = FindNode(circuit, component.pins[is_three_terminal ? 2U : 1U]);
         if (positive == -2 || negative == -2 || positive == negative) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
         }
@@ -663,6 +747,43 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                                     .max_current = bjt.max_current,
                                                     .max_step = bjt.max_step}};
             if (!ValidateNonlinearBjtModel(element.nonlinear_bjt_model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            prepared.elements_.push_back(element);
+            continue;
+        }
+        if (component.type == CircuitComponentType::Jfet) {
+            const auto gate = FindNode(circuit, component.pins[1]);
+            if (gate == -2 || gate == positive || gate == negative) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+            }
+            const auto& jfet = *component.jfet_model;
+            MnaPreparedCircuit::Element element{.type = CircuitComponentType::Jfet,
+                                                .positive_node = positive,
+                                                .negative_node = negative,
+                                                .control_positive_node = -1,
+                                                .control_negative_node = -1,
+                                                .bjt_base_node = -1,
+                                                .jfet_gate_node = gate,
+                                                .branch_index = kNoIndex,
+                                                .history_index = kNoIndex,
+                                                .inductor_history_index = kNoIndex,
+                                                .value = 0.0,
+                                                .initial = component.initial.value_or(0.0),
+                                                .nonlinear_model = {},
+                                                .controlled_gain = 0.0,
+                                                .controlled_minimum = 0.0,
+                                                .controlled_maximum = 0.0,
+                                                .controlled_has_limits = false,
+                                                .nonlinear_bjt_model = {},
+                                                .nonlinear_jfet_model = {
+                                                    .polarity = jfet.polarity == "n-channel"
+                                                        ? JfetPolarity::NChannel : JfetPolarity::PChannel,
+                                                    .pinch_off_voltage = jfet.pinch_off_voltage,
+                                                    .transconductance_parameter = jfet.transconductance_parameter,
+                                                    .max_current = jfet.max_current,
+                                                    .max_step = jfet.max_step}};
+            if (!ValidateNonlinearJfetModel(element.nonlinear_jfet_model)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
             prepared.elements_.push_back(element);
@@ -809,11 +930,15 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
 MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDatabase& model_database) {
     CircuitNetlist bound = circuit;
     for (auto& component : bound.components) {
-        if (component.type != CircuitComponentType::Diode && component.type != CircuitComponentType::Bjt) {
+        if (component.type != CircuitComponentType::Diode && component.type != CircuitComponentType::Bjt &&
+            component.type != CircuitComponentType::Jfet) {
             continue;
         }
         if (!component.model.has_value()) {
             if (component.type == CircuitComponentType::Bjt && component.bjt_model.has_value()) {
+                continue;
+            }
+            if (component.type == CircuitComponentType::Jfet && component.jfet_model.has_value()) {
                 continue;
             }
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
@@ -838,6 +963,26 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
                 .kind = "ebers-moll", .model_version = 1U, .polarity = *record.polarity,
                 .saturation_current = *saturation, .forward_beta = *forward_beta,
                 .reverse_beta = *reverse_beta, .thermal_voltage = *thermal,
+                .max_current = *max_current, .max_step = *max_step};
+            continue;
+        }
+        if (component.type == CircuitComponentType::Jfet) {
+            const auto result = model_database.Bind({*component.model, ModelKind::Jfet});
+            if (!result.model.has_value() || !result.model->polarity.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& record = *result.model;
+            const auto pinch_off = ModelParameter(record, "pinch-off-voltage");
+            const auto transconductance = ModelParameter(record, "transconductance-parameter");
+            const auto max_current = ModelParameter(record, "max-current");
+            const auto max_step = ModelParameter(record, "max-step");
+            if (!pinch_off.has_value() || !transconductance.has_value() ||
+                !max_current.has_value() || !max_step.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            component.jfet_model = CircuitJfetModel{
+                .kind = "square-law", .model_version = 1U, .polarity = *record.polarity,
+                .pinch_off_voltage = *pinch_off, .transconductance_parameter = *transconductance,
                 .max_current = *max_current, .max_step = *max_step};
             continue;
         }

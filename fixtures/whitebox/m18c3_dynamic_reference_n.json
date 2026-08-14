@@ -1,0 +1,13 @@
+{
+  "version":2,"schema":"circuit","referenceGround":"0",
+  "nodes":["vdd","in","g","d","0"],
+  "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"d"}],
+  "supplies":[{"id":"supply","positive":"vdd","negative":"0","voltage":5.0}],
+  "components":[
+    {"id":"rg","type":"resistor","pins":["in","g"],"value":1000.0},
+    {"id":"cg","type":"capacitor","pins":["g","0"],"value":1.0e-6,"initial":0.25},
+    {"id":"j","type":"jfet","pins":["d","g","0"],"model":"solorig.cleanroom.jfet.n-channel.v1","initial":0.25},
+    {"id":"rd","type":"resistor","pins":["vdd","d"],"value":1000.0}
+  ],
+  "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,"convergence":{"maxIterations":64,"absoluteTolerance":1.0e-10,"relativeTolerance":1.0e-8}}
+}

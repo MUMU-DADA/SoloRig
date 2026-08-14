@@ -1,0 +1,8 @@
+{
+  "version":2,"schema":"circuit","referenceGround":"0","nodes":["d","g","0"],
+  "ports":[{"id":"input","direction":"input","node":"g"},{"id":"output","direction":"output","node":"d"}],
+  "components":[
+    {"id":"j","type":"jfet","pins":["d","g","0"],"jfetModel":{"kind":"square-law","modelVersion":1,"polarity":"n-channel","pinchOffVoltage":1.0,"transconductanceParameter":0.001,"maxCurrent":0.01}}
+  ],
+  "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+}

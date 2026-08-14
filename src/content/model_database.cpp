@@ -64,7 +64,7 @@ std::optional<ModelLicenseReviewStatus> ParseReviewStatus(std::string_view value
 
 bool IsApprovedKind(ModelKind kind) {
     return kind == ModelKind::Diode || kind == ModelKind::Zener ||
-           kind == ModelKind::Bjt ||
+           kind == ModelKind::Bjt || kind == ModelKind::Jfet ||
            kind == ModelKind::TestMathematical;
 }
 
@@ -100,12 +100,46 @@ bool HasBjtParameterContract(const ModelAuditRecord& model) {
     });
 }
 
-bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
-    if (model.kind != ModelKind::Diode && model.kind != ModelKind::Zener && model.kind != ModelKind::Bjt) {
+bool HasJfetParameterContract(const ModelAuditRecord& model) {
+    if (model.kind != ModelKind::Jfet) {
         return true;
     }
-    if (model.kind == ModelKind::Bjt) {
-        if (!model.polarity.has_value() || (*model.polarity != "npn" && *model.polarity != "pnp")) {
+    struct RequiredParameter {
+        std::string_view id;
+        std::string_view unit;
+        double minimum;
+        double maximum;
+    };
+    constexpr RequiredParameter required[] = {
+        {"pinch-off-voltage", "V", 1.0e-6, 100.0},
+        {"transconductance-parameter", "A/V^2", 1.0e-12, 1.0e6},
+        {"max-current", "A", 1.0e-12, 1.0e6},
+        {"max-step", "V", 1.0e-20, 10.0}};
+    if (model.parameters.size() != std::size(required)) {
+        return false;
+    }
+    return std::all_of(std::begin(required), std::end(required), [&model](const auto& expected) {
+        return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
+            return parameter.id == expected.id && parameter.unit == expected.unit &&
+                   std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
+                   parameter.default_value <= expected.maximum && std::isfinite(parameter.minimum) &&
+                   std::isfinite(parameter.maximum) && parameter.minimum >= expected.minimum &&
+                   parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
+                   parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
+        }) == 1;
+    });
+}
+
+bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
+    if (model.kind != ModelKind::Diode && model.kind != ModelKind::Zener && model.kind != ModelKind::Bjt &&
+        model.kind != ModelKind::Jfet) {
+        return true;
+    }
+    if (model.kind == ModelKind::Bjt || model.kind == ModelKind::Jfet) {
+        const bool polarity_allowed = model.kind == ModelKind::Bjt
+            ? model.polarity.has_value() && (*model.polarity == "npn" || *model.polarity == "pnp")
+            : model.polarity.has_value() && (*model.polarity == "n-channel" || *model.polarity == "p-channel");
+        if (!polarity_allowed) {
             return false;
         }
         return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
@@ -142,7 +176,7 @@ std::vector<ModelKindContract> ModelKindContracts() {
         {ModelKind::Diode, ModelAvailability::Approved},
         {ModelKind::Zener, ModelAvailability::Approved},
         {ModelKind::Bjt, ModelAvailability::Approved},
-        {ModelKind::Jfet, ModelAvailability::Blocked},
+        {ModelKind::Jfet, ModelAvailability::Approved},
         {ModelKind::Mosfet, ModelAvailability::Blocked},
         {ModelKind::Opamp, ModelAvailability::Blocked},
         {ModelKind::Ota, ModelAvailability::Blocked},
@@ -191,9 +225,12 @@ ModelAuditParseResult ParseModelAuditJson(std::string_view source) {
                             .part_number = *part,
                             .kind = *kind,
                             .availability = *availability};
-    if (*kind == ModelKind::Bjt) {
+    if (*kind == ModelKind::Bjt || *kind == ModelKind::Jfet) {
         const auto polarity = StringValue(Find(object, "polarity"));
-        if (!polarity.has_value() || (*polarity != "npn" && *polarity != "pnp")) {
+        const bool polarity_allowed = *kind == ModelKind::Bjt
+            ? polarity.has_value() && (*polarity == "npn" || *polarity == "pnp")
+            : polarity.has_value() && (*polarity == "n-channel" || *polarity == "p-channel");
+        if (!polarity_allowed) {
             return {.model = std::nullopt, .error = ModelAuditError::InvalidField};
         }
         record.polarity = *polarity;
@@ -312,7 +349,8 @@ std::optional<ModelAuditError> ModelDatabase::Register(ModelAuditRecord model) {
         return ModelAuditError::MissingModelAuthorization;
     }
     if (!IsAuthorizedCleanRoomDevice(model) ||
-        (model.kind == ModelKind::Bjt && (!model.polarity.has_value() || !HasBjtParameterContract(model)))) {
+        (model.kind == ModelKind::Bjt && (!model.polarity.has_value() || !HasBjtParameterContract(model))) ||
+        (model.kind == ModelKind::Jfet && (!model.polarity.has_value() || !HasJfetParameterContract(model)))) {
         return ModelAuditError::MissingModelAuthorization;
     }
     if (model.availability != ModelAvailability::Approved || !IsApprovedKind(model.kind)) {

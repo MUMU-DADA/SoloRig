@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "schema": "solorig-model-audit",
+  "modelId": "solorig.cleanroom.jfet.p-channel.v1",
+  "deviceFamily": "clean-room-jfet",
+  "partNumber": "self-authored-p-channel-no-commercial-part",
+  "modelKind": "jfet",
+  "polarity": "p-channel",
+  "runtimeStatus": "approved",
+  "parameters": [
+    {"id":"pinch-off-voltage","default":1.0,"min":1.0e-6,"max":100.0,"unit":"V"},
+    {"id":"transconductance-parameter","default":0.001,"min":1.0e-12,"max":1.0e6,"unit":"A/V^2"},
+    {"id":"max-current","default":0.01,"min":1.0e-12,"max":1.0e6,"unit":"A"},
+    {"id":"max-step","default":0.5,"min":1.0e-20,"max":10.0,"unit":"V"}
+  ],
+  "source":{"origin":"SoloRig self-authored clean-room square-law JFET contract","version":"m18c3-clean-room-v1","integrity":"self:m18c3-p-channel-v1"},
+  "license":{"spdx":"MIT","permissionEvidence":"self-authored-clean-room","reviewStatus":"approved"},
+  "applicability":[{"quantity":"terminal-voltage","min":-20.0,"max":20.0,"unit":"V"}],
+  "evidenceRefs":["test:m18c3-jfet-iv-jacobian"]
+}

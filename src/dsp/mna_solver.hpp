@@ -61,6 +61,7 @@ public:
         std::int32_t control_positive_node{-1};
         std::int32_t control_negative_node{-1};
         std::int32_t bjt_base_node{-1};
+        std::int32_t jfet_gate_node{-1};
         std::uint32_t branch_index{};
         std::uint32_t history_index{UINT32_MAX};
         std::uint32_t inductor_history_index{UINT32_MAX};
@@ -72,6 +73,7 @@ public:
         double controlled_maximum{};
         bool controlled_has_limits{};
         NonlinearBjtModel nonlinear_bjt_model{};
+        NonlinearJfetModel nonlinear_jfet_model{};
     };
 
 private:

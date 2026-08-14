@@ -88,8 +88,7 @@ TEST_CASE("M14 rejects missing fields, nonfinite values, ranges, version and unk
 
 TEST_CASE("M14 protected device contracts remain explicit after later family approvals") {
     const auto contracts = solo_rig::ModelKindContracts();
-    for (const auto kind : {solo_rig::ModelKind::Jfet, solo_rig::ModelKind::Mosfet,
-                            solo_rig::ModelKind::Opamp,
+    for (const auto kind : {solo_rig::ModelKind::Mosfet, solo_rig::ModelKind::Opamp,
                             solo_rig::ModelKind::Ota, solo_rig::ModelKind::Triode,
                             solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
                             solo_rig::ModelKind::TransformerCore}) {
@@ -132,8 +131,7 @@ TEST_CASE("M18-C1 registers only self-authored clean-room diode and Zener famili
         REQUIRE(found != contracts.end());
         REQUIRE(found->availability == solo_rig::ModelAvailability::Approved);
     }
-    for (const auto kind : {solo_rig::ModelKind::Jfet, solo_rig::ModelKind::Mosfet,
-                            solo_rig::ModelKind::Opamp,
+    for (const auto kind : {solo_rig::ModelKind::Mosfet, solo_rig::ModelKind::Opamp,
                             solo_rig::ModelKind::Ota, solo_rig::ModelKind::Triode,
                             solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
                             solo_rig::ModelKind::TransformerCore}) {
@@ -206,4 +204,56 @@ TEST_CASE("M18-C2 audits and registers only complete authorized clean-room BJT m
     });
     REQUIRE(bjt != contracts.end());
     REQUIRE(bjt->availability == solo_rig::ModelAvailability::Approved);
+}
+
+TEST_CASE("M18-C3 audits and registers only complete authorized clean-room JFET models") {
+    for (const auto fixture : {"m18c3_cleanroom_n_jfet_model.json", "m18c3_cleanroom_p_jfet_model.json"}) {
+        const auto parsed = solo_rig::ParseModelAuditJson(ReadFixture(fixture));
+        REQUIRE(parsed.error == std::nullopt);
+        REQUIRE(parsed.model.has_value());
+        REQUIRE(parsed.model->polarity.has_value());
+        REQUIRE(parsed.model->part_number == "self-authored-" + *parsed.model->polarity + "-no-commercial-part");
+        const auto built = solo_rig::BuildModelDatabase(ReadFixture(fixture));
+        REQUIRE(built.database.has_value());
+        REQUIRE(built.error == std::nullopt);
+        REQUIRE(built.database->Bind({parsed.model->model_id, solo_rig::ModelKind::Jfet,
+                                      parsed.model->polarity}).model.has_value());
+        const auto wrong_polarity = *parsed.model->polarity == "n-channel" ? "p-channel" : "n-channel";
+        REQUIRE(built.database->Bind({parsed.model->model_id, solo_rig::ModelKind::Jfet, wrong_polarity}).error ==
+                solo_rig::ModelAuditError::ModelKindMismatch);
+    }
+    REQUIRE(solo_rig::BuildModelDatabase(ReadFixture("m18c3_untrusted_jfet_model.json")).error ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+    REQUIRE(solo_rig::BuildModelDatabase(ReadFixture("m18c3_incomplete_jfet_model.json")).error ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+
+    const auto parsed = solo_rig::ParseModelAuditJson(ReadFixture("m18c3_cleanroom_n_jfet_model.json"));
+    REQUIRE(parsed.model.has_value());
+    auto invalid_polarity = *parsed.model;
+    invalid_polarity.polarity = "invalid";
+    solo_rig::ModelDatabase invalid_polarity_database;
+    REQUIRE(invalid_polarity_database.Register(std::move(invalid_polarity)) ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+
+    auto spoofed_part = *parsed.model;
+    spoofed_part.part_number = "commercial-jfet-no-commercial-part";
+    solo_rig::ModelDatabase spoofed_database;
+    REQUIRE(spoofed_database.Register(std::move(spoofed_part)) ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+
+    auto unsafe_range = *parsed.model;
+    const auto parameter = std::find_if(unsafe_range.parameters.begin(), unsafe_range.parameters.end(),
+                                        [](const auto& item) { return item.id == "pinch-off-voltage"; });
+    REQUIRE(parameter != unsafe_range.parameters.end());
+    parameter->maximum = 101.0;
+    solo_rig::ModelDatabase unsafe_database;
+    REQUIRE(unsafe_database.Register(std::move(unsafe_range)) ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+
+    const auto contracts = solo_rig::ModelKindContracts();
+    const auto jfet = std::find_if(contracts.begin(), contracts.end(), [](const auto& contract) {
+        return contract.kind == solo_rig::ModelKind::Jfet;
+    });
+    REQUIRE(jfet != contracts.end());
+    REQUIRE(jfet->availability == solo_rig::ModelAvailability::Approved);
 }
