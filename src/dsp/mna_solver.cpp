@@ -105,6 +105,34 @@ void StampInductor(std::vector<double>& matrix,
     rhs[branch] -= inductance_over_dt * previous_current;
 }
 
+void StampCoupledInductor(std::vector<double>& matrix,
+                          std::vector<double>& rhs,
+                          std::uint32_t size,
+                          const MnaPreparedCircuit::Element& element,
+                          double inverse_dt,
+                          double primary_previous,
+                          double secondary_previous) noexcept {
+    const double primary_dynamic = element.coupled_inductor_coefficients.primary_inductance * inverse_dt;
+    const double secondary_dynamic = element.coupled_inductor_coefficients.secondary_inductance * inverse_dt;
+    const double mutual_dynamic = element.coupled_inductor_coefficients.mutual_inductance * inverse_dt;
+    StampInductor(matrix, rhs, size, element.positive_node, element.negative_node,
+                  element.branch_index, element.coupled_inductor_model.primary_resistance + primary_dynamic,
+                  primary_previous);
+    StampInductor(matrix, rhs, size, element.secondary_positive_node, element.secondary_negative_node,
+                  element.secondary_branch_index,
+                  element.coupled_inductor_model.secondary_resistance + secondary_dynamic,
+                  secondary_previous);
+    rhs[element.branch_index] += element.coupled_inductor_model.primary_resistance * primary_previous;
+    rhs[element.secondary_branch_index] +=
+        element.coupled_inductor_model.secondary_resistance * secondary_previous;
+    matrix[static_cast<std::size_t>(element.branch_index) * size + element.secondary_branch_index] -=
+        mutual_dynamic;
+    matrix[static_cast<std::size_t>(element.secondary_branch_index) * size + element.branch_index] -=
+        mutual_dynamic;
+    rhs[element.branch_index] -= mutual_dynamic * secondary_previous;
+    rhs[element.secondary_branch_index] -= mutual_dynamic * primary_previous;
+}
+
 void StampVccs(std::vector<double>& matrix,
                std::vector<double>& rhs,
                std::uint32_t size,
@@ -555,6 +583,9 @@ void MnaPreparedCircuit::Reset() noexcept {
         if (element.inductor_history_index != kNoIndex) {
             inductor_history_[element.inductor_history_index] = element.initial;
         }
+        if (element.secondary_inductor_history_index != kNoIndex) {
+            inductor_history_[element.secondary_inductor_history_index] = element.secondary_initial;
+        }
     }
     std::fill(matrix_.begin(), matrix_.end(), 0.0);
     std::fill(rhs_.begin(), rhs_.end(), 0.0);
@@ -635,6 +666,11 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                                   inductor_history_[element.inductor_history_index]);
                     break;
                 }
+                case CircuitComponentType::CoupledInductor:
+                    StampCoupledInductor(matrix_, rhs_, matrix_size_, element, conductance_scale,
+                        inductor_history_[element.inductor_history_index],
+                        inductor_history_[element.secondary_inductor_history_index]);
+                    break;
                 case CircuitComponentType::VoltageSource:
                     StampVoltageSource(matrix_, rhs_, matrix_size_, element.positive_node, element.negative_node,
                                        element.branch_index, element.value);
@@ -882,6 +918,10 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
             if (element.inductor_history_index != kNoIndex) {
                 inductor_history_[element.inductor_history_index] = solution_[element.branch_index];
             }
+            if (element.secondary_inductor_history_index != kNoIndex) {
+                inductor_history_[element.secondary_inductor_history_index] =
+                    solution_[element.secondary_branch_index];
+            }
         }
         result.output_voltage = output_node_ >= 0 ? solution_[output_node_] : 0.0;
     }
@@ -931,6 +971,12 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         if (component.initial.has_value() && !std::isfinite(*component.initial)) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
         }
+        if ((component.primary_initial_current.has_value() &&
+             !std::isfinite(*component.primary_initial_current)) ||
+            (component.secondary_initial_current.has_value() &&
+             !std::isfinite(*component.secondary_initial_current))) {
+            return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+        }
         if ((component.bjt_model.has_value() && component.type != CircuitComponentType::Bjt) ||
             (component.jfet_model.has_value() && component.type != CircuitComponentType::Jfet) ||
             (component.mosfet_model.has_value() && component.type != CircuitComponentType::Mosfet) ||
@@ -939,7 +985,11 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             (component.triode_model.has_value() && component.type != CircuitComponentType::Triode) ||
             (component.pentode_model.has_value() && component.type != CircuitComponentType::Pentode) ||
             (component.beam_tetrode_model.has_value() && component.type != CircuitComponentType::BeamTetrode) ||
-            (component.vari_mu_model.has_value() && component.type != CircuitComponentType::VariMu)) {
+            (component.vari_mu_model.has_value() && component.type != CircuitComponentType::VariMu) ||
+            (component.coupled_inductor_model.has_value() &&
+             component.type != CircuitComponentType::CoupledInductor) ||
+            ((component.primary_initial_current.has_value() || component.secondary_initial_current.has_value()) &&
+             component.type != CircuitComponentType::CoupledInductor)) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
         }
         if (component.type != CircuitComponentType::Resistor && component.type != CircuitComponentType::Capacitor &&
@@ -950,7 +1000,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             component.type != CircuitComponentType::Ota && component.type != CircuitComponentType::Bjt &&
             component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet &&
             component.type != CircuitComponentType::Triode && component.type != CircuitComponentType::Pentode &&
-            component.type != CircuitComponentType::BeamTetrode && component.type != CircuitComponentType::VariMu) {
+            component.type != CircuitComponentType::BeamTetrode && component.type != CircuitComponentType::VariMu &&
+            component.type != CircuitComponentType::CoupledInductor) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
         }
         if (component.type == CircuitComponentType::Bjt) {
@@ -1149,6 +1200,30 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
             }
         }
+        if (component.type == CircuitComponentType::CoupledInductor) {
+            if (component.pins.size() != 4U ||
+                (!component.coupled_inductor_model.has_value() && !component.model.has_value()) ||
+                component.value.has_value() || component.tolerance.has_value() || component.initial.has_value() ||
+                component.diode_model.has_value() || component.potentiometer.has_value() ||
+                component.controlled_source.has_value() || component.bjt_model.has_value() ||
+                component.jfet_model.has_value() || component.mosfet_model.has_value() ||
+                component.amplifier_model.has_value() || component.triode_model.has_value() ||
+                component.pentode_model.has_value() || component.beam_tetrode_model.has_value() ||
+                component.vari_mu_model.has_value() || component.switch_spec.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            if (component.model.has_value() && !component.coupled_inductor_model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& item = *component.coupled_inductor_model;
+            const CoupledInductorModel model{item.turns_ratio, item.magnetizing_inductance,
+                item.primary_leakage_inductance, item.secondary_leakage_inductance,
+                item.primary_resistance, item.secondary_resistance};
+            if (item.kind != "lossy-linear" || item.model_version != 1U ||
+                !ValidateCoupledInductorModel(model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+        }
         if ((component.type == CircuitComponentType::Resistor || component.type == CircuitComponentType::Capacitor ||
              component.type == CircuitComponentType::Inductor ||
              component.type == CircuitComponentType::VoltageSource || component.type == CircuitComponentType::Potentiometer) &&
@@ -1201,12 +1276,17 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
             return component.type == CircuitComponentType::Inductor;
         }));
+    const auto coupled_inductor_branch_count = 2U * static_cast<std::uint32_t>(std::count_if(
+        circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
+            return component.type == CircuitComponentType::CoupledInductor;
+        }));
     const auto controlled_voltage_source_count = static_cast<std::uint32_t>(std::count_if(
         circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
             return component.type == CircuitComponentType::IdealOpAmp ||
                    component.type == CircuitComponentType::OpAmp;
         }));
-    const auto branch_count = voltage_source_count + inductor_count + controlled_voltage_source_count;
+    const auto branch_count = voltage_source_count + inductor_count + coupled_inductor_branch_count +
+                              controlled_voltage_source_count;
     if (non_ground_nodes + branch_count == 0U) {
         return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
     }
@@ -1277,6 +1357,41 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             if (!ValidateNonlinearBjtModel(element.nonlinear_bjt_model)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
+            prepared.elements_.push_back(element);
+            continue;
+        }
+        if (component.type == CircuitComponentType::CoupledInductor) {
+            const auto secondary_positive = FindNode(circuit, component.pins[2]);
+            const auto secondary_negative = FindNode(circuit, component.pins[3]);
+            if (secondary_positive == -2 || secondary_negative == -2 ||
+                secondary_positive == secondary_negative) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+            }
+            const auto& item = *component.coupled_inductor_model;
+            const CoupledInductorModel model{item.turns_ratio, item.magnetizing_inductance,
+                item.primary_leakage_inductance, item.secondary_leakage_inductance,
+                item.primary_resistance, item.secondary_resistance};
+            const auto coefficients = PrepareCoupledInductor(model);
+            if (!coefficients.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            MnaPreparedCircuit::Element element{};
+            element.type = CircuitComponentType::CoupledInductor;
+            element.positive_node = positive;
+            element.negative_node = negative;
+            element.secondary_positive_node = secondary_positive;
+            element.secondary_negative_node = secondary_negative;
+            element.branch_index = non_ground_nodes + branch++;
+            element.secondary_branch_index = non_ground_nodes + branch++;
+            element.inductor_history_index = static_cast<std::uint32_t>(prepared.inductor_history_.size());
+            prepared.inductor_history_.push_back(0.0);
+            element.secondary_inductor_history_index =
+                static_cast<std::uint32_t>(prepared.inductor_history_.size());
+            prepared.inductor_history_.push_back(0.0);
+            element.initial = component.primary_initial_current.value_or(0.0);
+            element.secondary_initial = component.secondary_initial_current.value_or(0.0);
+            element.coupled_inductor_model = model;
+            element.coupled_inductor_coefficients = *coefficients;
             prepared.elements_.push_back(element);
             continue;
         }
@@ -1614,7 +1729,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
             component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet &&
             component.type != CircuitComponentType::OpAmp && component.type != CircuitComponentType::Ota &&
             component.type != CircuitComponentType::Triode && component.type != CircuitComponentType::Pentode &&
-            component.type != CircuitComponentType::BeamTetrode && component.type != CircuitComponentType::VariMu) {
+            component.type != CircuitComponentType::BeamTetrode && component.type != CircuitComponentType::VariMu &&
+            component.type != CircuitComponentType::CoupledInductor) {
             continue;
         }
         if (!component.model.has_value()) {
@@ -1637,7 +1753,36 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
             if (component.type == CircuitComponentType::Pentode && component.pentode_model.has_value()) continue;
             if (component.type == CircuitComponentType::BeamTetrode && component.beam_tetrode_model.has_value()) continue;
             if (component.type == CircuitComponentType::VariMu && component.vari_mu_model.has_value()) continue;
+            if (component.type == CircuitComponentType::CoupledInductor &&
+                component.coupled_inductor_model.has_value()) continue;
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+        }
+        if (component.type == CircuitComponentType::CoupledInductor) {
+            const auto result = model_database.Bind({*component.model, ModelKind::TransformerCore});
+            if (!result.model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& record = *result.model;
+            const auto turns_ratio = ModelParameter(record, "turns-ratio");
+            const auto magnetizing = ModelParameter(record, "magnetizing-inductance");
+            const auto primary_leakage = ModelParameter(record, "primary-leakage-inductance");
+            const auto secondary_leakage = ModelParameter(record, "secondary-leakage-inductance");
+            const auto primary_resistance = ModelParameter(record, "primary-resistance");
+            const auto secondary_resistance = ModelParameter(record, "secondary-resistance");
+            if (!turns_ratio || !magnetizing || !primary_leakage || !secondary_leakage ||
+                !primary_resistance || !secondary_resistance) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            component.coupled_inductor_model = CircuitCoupledInductorModel{
+                .kind = "lossy-linear",
+                .model_version = 1U,
+                .turns_ratio = *turns_ratio,
+                .magnetizing_inductance = *magnetizing,
+                .primary_leakage_inductance = *primary_leakage,
+                .secondary_leakage_inductance = *secondary_leakage,
+                .primary_resistance = *primary_resistance,
+                .secondary_resistance = *secondary_resistance};
+            continue;
         }
         if (component.type == CircuitComponentType::Bjt) {
             const auto result = model_database.Bind({*component.model, ModelKind::Bjt});

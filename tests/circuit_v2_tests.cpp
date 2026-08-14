@@ -1758,6 +1758,192 @@ TEST_CASE("M18-C7c vari-mu runtime rejects failures and remains preallocated at 
     REQUIRE(singular.circuit->Solve(0.0).error == solo_rig::MnaSolveError::SingularMatrix);
 }
 
+TEST_CASE("M18-C8a coupled-inductor inline and audited references reach prepared Solve") {
+    REQUIRE(solo_rig::ParseCircuitV2Json(
+                ReadFixture("m18c8a_invalid_coupled_inductor_inline.json")).errors ==
+            std::vector<solo_rig::CircuitLoadError>{solo_rig::CircuitLoadError::InvalidValue});
+    auto cross_family = ReadFixture("m18c8a_coupled_inductor_inline.json");
+    const auto type = cross_family.find("\"type\":\"coupled-inductor\"");
+    REQUIRE(type != std::string::npos);
+    cross_family.replace(type, std::string("\"type\":\"coupled-inductor\"").size(),
+                         "\"type\":\"resistor\"");
+    REQUIRE(solo_rig::ParseCircuitV2Json(cross_family).errors ==
+            std::vector<solo_rig::CircuitLoadError>{solo_rig::CircuitLoadError::InvalidValue});
+
+    const auto inline_graph = solo_rig::ParseCircuitV2Json(
+        ReadFixture("m18c8a_coupled_inductor_inline.json"));
+    REQUIRE(inline_graph.circuit.has_value());
+    auto inline_compiled = solo_rig::CompileMnaCircuit(*inline_graph.circuit);
+    REQUIRE(inline_compiled.circuit.has_value());
+    REQUIRE(inline_compiled.circuit->Prepare(1000.0));
+    const auto inline_solved = inline_compiled.circuit->Solve(1.0);
+    REQUIRE(inline_solved.Succeeded());
+    REQUIRE(std::fabs(inline_solved.output_voltage - 0.4270584215920738) < 1.0e-12);
+
+    const auto graph = solo_rig::ParseCircuitV2Json(
+        ReadFixture("m18c8a_coupled_inductor_reference.json"));
+    const auto database = solo_rig::BuildModelDatabase(
+        ReadFixture("m18c8a_cleanroom_transformer_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*graph.circuit).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(1000.0));
+    REQUIRE(std::fabs(compiled.circuit->Solve(1.0).output_voltage -
+                      inline_solved.output_voltage) < 1.0e-12);
+    const auto unknown = solo_rig::ParseCircuitV2Json(ReadFixture("m18c8a_unknown_reference.json"));
+    REQUIRE(unknown.circuit.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*unknown.circuit, *database.database).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+}
+
+TEST_CASE("M18-C8a coupled-inductor matches independent two-by-two BE reference after Reset") {
+    const auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c8a_dynamic_reference.json"));
+    const auto database = solo_rig::BuildModelDatabase(
+        ReadFixture("m18c8a_cleanroom_transformer_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(1000.0));
+    const auto run = [](solo_rig::MnaPreparedCircuit& circuit) {
+        double primary_history = 0.001;
+        double secondary_history = -0.00025;
+        double output = 0.0;
+        for (const double input : {1.0, 0.5, -0.25, 0.0, 0.75}) {
+            constexpr double primary_inductance_over_dt = 1100.0;
+            constexpr double secondary_inductance_over_dt = 275.0;
+            constexpr double mutual_inductance_over_dt = 500.0;
+            constexpr double a11 = 1110.0;
+            constexpr double a12 = mutual_inductance_over_dt;
+            constexpr double a21 = mutual_inductance_over_dt;
+            constexpr double a22 = 1280.0;
+            const double rhs1 = input + primary_inductance_over_dt * primary_history +
+                                mutual_inductance_over_dt * secondary_history;
+            const double rhs2 = mutual_inductance_over_dt * primary_history +
+                                secondary_inductance_over_dt * secondary_history;
+            const double determinant = a11 * a22 - a12 * a21;
+            const double primary = (rhs1 * a22 - a12 * rhs2) / determinant;
+            const double secondary = (a11 * rhs2 - a21 * rhs1) / determinant;
+            output = -1000.0 * secondary;
+            const auto solved = circuit.Solve(input);
+            REQUIRE(solved.Succeeded());
+            REQUIRE(std::fabs(solved.output_voltage - output) < 1.0e-12);
+            primary_history = primary;
+            secondary_history = secondary;
+        }
+        return output;
+    };
+    const double first = run(*compiled.circuit);
+    compiled.circuit->Reset();
+    REQUIRE(std::fabs(run(*compiled.circuit) - first) < 1.0e-12);
+    REQUIRE(compiled.circuit->Prepare(1000.0));
+    REQUIRE(std::fabs(run(*compiled.circuit) - first) < 1.0e-12);
+}
+
+TEST_CASE("M18-C8a coupled-inductor rejects non-finite state and stays preallocated at 192 kHz 4x") {
+    auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c8a_coupled_inductor_reference.json"));
+    const auto database = solo_rig::BuildModelDatabase(
+        ReadFixture("m18c8a_cleanroom_transformer_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    graph.circuit->solver.oversampling = 4U;
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(192000.0));
+    REQUIRE(compiled.circuit->Solve(std::numeric_limits<double>::quiet_NaN()).error ==
+            solo_rig::MnaSolveError::NonFinite);
+    constexpr auto contract = solo_rig::MnaPreparedCircuit::ProcessContract();
+    static_assert(!contract.process_allocates && !contract.process_locks &&
+                  !contract.process_reads_files && !contract.process_parses_json);
+    for (std::uint32_t sample = 0; sample < 1024U; ++sample) {
+        REQUIRE(compiled.circuit->Solve(sample % 2U == 0U ? -1.0 : 1.0).Succeeded());
+    }
+    graph.circuit->components.front().primary_initial_current =
+        std::numeric_limits<double>::infinity();
+    REQUIRE(solo_rig::CompileMnaCircuit(*graph.circuit, *database.database).error ==
+            solo_rig::MnaCompileError::InvalidValue);
+}
+
+TEST_CASE("M18-C8a coupled-inductor covers open circuit loss decay and singular topology") {
+    auto open_graph = solo_rig::ParseCircuitV2Json(
+        ReadFixture("m18c8a_coupled_inductor_inline.json"));
+    REQUIRE(open_graph.circuit.has_value());
+    open_graph.circuit->components.pop_back();
+    auto open = solo_rig::CompileMnaCircuit(*open_graph.circuit);
+    REQUIRE(open.circuit.has_value());
+    REQUIRE(open.circuit->Prepare(1000.0));
+    const auto open_solved = open.circuit->Solve(1.0);
+    REQUIRE(open_solved.Succeeded());
+    REQUIRE(std::fabs(open_solved.output_voltage - 500.0 / 1110.0) < 1.0e-12);
+
+    const auto dynamic_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c8a_dynamic_reference.json"));
+    const auto database = solo_rig::BuildModelDatabase(
+        ReadFixture("m18c8a_cleanroom_transformer_model.json"));
+    REQUIRE(dynamic_graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    auto decay = solo_rig::CompileMnaCircuit(*dynamic_graph.circuit, *database.database);
+    REQUIRE(decay.circuit.has_value());
+    REQUIRE(decay.circuit->Prepare(1000.0));
+    double primary = 0.001;
+    double secondary = -0.00025;
+    double previous_energy = 0.5 * (1.1 * primary * primary + primary * secondary +
+                                    0.275 * secondary * secondary);
+    for (std::uint32_t step = 0; step < 16U; ++step) {
+        const double rhs1 = 1100.0 * primary + 500.0 * secondary;
+        const double rhs2 = 500.0 * primary + 275.0 * secondary;
+        constexpr double determinant = 1110.0 * 1280.0 - 500.0 * 500.0;
+        const double next_primary = (rhs1 * 1280.0 - 500.0 * rhs2) / determinant;
+        const double next_secondary = (1110.0 * rhs2 - 500.0 * rhs1) / determinant;
+        const double energy = 0.5 * (1.1 * next_primary * next_primary +
+            next_primary * next_secondary + 0.275 * next_secondary * next_secondary);
+        REQUIRE(energy < previous_energy);
+        const auto solved = decay.circuit->Solve(0.0);
+        REQUIRE(solved.Succeeded());
+        REQUIRE(std::fabs(solved.output_voltage + 1000.0 * next_secondary) < 1.0e-12);
+        primary = next_primary;
+        secondary = next_secondary;
+        previous_energy = energy;
+    }
+
+    solo_rig::CircuitNetlist floating;
+    floating.reference_ground = "0";
+    floating.nodes = {"p1", "p2", "out", "0"};
+    floating.ports = {{.id = "output", .direction = solo_rig::CircuitPortDirection::Output, .node = "out"}};
+    solo_rig::CircuitComponent transformer;
+    transformer.id = "t1";
+    transformer.type = solo_rig::CircuitComponentType::CoupledInductor;
+    transformer.pins = {"p1", "p2", "out", "0"};
+    transformer.coupled_inductor_model = solo_rig::CircuitCoupledInductorModel{
+        .turns_ratio = 2.0, .magnetizing_inductance = 1.0,
+        .primary_leakage_inductance = 0.1, .secondary_leakage_inductance = 0.025,
+        .primary_resistance = 10.0, .secondary_resistance = 5.0};
+    floating.components.push_back(transformer);
+    auto singular = solo_rig::CompileMnaCircuit(floating);
+    REQUIRE(singular.circuit.has_value());
+    REQUIRE(singular.circuit->Prepare(48000.0));
+    REQUIRE(singular.circuit->Solve(0.0).error == solo_rig::MnaSolveError::SingularMatrix);
+}
+
+TEST_CASE("M18-C8a coupled-inductor rejects mixed fields and wrong-kind audit binding") {
+    auto mixed = ReadFixture("m18c8a_coupled_inductor_reference.json");
+    const auto model = mixed.find("\"model\":");
+    REQUIRE(model != std::string::npos);
+    mixed.insert(model, "\"value\":1.0,");
+    REQUIRE(solo_rig::ParseCircuitV2Json(mixed).errors ==
+            std::vector<solo_rig::CircuitLoadError>{solo_rig::CircuitLoadError::InvalidValue});
+    const auto graph = solo_rig::ParseCircuitV2Json(
+        ReadFixture("m18c8a_coupled_inductor_reference.json"));
+    const auto wrong_database = solo_rig::BuildModelDatabase(
+        ReadFixture("m18c7c_cleanroom_vari_mu_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(wrong_database.database.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*graph.circuit, *wrong_database.database).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+}
+
 TEST_CASE("M18-C1 MNA solves forward conduction reverse breakdown and zero bias") {
     auto diode_compiled = solo_rig::CompileMnaCircuit(
         *solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_diode_forward.json")).circuit);

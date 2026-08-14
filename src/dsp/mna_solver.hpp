@@ -3,6 +3,7 @@
 #include "content/circuit_v2.hpp"
 #include "content/model_database.hpp"
 #include "core/realtime_contract.hpp"
+#include "dsp/coupled_inductor.hpp"
 #include "dsp/nonlinear_device.hpp"
 
 #include <cstdint>
@@ -87,6 +88,13 @@ public:
         NonlinearPentodeModel nonlinear_pentode_model{};
         NonlinearBeamTetrodeModel nonlinear_beam_tetrode_model{};
         NonlinearVariMuModel nonlinear_vari_mu_model{};
+        std::int32_t secondary_positive_node{-1};
+        std::int32_t secondary_negative_node{-1};
+        std::uint32_t secondary_branch_index{UINT32_MAX};
+        std::uint32_t secondary_inductor_history_index{UINT32_MAX};
+        double secondary_initial{};
+        CoupledInductorModel coupled_inductor_model{};
+        CoupledInductorCoefficients coupled_inductor_coefficients{};
     };
 
 private:

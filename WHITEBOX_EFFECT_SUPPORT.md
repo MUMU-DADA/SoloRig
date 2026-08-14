@@ -4,7 +4,7 @@
 
 ## 结论
 
-当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 diode/Zener、BJT、JFET、MOSFET、bounded opamp/OTA、triode、generic pentode 和 generic beam tetrode 等第一批通用有源模型；generic vari-mu 已完成本地实现和全量门禁，尚待提交进入 Git 基线。它可以作为简单模拟削波、Fuzz、Boost、滤波、音调网络和部分运放/OTA、电子管级电路的结构基础。
+当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 diode/Zener、BJT、JFET、MOSFET、bounded opamp/OTA、triode、generic pentode、generic beam tetrode、generic vari-mu 和受限 lossy-linear coupled-inductor 等通用模型；M18-C8a 已完成本地实现和全量门禁，尚待提交进入 Git 基线。它可以作为简单模拟削波、Fuzz、Boost、滤波、音调网络、部分运放/OTA、电子管级电路和线性耦合电感网络的结构基础。
 
 当前仍不能宣称覆盖“绝大多数单块效果器和箱头”。主要阻塞不只是元件数量，还包括实时旋钮/开关、行为模块、复杂拓扑编译、器件高阶物理、功放与电源/负载交互，以及 SPICE/golden/实机误差验证。
 
@@ -57,8 +57,8 @@
 | triode | 已交付 | M18-C6 generic space-charge v1 已由 `667d1f2` 提交；没有栅极导通/漏电、极间电容、加热器、温度、自热、老化、microphonics 和商业管参数。 |
 | pentode | 已交付 | M18-C7a generic space-charge/screen-share v1 已由 `cd5f1bc` 提交；没有商业管型、真实 suppressor-grid/beam-forming、secondary emission、反向/栅极导通、动态电容和热行为。 |
 | beam tetrode | 已交付 | M18-C7b generic beam-capture v1 已由 `75f061d` 提交；平方有理 capture 不是实际 beam-forming，不含 secondary-emission kink、反向/栅极导通、动态电容、热行为或商业管参数。 |
-| vari-mu | 本地候选 | M18-C7c generic 三端 remote-cutoff v1 已通过全量门禁、尚待提交；sidechain/envelope、attack/release、商业管型、动态电容、栅流和热行为不在范围内。 |
-| 真实变压器/磁芯 | 未实现 | 没有绕组电阻、励磁/漏感、饱和及磁滞。 |
+| vari-mu | 已交付 | M18-C7c generic 三端 remote-cutoff v1 已由 `bf47d2a` 提交；sidechain/envelope、attack/release、商业管型、动态电容、栅流和热行为不在范围内。 |
+| coupled-inductor / transformer-core | 本地候选完成，待提交 | M18-C8a 已交付有损线性四端模型、匝比、绕组电阻、励磁/漏感、双初态和双支路运行时；仅批准 self-authored lossy-linear v1。饱和、磁滞、剩磁及商业变压器留给 C8b/后续。 |
 
 ## 效果器类别覆盖判断
 
@@ -73,15 +73,15 @@
 | 光学压缩、光学 Tremolo、Uni-Vibe | 未完整覆盖 | 缺少 LED/LDR/灯泡耦合、记忆和时间常数模型。 |
 | Chorus、Flanger、Analog Delay | 未完整覆盖 | 缺少 BBD、clock、VCO/LFO、插值/抗混叠和行为岛真实绑定。 |
 | Spring Reverb | 未完整覆盖 | 只有行为 lowering/契约基础，没有可运行弹簧与换能器模型。 |
-| 真空管前级单块/前级通道 | 通用模型初步能力 | generic triode/pentode/beam tetrode 已交付，vari-mu 是本地候选；真实栅流、极间电容、供电和具体管型尚未完成。 |
+| 真空管前级单块/前级通道 | 通用模型初步能力 | generic triode/pentode/beam tetrode/vari-mu 已交付；真实栅流、极间电容、供电和具体管型尚未完成。 |
 
 上述“可实现”表示通用模型具备搭建条件，不表示仓库已经交付相应产品模块，也不表示声音达到具体设备的 1:1 精度。
 
 ## 箱头覆盖的关键缺口
 
-要覆盖绝大多数电子管箱头，仅有 triode 前级模型不够，至少还需要：
+要覆盖绝大多数电子管箱头，仅有 generic 管模型不够，至少还需要：
 
-1. 提交并独立复验 generic vari-mu；继续补齐屏栅、抑制栅和功率管高阶行为；
+1. 继续补齐屏栅、抑制栅和功率管高阶行为；
 2. 输出变压器的耦合电感、绕组损耗、漏感、励磁、磁芯饱和与磁滞；
 3. 整流器、储能电容、供电阻抗、纹波、Sag 和负载恢复；
 4. 扬声器随频率和振幅变化的复阻抗负载，以及它与输出级/负反馈的交互；
@@ -106,15 +106,16 @@
 
 ## 纳入项目计划
 
-后续工作按下表纳入 M18-M20。登记计划不等于完成；M18-C7b 已提交，M18-C7c 已完成本地实现与全量门禁、尚待提交，C8 及后续子里程碑仍需逐项登记范围、测试和禁止扩展。
+后续工作按下表纳入 M18-M20。登记计划不等于完成；M18-C7c 已由 `bf47d2a` 提交，M18-C8a 已在本地完成门禁但尚未提交，C8b 及后续子里程碑仍需逐项登记范围、测试和禁止扩展。
 
 | 阶段 | 计划内容 | 完成判据摘要 |
 | --- | --- | --- |
 | M18-C6 | generic triode 主线化 | 已由 `667d1f2` 完成提交；保持商业管型及高阶物理边界。 |
 | M18-C7a | generic pentode | 已由 `cd5f1bc` 完成提交；保持商业管型及高阶物理边界。 |
 | M18-C7b | generic beam tetrode | 已由 `75f061d` 完成提交；保持真实 beam-forming、secondary emission、商业管型及高阶物理边界。 |
-| M18-C7c | vari-mu | generic 三端 remote-cutoff 模型、五参数授权及静态/DC/动态/收敛/Reset/实时门禁已本地通过；待提交进入 Git 基线，商业管型与压缩器行为仍排除。 |
-| M18-C8 | coupled inductor、transformer/core | 匝比、绕组损耗、励磁/漏感、饱和/磁滞的状态与能量/稳定性证据。 |
+| M18-C7c | vari-mu | 已由 `bf47d2a` 完成提交；商业管型与压缩器行为仍排除。 |
+| M18-C8a | coupled inductor、lossy-linear transformer/core | 本地门禁已通过：核心 283/283、C ABI 9/9、VST3 7/7、Windows UI 6/6、CTest 5/5、Validator 47/47、C# 契约；manifest `517fdf472e9d40dd891595daf640c71d`。尚未提交；饱和/磁滞/剩磁留给 C8b。 |
+| M18-C8b | nonlinear transformer/core | 饱和、磁滞、剩磁及采样率/能量稳定性；不得用 C8a 线性模型冒充。 |
 | M18-C9 | 半导体与运放高阶物理 | 补齐二极管动态、BJT/JFET/MOSFET 寄生与温度、真实运放电源/频率/瞬态行为；逐项与参考模型比较。 |
 | M18-C10 | 电源与负载交互 | 整流、纹波、Sag、供电恢复、扬声器动态阻抗及功放反馈联调。 |
 | M18-D1 | 实时控制和跨网络语义 | 电位器、开关、继电器、供电和子电路参数经有界实时邮箱更新，具备平滑、状态、自动化和 Reset 测试。 |

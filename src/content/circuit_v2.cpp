@@ -1,6 +1,7 @@
 #include "content/circuit_v2.hpp"
 
 #include "content/json.hpp"
+#include "dsp/coupled_inductor.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -104,6 +105,9 @@ std::optional<CircuitComponentType> ComponentType(std::string_view text) {
     }
     if (text == "vari-mu") {
         return CircuitComponentType::VariMu;
+    }
+    if (text == "coupled-inductor") {
+        return CircuitComponentType::CoupledInductor;
     }
     if (text == "switch") {
         return CircuitComponentType::Switch;
@@ -282,6 +286,7 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         const bool is_pentode = *type == CircuitComponentType::Pentode;
         const bool is_beam_tetrode = *type == CircuitComponentType::BeamTetrode;
         const bool is_vari_mu = *type == CircuitComponentType::VariMu;
+        const bool is_coupled_inductor = *type == CircuitComponentType::CoupledInductor;
         if ((Find(*component, "bjtModel") != nullptr && !is_bjt) ||
             (Find(*component, "jfetModel") != nullptr && !is_jfet) ||
             (Find(*component, "mosfetModel") != nullptr && !is_mosfet) ||
@@ -290,13 +295,16 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             (Find(*component, "pentodeModel") != nullptr && !is_pentode) ||
             (Find(*component, "beamTetrodeModel") != nullptr && !is_beam_tetrode) ||
             (Find(*component, "variMuModel") != nullptr && !is_vari_mu) ||
+            (Find(*component, "coupledInductorModel") != nullptr && !is_coupled_inductor) ||
+            (Find(*component, "primaryInitialCurrent") != nullptr && !is_coupled_inductor) ||
+            (Find(*component, "secondaryInitialCurrent") != nullptr && !is_coupled_inductor) ||
             (Find(*component, "controlledSource") != nullptr && !is_controlled_source)) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         if (pins->size() != 2U && !(is_potentiometer && pins->size() == 3U) &&
             !((is_controlled_source || is_amplifier) && pins->size() == 4U) &&
             !((is_bjt || is_jfet || is_mosfet || is_triode || is_vari_mu) && pins->size() == 3U) &&
-            !((is_pentode || is_beam_tetrode) && pins->size() == 4U)) {
+            !((is_pentode || is_beam_tetrode || is_coupled_inductor) && pins->size() == 4U)) {
             return Failure(CircuitLoadError::InvalidPin);
         }
         for (const auto& pin : *pins) {
@@ -800,6 +808,74 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         }
         if (is_vari_mu && !parsed_component.vari_mu_model.has_value() && !parsed_component.model.has_value()) {
             return Failure(CircuitLoadError::InvalidValue);
+        }
+        if (is_coupled_inductor) {
+            const auto* value = Find(*component, "coupledInductorModel");
+            const auto* model = value == nullptr ? nullptr : value->AsObject();
+            const auto kind = model == nullptr ? std::nullopt : StringValue(Find(*model, "kind"));
+            const auto model_version = model == nullptr ? std::nullopt : UnsignedValue(Find(*model, "modelVersion"));
+            const auto turns_ratio = model == nullptr ? std::nullopt : NumberValue(Find(*model, "turnsRatio"));
+            const auto magnetizing = model == nullptr
+                ? std::nullopt : NumberValue(Find(*model, "magnetizingInductance"));
+            const auto primary_leakage = model == nullptr
+                ? std::nullopt : NumberValue(Find(*model, "primaryLeakageInductance"));
+            const auto secondary_leakage = model == nullptr
+                ? std::nullopt : NumberValue(Find(*model, "secondaryLeakageInductance"));
+            const auto primary_resistance = model == nullptr
+                ? std::nullopt : NumberValue(Find(*model, "primaryResistance"));
+            const auto secondary_resistance = model == nullptr
+                ? std::nullopt : NumberValue(Find(*model, "secondaryResistance"));
+            if (model == nullptr && !parsed_component.model.has_value()) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            if (parsed_component.value.has_value() || parsed_component.tolerance.has_value() ||
+                parsed_component.initial.has_value()) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            const bool complete = kind.has_value() && *kind == "lossy-linear" && model_version.has_value() &&
+                *model_version == 1U && turns_ratio.has_value() && magnetizing.has_value() &&
+                primary_leakage.has_value() && secondary_leakage.has_value() &&
+                primary_resistance.has_value() && secondary_resistance.has_value();
+            const CoupledInductorModel runtime_model{
+                .turns_ratio = turns_ratio.value_or(0.0),
+                .magnetizing_inductance = magnetizing.value_or(0.0),
+                .primary_leakage_inductance = primary_leakage.value_or(0.0),
+                .secondary_leakage_inductance = secondary_leakage.value_or(0.0),
+                .primary_resistance = primary_resistance.value_or(0.0),
+                .secondary_resistance = secondary_resistance.value_or(0.0)};
+            if (model != nullptr && (!complete || !ValidateCoupledInductorModel(runtime_model) ||
+                parsed_component.model.has_value() ||
+                parsed_component.diode_model.has_value() || parsed_component.potentiometer.has_value() ||
+                parsed_component.controlled_source.has_value() || parsed_component.bjt_model.has_value() ||
+                parsed_component.jfet_model.has_value() || parsed_component.mosfet_model.has_value() ||
+                parsed_component.amplifier_model.has_value() || parsed_component.triode_model.has_value() ||
+                parsed_component.pentode_model.has_value() || parsed_component.beam_tetrode_model.has_value() ||
+                parsed_component.vari_mu_model.has_value() || parsed_component.switch_spec.has_value())) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            if (const auto* initial = Find(*component, "primaryInitialCurrent"); initial != nullptr) {
+                parsed_component.primary_initial_current = NumberValue(initial);
+                if (!parsed_component.primary_initial_current.has_value()) {
+                    return Failure(CircuitLoadError::InvalidValue);
+                }
+            }
+            if (const auto* initial = Find(*component, "secondaryInitialCurrent"); initial != nullptr) {
+                parsed_component.secondary_initial_current = NumberValue(initial);
+                if (!parsed_component.secondary_initial_current.has_value()) {
+                    return Failure(CircuitLoadError::InvalidValue);
+                }
+            }
+            if (model != nullptr) {
+                parsed_component.coupled_inductor_model = CircuitCoupledInductorModel{
+                    .kind = *kind,
+                    .model_version = *model_version,
+                    .turns_ratio = *turns_ratio,
+                    .magnetizing_inductance = *magnetizing,
+                    .primary_leakage_inductance = *primary_leakage,
+                    .secondary_leakage_inductance = *secondary_leakage,
+                    .primary_resistance = *primary_resistance,
+                    .secondary_resistance = *secondary_resistance};
+            }
         }
         circuit.components.push_back(std::move(parsed_component));
     }

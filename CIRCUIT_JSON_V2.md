@@ -37,7 +37,7 @@
 }
 ```
 
-节点、端口、供电和元件 ID 在整个网表中必须唯一，所有引脚必须引用已声明节点。下表包含 M18-C2/C3/C4/C5/C6/C7a/C7b/C7c clean-room BJT、JFET、MOSFET、bounded opamp/OTA、generic triode、generic pentode、generic beam tetrode 和 generic vari-mu 主线路径；它不代表完整模型数据库、具体器件或白盒等价能力已经交付。
+节点、端口、供电和元件 ID 在整个网表中必须唯一，所有引脚必须引用已声明节点。下表包含 M18-C2 至 C8a 已交付的 clean-room 主线路径；它不代表完整模型数据库、具体器件、非线性磁芯或白盒等价能力已经交付。
 
 | 类型 | v2 解析 | MNA Compile/Prepare/Solve | 状态/模型 |
 | --- | --- | --- | --- |
@@ -58,6 +58,7 @@
 | `pentode` | 支持 | 支持 clean-room space-charge/screen-share Newton | 四引脚 `[plate, screen, grid, cathode]`；兼容 inline `pentodeModel`，或由 `ModelDatabase` 按 pentode 类型绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
 | `beam-tetrode` | 支持 | 支持 clean-room beam-capture Newton | 四引脚 `[plate, screen, grid, cathode]`；兼容 inline `beamTetrodeModel.kind=beam-capture`，或由 `ModelDatabase` 按 beam-tetrode 类型绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
 | `vari-mu` | 支持 | 支持 clean-room remote-cutoff Newton | 三引脚 `[plate, grid, cathode]`；兼容 inline `variMuModel.kind=remote-cutoff`，或由 `ModelDatabase` 按 vari-mu 类型绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
+| `coupled-inductor` | 支持 | 支持 clean-room lossy-linear 双支路 MNA | 四引脚 `[primary-dot, primary, secondary-dot, secondary]`；inline `coupledInductorModel.kind=lossy-linear` 或经 `ModelDatabase` 审计的安全字符串引用；`primaryInitialCurrent`/`secondaryInitialCurrent` 单位为安培 |
 | `switch` | 支持契约解析 | `UnsupportedComponent` | 状态列表/初态会校验，运行时尚未提供控制邮箱 |
 
 电感采用 branch-current MNA 形式：每个 backward-Euler 步求解 `v+ - v- - (L/dt)i = -(L/dt)i_previous`，并在 `Reset`/重复 `Prepare` 时恢复声明的初始电流。电容使用 companion conductance 与电压历史；`voltage-source`、`supplies` 和理想运放使用额外 MNA branch unknown。电位器在 Compile 阶段按归一化位置展开为端点到 wiper、wiper 到端点的两个电阻，位置扫动通过重新 Compile/Prepare 完成；端点的零段以极小正阻值保持矩阵可解。VCCS 直接印章四端线性跨导矩阵；理想运放印章有限增益 VCVS，带限幅时在 Prepare 后的预分配 Newton 工作区内选择线性/饱和分支。已发布的 runtime 没有实时旋钮或受控源参数更新入口，`SetParameter` 会明确拒绝该更新。矩阵奇异、非有限输入/结果、Newton 不收敛会返回稳定错误；未知器件、未知控制状态、缺失模型不会静默退化。
@@ -80,8 +81,10 @@ M18-C7b 的 `beam-tetrode` 使用独立 `EvaluateNonlinearBeamTetrode` 四端 be
 
 M18-C7c 的 `vari-mu` 使用独立 `EvaluateNonlinearVariMu` 三端 remote-cutoff evaluator。定义 `control = Vgk + Vpk / amplificationFactor`、`bias = max(-Vgk, 0)` 和 `remoteScale = 1 / sqrt(1 + (remoteCutoffCoefficient * bias)^2)`；只有 `Vpk > 0` 且 control 为正时导通，plate current 为 `perveance * remoteScale * control^(3/2)`，grid current 为零，cathode current 与 plate current 相反。完整 3x3 Jacobian、KCL 和独立中心有限差分一致；归一化电压差、remote-scale 双分支及 log-domain 电流判定避免极端有限输入在限流前溢出，`maxCurrent` 硬钳位后 Jacobian 为零，`maxStep` 对 Vpk/Vgk Newton 步长阻尼。审计引用只在 Compile/Prepare 边界绑定为 POD。该 generic v1 不包含商业管型、真实双节匹配、screen/suppressor/beam 物理、grid conduction/leakage、heater/filament、极间电容/电荷、热/老化/噪声、sidechain/envelope detector、attack/release 或压缩器时间常数。
 
+M18-C8a 的 `coupled-inductor` 是四端有损线性双绕组。定义 `n=Np/Ns`、`L1=Lm+Llp`、`L2=Lm/n^2+Lls`、`M=Lm/n`；dot 端固定正互感，需要反相时交换任一绕组引脚。每个 backward-Euler 子步预分配两个 branch unknown，分别印章绕组电阻、`L1/dt`、`L2/dt` 和对称 `M/dt` 交叉项，并在子步结束更新两路历史电流；`Reset`/重复 `Prepare` 恢复两个声明初态。模型必须提供正 `turnsRatio`/`magnetizingInductance`、非负两路 leakage/resistance，且 `[[L1,M],[M,L2]]` 严格正定，因此两路漏感不能同时为零。该 v1 只是固定参数 lossy-linear coupled-inductor，不包含饱和、磁滞、剩磁、涡流/频变损耗、寄生电容、温度、自热、商业磁芯或商业变压器参数。
+
 模块加载器对旧的 `schemaVersion: 1` + `kind: "analog-circuit"` 保持原受限 RC/二极管适配器；v2 读取根对象的 `version: 2`。未知版本、缺失字段、重复 ID、非法节点/引脚、范围值、缺失模型和危险路径均拒绝加载。v1 不会被静默转换为 v2，v2 也不会回退到旧硬编码拓扑。
 
 M18-C1 的 Zener 使用 self-authored 双指数静态数学契约，参数包括正向饱和电流/热电压、反向击穿电压/电流/斜率和最大 Newton 步长；这不是商业器件参数。安全字符串引用只有通过 `CompileMnaCircuit(circuit, ModelDatabase)` 才能在 Prepare 阶段绑定，普通编译稳定返回 `MissingModelAuthorization`；inline 模型对象不经过数据库，必须按本规范范围校验且只代表 generic clean-room 数学模型。
 
-本版本仍不宣称通用器件覆盖、真实设备 1:1 校准、实时参数控制电位器、开关/受控源控制、真实非理想/商业运放芯片、商业真空管、真实 beam-forming、transformer/core、结电容、Early/热效应、供电下垂或测量基线自动校准；这些属于后续独立范围。M18-C2/C3/C4/C5/C6/C7a/C7b/C7c 分别完成 generic BJT/JFET/MOSFET/bounded opamp+OTA/space-charge triode/space-charge pentode/beam-capture tetrode/remote-cutoff vari-mu 主线化，但不构成 PedalKernel 等价或完整白盒完成。
+本版本仍不宣称通用器件覆盖、真实设备 1:1 校准、实时参数控制电位器、开关/受控源控制、真实非理想/商业运放芯片、商业真空管、真实 beam-forming、非线性 transformer core、结电容、Early/热效应、供电下垂或测量基线自动校准；这些属于后续独立范围。M18-C2 至 C8a 已完成相应 generic 主线化，但不构成 PedalKernel 等价、完整输出变压器或完整白盒完成。

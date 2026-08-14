@@ -1,6 +1,7 @@
 #include "content/model_database.hpp"
 
 #include "content/json.hpp"
+#include "dsp/coupled_inductor.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -68,7 +69,7 @@ bool IsApprovedKind(ModelKind kind) {
            kind == ModelKind::Bjt || kind == ModelKind::Jfet || kind == ModelKind::Mosfet ||
            kind == ModelKind::Opamp || kind == ModelKind::Ota ||
            kind == ModelKind::Triode || kind == ModelKind::Pentode || kind == ModelKind::BeamTetrode ||
-           kind == ModelKind::VariMu ||
+           kind == ModelKind::VariMu || kind == ModelKind::TransformerCore ||
            kind == ModelKind::TestMathematical;
 }
 
@@ -305,12 +306,48 @@ bool HasVariMuParameterContract(const ModelAuditRecord& model) {
     });
 }
 
+bool HasTransformerCoreParameterContract(const ModelAuditRecord& model) {
+    if (model.kind != ModelKind::TransformerCore) return true;
+    struct Required { std::string_view id; std::string_view unit; double minimum; double maximum; };
+    constexpr Required required[] = {
+        {"turns-ratio", "1", 1.0e-6, 1.0e6},
+        {"magnetizing-inductance", "H", 1.0e-12, 1.0e6},
+        {"primary-leakage-inductance", "H", 0.0, 1.0e6},
+        {"secondary-leakage-inductance", "H", 0.0, 1.0e6},
+        {"primary-resistance", "ohm", 0.0, 1.0e12},
+        {"secondary-resistance", "ohm", 0.0, 1.0e12}};
+    if (model.parameters.size() != std::size(required)) return false;
+    const bool fields_valid = std::all_of(std::begin(required), std::end(required), [&model](const auto& expected) {
+        return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
+            return parameter.id == expected.id && parameter.unit == expected.unit &&
+                   std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
+                   parameter.default_value <= expected.maximum && std::isfinite(parameter.minimum) &&
+                   std::isfinite(parameter.maximum) && parameter.minimum >= expected.minimum &&
+                   parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
+                   parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
+        }) == 1;
+    });
+    if (!fields_valid) return false;
+    const auto value = [&model](std::string_view id) {
+        return std::find_if(model.parameters.begin(), model.parameters.end(),
+                            [id](const auto& parameter) { return parameter.id == id; })->default_value;
+    };
+    return ValidateCoupledInductorModel({
+        .turns_ratio = value("turns-ratio"),
+        .magnetizing_inductance = value("magnetizing-inductance"),
+        .primary_leakage_inductance = value("primary-leakage-inductance"),
+        .secondary_leakage_inductance = value("secondary-leakage-inductance"),
+        .primary_resistance = value("primary-resistance"),
+        .secondary_resistance = value("secondary-resistance")});
+}
+
 bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
     if (model.kind != ModelKind::Diode && model.kind != ModelKind::Zener && model.kind != ModelKind::Bjt &&
         model.kind != ModelKind::Jfet && model.kind != ModelKind::Mosfet &&
         model.kind != ModelKind::Opamp && model.kind != ModelKind::Ota &&
         model.kind != ModelKind::Triode && model.kind != ModelKind::Pentode &&
-        model.kind != ModelKind::BeamTetrode && model.kind != ModelKind::VariMu) {
+        model.kind != ModelKind::BeamTetrode && model.kind != ModelKind::VariMu &&
+        model.kind != ModelKind::TransformerCore) {
         return true;
     }
     if (model.kind == ModelKind::Opamp || model.kind == ModelKind::Ota) {
@@ -340,6 +377,12 @@ bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
         return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
                model.license.permission_evidence == "self-authored-clean-room" &&
                model.part_number == "self-authored-vari-mu-remote-cutoff-no-commercial-part";
+    }
+    if (model.kind == ModelKind::TransformerCore) {
+        return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
+               model.license.permission_evidence == "self-authored-clean-room" &&
+               model.part_number == "self-authored-lossy-linear-transformer-core-no-commercial-part" &&
+               model.model_id == "solorig.cleanroom.transformer-core.lossy-linear.v1";
     }
     if (model.kind == ModelKind::Bjt || model.kind == ModelKind::Jfet || model.kind == ModelKind::Mosfet) {
         const bool polarity_allowed = model.kind == ModelKind::Bjt
@@ -391,7 +434,7 @@ std::vector<ModelKindContract> ModelKindContracts() {
         {ModelKind::Pentode, ModelAvailability::Approved},
         {ModelKind::BeamTetrode, ModelAvailability::Approved},
         {ModelKind::VariMu, ModelAvailability::Approved},
-        {ModelKind::TransformerCore, ModelAvailability::Blocked},
+        {ModelKind::TransformerCore, ModelAvailability::Approved},
         {ModelKind::TestMathematical, ModelAvailability::Approved},
     };
 }
@@ -565,7 +608,8 @@ std::optional<ModelAuditError> ModelDatabase::Register(ModelAuditRecord model) {
         (model.kind == ModelKind::Triode && !HasTriodeParameterContract(model)) ||
         (model.kind == ModelKind::Pentode && !HasPentodeParameterContract(model)) ||
         (model.kind == ModelKind::BeamTetrode && !HasBeamTetrodeParameterContract(model)) ||
-        (model.kind == ModelKind::VariMu && !HasVariMuParameterContract(model))) {
+        (model.kind == ModelKind::VariMu && !HasVariMuParameterContract(model)) ||
+        (model.kind == ModelKind::TransformerCore && !HasTransformerCoreParameterContract(model))) {
         return ModelAuditError::MissingModelAuthorization;
     }
     if (model.availability != ModelAvailability::Approved || !IsApprovedKind(model.kind)) {

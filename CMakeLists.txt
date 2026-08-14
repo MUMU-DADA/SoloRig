@@ -55,6 +55,7 @@ add_library(solo_rig_core STATIC
     src/core/realtime_load_meter.cpp
     src/core/rig_runtime.cpp
     src/dsp/diode_clipper.cpp
+    src/dsp/coupled_inductor.cpp
     src/dsp/mna_solver.cpp
     src/dsp/nonlinear_amplifier.cpp
     src/dsp/nonlinear_beam_tetrode.cpp
@@ -229,6 +230,7 @@ if(BUILD_TESTING)
         tests/realtime_contract_tests.cpp
         tests/wdf_runtime_tests.cpp
         tests/diode_clipper_tests.cpp
+        tests/coupled_inductor_tests.cpp
         tests/nonlinear_amplifier_tests.cpp
         tests/nonlinear_beam_tetrode_tests.cpp
         tests/nonlinear_bjt_tests.cpp

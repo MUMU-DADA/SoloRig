@@ -32,6 +32,7 @@ enum class CircuitComponentType {
     BeamTetrode,
     VariMu,
     Switch,
+    CoupledInductor,
 };
 
 struct CircuitPotentiometerSpec {
@@ -131,6 +132,17 @@ struct CircuitVariMuModel {
     double max_step{1.0};
 };
 
+struct CircuitCoupledInductorModel {
+    std::string kind{"lossy-linear"};
+    std::uint32_t model_version{1};
+    double turns_ratio{1.0};
+    double magnetizing_inductance{1.0};
+    double primary_leakage_inductance{};
+    double secondary_leakage_inductance{};
+    double primary_resistance{};
+    double secondary_resistance{};
+};
+
 struct CircuitSwitchSpec {
     std::vector<std::string> states;
     std::uint32_t initial_state{};
@@ -179,6 +191,9 @@ struct CircuitComponent {
     std::optional<CircuitPentodeModel> pentode_model;
     std::optional<CircuitBeamTetrodeModel> beam_tetrode_model;
     std::optional<CircuitVariMuModel> vari_mu_model;
+    std::optional<CircuitCoupledInductorModel> coupled_inductor_model;
+    std::optional<double> primary_initial_current;
+    std::optional<double> secondary_initial_current;
     std::optional<CircuitSwitchSpec> switch_spec;
 };
 
