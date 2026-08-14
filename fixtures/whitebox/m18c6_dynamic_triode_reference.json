@@ -1,0 +1,7 @@
+{
+  "version":2,"schema":"circuit","referenceGround":"0","nodes":["vdd","in","g","p","0"],
+  "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"p"}],
+  "supplies":[{"id":"vdd","positive":"vdd","negative":"0","voltage":12.0}],
+  "components":[{"id":"rg","type":"resistor","pins":["in","g"],"value":1000.0},{"id":"cg","type":"capacitor","pins":["g","0"],"value":1.0e-6,"initial":-0.5},{"id":"t","type":"triode","pins":["p","g","0"],"model":"solorig.cleanroom.triode.space-charge.v1","initial":-0.5},{"id":"rp","type":"resistor","pins":["vdd","p"],"value":10000.0}],
+  "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,"convergence":{"maxIterations":64,"absoluteTolerance":1.0e-10,"relativeTolerance":1.0e-8}}
+}

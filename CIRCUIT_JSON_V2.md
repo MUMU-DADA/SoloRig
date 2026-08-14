@@ -37,7 +37,7 @@
 }
 ```
 
-节点、端口、供电和元件 ID 在整个网表中必须唯一，所有引脚必须引用已声明节点。下表包含 M18-C2/C3/C4/C5 clean-room BJT、JFET、MOSFET 和 bounded opamp/OTA 主线路径；它不代表完整模型数据库、具体器件或白盒等价能力已经交付。
+节点、端口、供电和元件 ID 在整个网表中必须唯一，所有引脚必须引用已声明节点。下表包含 M18-C2/C3/C4/C5/C6 clean-room BJT、JFET、MOSFET、bounded opamp/OTA 和 generic triode 主线路径；它不代表完整模型数据库、具体器件或白盒等价能力已经交付。
 
 | 类型 | v2 解析 | MNA Compile/Prepare/Solve | 状态/模型 |
 | --- | --- | --- | --- |
@@ -54,6 +54,7 @@
 | `bjt` | 支持 | 支持 clean-room Ebers-Moll Newton | 三引脚 `[collector, base, emitter]`；兼容 inline `bjtModel`，或由 `ModelDatabase` 按 BJT 类型/极性绑定的安全字符串引用；`initial` 是基极节点电压初始猜测 |
 | `jfet` | 支持 | 支持 clean-room square-law Newton | 三引脚 `[drain, gate, source]`；兼容 inline `jfetModel`，或由 `ModelDatabase` 按 JFET 类型/极性绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
 | `mosfet` | 支持 | 支持 clean-room enhancement square-law Newton | 三引脚 `[drain, gate, source]`；兼容 inline `mosfetModel`，或由 `ModelDatabase` 按 MOSFET 类型/极性绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
+| `triode` | 支持 | 支持 clean-room space-charge Newton | 三引脚 `[plate, grid, cathode]`；兼容 inline `triodeModel`，或由 `ModelDatabase` 按 triode 类型绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
 | `switch` | 支持契约解析 | `UnsupportedComponent` | 状态列表/初态会校验，运行时尚未提供控制邮箱 |
 
 电感采用 branch-current MNA 形式：每个 backward-Euler 步求解 `v+ - v- - (L/dt)i = -(L/dt)i_previous`，并在 `Reset`/重复 `Prepare` 时恢复声明的初始电流。电容使用 companion conductance 与电压历史；`voltage-source`、`supplies` 和理想运放使用额外 MNA branch unknown。电位器在 Compile 阶段按归一化位置展开为端点到 wiper、wiper 到端点的两个电阻，位置扫动通过重新 Compile/Prepare 完成；端点的零段以极小正阻值保持矩阵可解。VCCS 直接印章四端线性跨导矩阵；理想运放印章有限增益 VCVS，带限幅时在 Prepare 后的预分配 Newton 工作区内选择线性/饱和分支。已发布的 runtime 没有实时旋钮或受控源参数更新入口，`SetParameter` 会明确拒绝该更新。矩阵奇异、非有限输入/结果、Newton 不收敛会返回稳定错误；未知器件、未知控制状态、缺失模型不会静默退化。
@@ -68,8 +69,10 @@ MOSFET 使用统一 `EvaluateNonlinearMosfet` 的三端对称 enhancement-mode s
 
 M18-C5 的 `opamp`/`ota` 共用 `EvaluateNonlinearAmplifier` 有界传输 evaluator。运放把差分控制电压乘以 `gain` 后限制到 `minimumOutput`/`maximumOutput`，并以 branch residual 约束输出端电压；OTA 把差分控制电压映射为同样有界的输出电流并注入输出端 KCL。线性分支对正/负控制端的 Jacobian 分别为 `+gain`/`-gain`，硬饱和分支导数为零；乘法前按输入阈值判定饱和，极端有限输入不会先发生增益乘法溢出。`maxStep` 对差分控制电压的 Newton 步长阻尼。审计引用只在 Compile/Prepare 边界绑定为 POD；旧 `ideal-op-amp`/`vccs` 仍是 M9 兼容原语，不作为审计模型证据。
 
+M18-C6 的 `triode` 使用统一 `EvaluateNonlinearTriode` 三端 space-charge evaluator。控制量为 `Vgk + Vpk / amplificationFactor`；只有 `Vpk > 0` 且控制量为正时，plate current 才是 `perveance * control^(3/2)`，grid current 为零，cathode current 与 plate current 相反。完整 3x3 Jacobian、KCL 和独立中心有限差分一致；`maxCurrent` 在幂运算前钳位且钳位分支导数为零，`maxStep` 对 Vgk/Vpk Newton 步长阻尼。审计引用只在 Compile/Prepare 边界绑定为 POD。该 generic v1 不包含 heater/filament、grid conduction/leakage、极间电容/电荷、独立高阶 plate resistance、secondary emission、温度/自热、老化、microphonics、噪声或商业管参数。
+
 模块加载器对旧的 `schemaVersion: 1` + `kind: "analog-circuit"` 保持原受限 RC/二极管适配器；v2 读取根对象的 `version: 2`。未知版本、缺失字段、重复 ID、非法节点/引脚、范围值、缺失模型和危险路径均拒绝加载。v1 不会被静默转换为 v2，v2 也不会回退到旧硬编码拓扑。
 
 M18-C1 的 Zener 使用 self-authored 双指数静态数学契约，参数包括正向饱和电流/热电压、反向击穿电压/电流/斜率和最大 Newton 步长；这不是商业器件参数。安全字符串引用只有通过 `CompileMnaCircuit(circuit, ModelDatabase)` 才能在 Prepare 阶段绑定，普通编译稳定返回 `MissingModelAuthorization`；inline 模型对象不经过数据库，必须按本规范范围校验且只代表 generic clean-room 数学模型。
 
-本版本仍不宣称通用器件覆盖、真实设备 1:1 校准、实时参数控制电位器、开关/受控源控制、真实非理想/商业运放芯片、真空管、结电容、Early/热效应、供电下垂或测量基线自动校准；这些属于后续独立范围。M18-C2/C3/C4/C5 分别完成 generic BJT/JFET/MOSFET/bounded opamp+OTA 主线化，但不构成 PedalKernel 等价或完整白盒完成。
+本版本仍不宣称通用器件覆盖、真实设备 1:1 校准、实时参数控制电位器、开关/受控源控制、真实非理想/商业运放芯片、商业真空管、pentode/vari-mu/transformer、结电容、Early/热效应、供电下垂或测量基线自动校准；这些属于后续独立范围。M18-C2/C3/C4/C5/C6 分别完成 generic BJT/JFET/MOSFET/bounded opamp+OTA/space-charge triode 主线化，但不构成 PedalKernel 等价或完整白盒完成。

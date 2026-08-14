@@ -90,7 +90,7 @@ TEST_CASE("M14 rejects missing fields, nonfinite values, ranges, version and unk
 
 TEST_CASE("M14 protected device contracts remain explicit after later family approvals") {
     const auto contracts = solo_rig::ModelKindContracts();
-    for (const auto kind : {solo_rig::ModelKind::Triode, solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
+    for (const auto kind : {solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
                             solo_rig::ModelKind::TransformerCore}) {
         const auto found = std::find_if(contracts.begin(), contracts.end(),
                                         [kind](const auto& contract) { return contract.kind == kind; });
@@ -131,7 +131,7 @@ TEST_CASE("M18-C1 registers only self-authored clean-room diode and Zener famili
         REQUIRE(found != contracts.end());
         REQUIRE(found->availability == solo_rig::ModelAvailability::Approved);
     }
-    for (const auto kind : {solo_rig::ModelKind::Triode, solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
+    for (const auto kind : {solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
                             solo_rig::ModelKind::TransformerCore}) {
         const auto found = std::find_if(contracts.begin(), contracts.end(),
                                         [kind](const auto& contract) { return contract.kind == kind; });
@@ -359,4 +359,40 @@ TEST_CASE("M18-C5 audits and registers only complete authorized clean-room opamp
         REQUIRE(found != contracts.end());
         REQUIRE(found->availability == solo_rig::ModelAvailability::Approved);
     }
+}
+
+TEST_CASE("M18-C6 audits and registers only complete authorized clean-room triode models") {
+    const auto built = solo_rig::BuildModelDatabase(ReadFixture("m18c6_cleanroom_triode_model.json"));
+    REQUIRE(built.database.has_value());
+    REQUIRE(built.database->Bind({"solorig.cleanroom.triode.space-charge.v1",
+                                  solo_rig::ModelKind::Triode}).model.has_value());
+    REQUIRE(built.database->Bind({"solorig.cleanroom.triode.space-charge.v1",
+                                  solo_rig::ModelKind::Pentode}).error ==
+            solo_rig::ModelAuditError::ModelKindMismatch);
+    REQUIRE(solo_rig::BuildModelDatabase(ReadFixture("m18c6_untrusted_triode_model.json")).error ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+    REQUIRE(solo_rig::BuildModelDatabase(ReadFixture("m18c6_incomplete_triode_model.json")).error ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+
+    const auto parsed = solo_rig::ParseModelAuditJson(ReadFixture("m18c6_cleanroom_triode_model.json"));
+    REQUIRE(parsed.model.has_value());
+    auto commercial = *parsed.model;
+    commercial.part_number = "commercial-tube-no-commercial-part";
+    solo_rig::ModelDatabase commercial_database;
+    REQUIRE(commercial_database.Register(std::move(commercial)) ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+    auto wrong_unit = *parsed.model;
+    const auto perveance = std::find_if(wrong_unit.parameters.begin(), wrong_unit.parameters.end(),
+                                        [](const auto& item) { return item.id == "perveance"; });
+    REQUIRE(perveance != wrong_unit.parameters.end());
+    perveance->unit = "A/V";
+    solo_rig::ModelDatabase wrong_unit_database;
+    REQUIRE(wrong_unit_database.Register(std::move(wrong_unit)) ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+    const auto contracts = solo_rig::ModelKindContracts();
+    const auto triode = std::find_if(contracts.begin(), contracts.end(), [](const auto& contract) {
+        return contract.kind == solo_rig::ModelKind::Triode;
+    });
+    REQUIRE(triode != contracts.end());
+    REQUIRE(triode->availability == solo_rig::ModelAvailability::Approved);
 }

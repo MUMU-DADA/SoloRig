@@ -1,0 +1,6 @@
+{
+  "version":2,"schema":"circuit","referenceGround":"0","nodes":["p","g","0"],
+  "ports":[{"id":"input","direction":"input","node":"g"},{"id":"output","direction":"output","node":"p"}],
+  "components":[{"id":"t","type":"triode","pins":["p","g","0"],"model":"unknown.triode.reference"},{"id":"rp","type":"resistor","pins":["p","0"],"value":10000.0}],
+  "solver":{"method":"modified-nodal-analysis","integration":"backward-euler"}
+}

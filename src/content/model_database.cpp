@@ -66,6 +66,7 @@ bool IsApprovedKind(ModelKind kind) {
     return kind == ModelKind::Diode || kind == ModelKind::Zener ||
            kind == ModelKind::Bjt || kind == ModelKind::Jfet || kind == ModelKind::Mosfet ||
            kind == ModelKind::Opamp || kind == ModelKind::Ota ||
+           kind == ModelKind::Triode ||
            kind == ModelKind::TestMathematical;
 }
 
@@ -205,10 +206,41 @@ bool HasAmplifierParameterContract(const ModelAuditRecord& model) {
            minimum->default_value < maximum->default_value;
 }
 
+bool HasTriodeParameterContract(const ModelAuditRecord& model) {
+    if (model.kind != ModelKind::Triode) {
+        return true;
+    }
+    struct RequiredParameter {
+        std::string_view id;
+        std::string_view unit;
+        double minimum;
+        double maximum;
+    };
+    constexpr RequiredParameter required[] = {
+        {"amplification-factor", "1", 1.0, 1.0e6},
+        {"perveance", "A/V^1.5", 1.0e-12, 1.0e6},
+        {"max-current", "A", 1.0e-12, 1.0e6},
+        {"max-step", "V", 1.0e-20, 10.0}};
+    if (model.parameters.size() != std::size(required)) {
+        return false;
+    }
+    return std::all_of(std::begin(required), std::end(required), [&model](const auto& expected) {
+        return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
+            return parameter.id == expected.id && parameter.unit == expected.unit &&
+                   std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
+                   parameter.default_value <= expected.maximum && std::isfinite(parameter.minimum) &&
+                   std::isfinite(parameter.maximum) && parameter.minimum >= expected.minimum &&
+                   parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
+                   parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
+        }) == 1;
+    });
+}
+
 bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
     if (model.kind != ModelKind::Diode && model.kind != ModelKind::Zener && model.kind != ModelKind::Bjt &&
         model.kind != ModelKind::Jfet && model.kind != ModelKind::Mosfet &&
-        model.kind != ModelKind::Opamp && model.kind != ModelKind::Ota) {
+        model.kind != ModelKind::Opamp && model.kind != ModelKind::Ota &&
+        model.kind != ModelKind::Triode) {
         return true;
     }
     if (model.kind == ModelKind::Opamp || model.kind == ModelKind::Ota) {
@@ -218,6 +250,11 @@ bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
         return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
                model.license.permission_evidence == "self-authored-clean-room" &&
                model.part_number == expected_part;
+    }
+    if (model.kind == ModelKind::Triode) {
+        return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
+               model.license.permission_evidence == "self-authored-clean-room" &&
+               model.part_number == "self-authored-space-charge-triode-no-commercial-part";
     }
     if (model.kind == ModelKind::Bjt || model.kind == ModelKind::Jfet || model.kind == ModelKind::Mosfet) {
         const bool polarity_allowed = model.kind == ModelKind::Bjt
@@ -264,7 +301,7 @@ std::vector<ModelKindContract> ModelKindContracts() {
         {ModelKind::Mosfet, ModelAvailability::Approved},
         {ModelKind::Opamp, ModelAvailability::Approved},
         {ModelKind::Ota, ModelAvailability::Approved},
-        {ModelKind::Triode, ModelAvailability::Blocked},
+        {ModelKind::Triode, ModelAvailability::Approved},
         {ModelKind::Pentode, ModelAvailability::Blocked},
         {ModelKind::VariMu, ModelAvailability::Blocked},
         {ModelKind::TransformerCore, ModelAvailability::Blocked},
@@ -437,7 +474,8 @@ std::optional<ModelAuditError> ModelDatabase::Register(ModelAuditRecord model) {
         (model.kind == ModelKind::Jfet && (!model.polarity.has_value() || !HasJfetParameterContract(model))) ||
         (model.kind == ModelKind::Mosfet && (!model.polarity.has_value() || !HasMosfetParameterContract(model))) ||
         ((model.kind == ModelKind::Opamp || model.kind == ModelKind::Ota) &&
-         !HasAmplifierParameterContract(model))) {
+         !HasAmplifierParameterContract(model)) ||
+        (model.kind == ModelKind::Triode && !HasTriodeParameterContract(model))) {
         return ModelAuditError::MissingModelAuthorization;
     }
     if (model.availability != ModelAvailability::Approved || !IsApprovedKind(model.kind)) {

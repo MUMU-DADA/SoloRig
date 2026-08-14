@@ -1,0 +1,6 @@
+{
+  "version":2,"schema":"circuit","referenceGround":"0","nodes":["p","g","0"],
+  "ports":[{"id":"input","direction":"input","node":"g"},{"id":"output","direction":"output","node":"p"}],
+  "components":[{"id":"t","type":"triode","pins":["p","g","0"],"triodeModel":{"kind":"space-charge","modelVersion":1,"amplificationFactor":0.0,"perveance":0.001,"maxCurrent":0.01,"maxStep":0.5}}],
+  "solver":{"method":"modified-nodal-analysis","integration":"backward-euler"}
+}

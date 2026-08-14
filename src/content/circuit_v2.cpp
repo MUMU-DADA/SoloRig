@@ -93,6 +93,9 @@ std::optional<CircuitComponentType> ComponentType(std::string_view text) {
     if (text == "mosfet") {
         return CircuitComponentType::Mosfet;
     }
+    if (text == "triode") {
+        return CircuitComponentType::Triode;
+    }
     if (text == "switch") {
         return CircuitComponentType::Switch;
     }
@@ -266,16 +269,18 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         const bool is_bjt = *type == CircuitComponentType::Bjt;
         const bool is_jfet = *type == CircuitComponentType::Jfet;
         const bool is_mosfet = *type == CircuitComponentType::Mosfet;
+        const bool is_triode = *type == CircuitComponentType::Triode;
         if ((Find(*component, "bjtModel") != nullptr && !is_bjt) ||
             (Find(*component, "jfetModel") != nullptr && !is_jfet) ||
             (Find(*component, "mosfetModel") != nullptr && !is_mosfet) ||
             (Find(*component, "amplifierModel") != nullptr && !is_amplifier) ||
+            (Find(*component, "triodeModel") != nullptr && !is_triode) ||
             (Find(*component, "controlledSource") != nullptr && !is_controlled_source)) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         if (pins->size() != 2U && !(is_potentiometer && pins->size() == 3U) &&
             !((is_controlled_source || is_amplifier) && pins->size() == 4U) &&
-            !((is_bjt || is_jfet || is_mosfet) && pins->size() == 3U)) {
+            !((is_bjt || is_jfet || is_mosfet || is_triode) && pins->size() == 3U)) {
             return Failure(CircuitLoadError::InvalidPin);
         }
         for (const auto& pin : *pins) {
@@ -623,6 +628,45 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             }
         }
         if (is_mosfet && !parsed_component.mosfet_model.has_value() && !parsed_component.model.has_value()) {
+            return Failure(CircuitLoadError::InvalidValue);
+        }
+        if (is_triode) {
+            const auto* triode_value = Find(*component, "triodeModel");
+            const auto* triode = triode_value == nullptr ? nullptr : triode_value->AsObject();
+            const auto kind = triode == nullptr ? std::nullopt : StringValue(Find(*triode, "kind"));
+            const auto model_version = triode == nullptr
+                ? std::nullopt : UnsignedValue(Find(*triode, "modelVersion"));
+            const auto amplification = triode == nullptr
+                ? std::nullopt : NumberValue(Find(*triode, "amplificationFactor"));
+            const auto perveance = triode == nullptr ? std::nullopt : NumberValue(Find(*triode, "perveance"));
+            const auto max_current = triode == nullptr ? std::nullopt : NumberValue(Find(*triode, "maxCurrent"));
+            const auto max_step = triode == nullptr ? std::nullopt : NumberValue(Find(*triode, "maxStep"));
+            if (triode == nullptr && !parsed_component.model.has_value()) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            if (triode != nullptr && (!kind.has_value() || *kind != "space-charge" ||
+                !model_version.has_value() || *model_version != 1U || !amplification.has_value() ||
+                *amplification < 1.0 || *amplification > 1.0e6 || !perveance.has_value() ||
+                *perveance < 1.0e-12 || *perveance > 1.0e6 || !max_current.has_value() ||
+                *max_current < 1.0e-12 || *max_current > 1.0e6 || !max_step.has_value() ||
+                *max_step < 1.0e-20 || *max_step > 10.0 || parsed_component.value.has_value() ||
+                parsed_component.tolerance.has_value() || parsed_component.model.has_value() ||
+                parsed_component.diode_model.has_value() || parsed_component.potentiometer.has_value() ||
+                parsed_component.controlled_source.has_value() || parsed_component.bjt_model.has_value() ||
+                parsed_component.jfet_model.has_value() || parsed_component.mosfet_model.has_value() ||
+                parsed_component.amplifier_model.has_value() || parsed_component.switch_spec.has_value())) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            if (triode != nullptr) {
+                parsed_component.triode_model = CircuitTriodeModel{.kind = *kind,
+                                                                    .model_version = *model_version,
+                                                                    .amplification_factor = *amplification,
+                                                                    .perveance = *perveance,
+                                                                    .max_current = *max_current,
+                                                                    .max_step = *max_step};
+            }
+        }
+        if (is_triode && !parsed_component.triode_model.has_value() && !parsed_component.model.has_value()) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         circuit.components.push_back(std::move(parsed_component));

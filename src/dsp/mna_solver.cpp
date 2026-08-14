@@ -326,6 +326,38 @@ void StampMosfet(std::vector<double>& matrix,
     }
 }
 
+void StampTriode(std::vector<double>& matrix,
+                 std::vector<double>& rhs,
+                 std::uint32_t size,
+                 const MnaPreparedCircuit::Element& element,
+                 const std::vector<double>& guess) noexcept {
+    const auto plate = element.positive_node >= 0 ? guess[static_cast<std::size_t>(element.positive_node)] : 0.0;
+    const auto grid = element.triode_grid_node >= 0 ? guess[static_cast<std::size_t>(element.triode_grid_node)] : 0.0;
+    const auto cathode = element.negative_node >= 0 ? guess[static_cast<std::size_t>(element.negative_node)] : 0.0;
+    const auto evaluation = EvaluateNonlinearTriode(element.nonlinear_triode_model, plate, grid, cathode);
+    if (!evaluation.Succeeded()) {
+        StampConductance(matrix, size, element.positive_node, element.negative_node,
+                         std::numeric_limits<double>::quiet_NaN());
+        return;
+    }
+    const std::int32_t nodes[3] = {element.positive_node, element.triode_grid_node, element.negative_node};
+    const double voltages[3] = {plate, grid, cathode};
+    for (std::size_t row = 0; row < 3U; ++row) {
+        if (nodes[row] < 0) {
+            continue;
+        }
+        double equivalent_current = evaluation.currents[row];
+        for (std::size_t column = 0; column < 3U; ++column) {
+            equivalent_current -= evaluation.jacobian[row][column] * voltages[column];
+            if (nodes[column] >= 0) {
+                matrix[static_cast<std::size_t>(nodes[row]) * size + static_cast<std::size_t>(nodes[column])] +=
+                    evaluation.jacobian[row][column];
+            }
+        }
+        rhs[static_cast<std::size_t>(nodes[row])] -= equivalent_current;
+    }
+}
+
 void StampDiode(std::vector<double>& matrix,
                 std::vector<double>& rhs,
                 std::uint32_t size,
@@ -451,6 +483,9 @@ void MnaPreparedCircuit::Reset() noexcept {
             element.positive_node >= 0) {
             solution_[element.positive_node] = element.initial;
         }
+        if (element.type == CircuitComponentType::Triode && element.triode_grid_node >= 0) {
+            solution_[element.triode_grid_node] = element.initial;
+        }
     }
 }
 
@@ -468,6 +503,7 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
             return element.type == CircuitComponentType::Diode || element.type == CircuitComponentType::Bjt ||
                    element.type == CircuitComponentType::Jfet || element.type == CircuitComponentType::Mosfet ||
                    element.type == CircuitComponentType::OpAmp || element.type == CircuitComponentType::Ota ||
+                   element.type == CircuitComponentType::Triode ||
                    element.controlled_has_limits;
         });
         bool converged = !has_nonlinearity;
@@ -521,6 +557,9 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     break;
                 case CircuitComponentType::Ota:
                     StampOta(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    break;
+                case CircuitComponentType::Triode:
+                    StampTriode(matrix_, rhs_, matrix_size_, element, newton_previous_);
                     break;
                 case CircuitComponentType::Potentiometer:
                 case CircuitComponentType::Switch:
@@ -628,6 +667,23 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                             nonlinear_step_scale, element.nonlinear_amplifier_model.max_step / control_step);
                     }
                 }
+                if (element.type == CircuitComponentType::Triode) {
+                    const auto old_plate = element.positive_node >= 0 ? newton_previous_[element.positive_node] : 0.0;
+                    const auto old_grid = element.triode_grid_node >= 0 ? newton_previous_[element.triode_grid_node] : 0.0;
+                    const auto old_cathode = element.negative_node >= 0 ? newton_previous_[element.negative_node] : 0.0;
+                    const auto new_plate = element.positive_node >= 0 ? solution_[element.positive_node] : 0.0;
+                    const auto new_grid = element.triode_grid_node >= 0 ? solution_[element.triode_grid_node] : 0.0;
+                    const auto new_cathode = element.negative_node >= 0 ? solution_[element.negative_node] : 0.0;
+                    const auto grid_cathode_delta = std::fabs(
+                        (new_grid - new_cathode) - (old_grid - old_cathode));
+                    const auto plate_cathode_delta = std::fabs(
+                        (new_plate - new_cathode) - (old_plate - old_cathode));
+                    const auto largest_step = std::max(grid_cathode_delta, plate_cathode_delta);
+                    if (largest_step > element.nonlinear_triode_model.max_step && std::isfinite(largest_step)) {
+                        nonlinear_step_scale = std::min(
+                            nonlinear_step_scale, element.nonlinear_triode_model.max_step / largest_step);
+                    }
+                }
             }
             // Nonlinear junction steps are damped, rather than allocating a second
             // trial vector. If the bounded iteration budget is exhausted the
@@ -718,7 +774,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             (component.jfet_model.has_value() && component.type != CircuitComponentType::Jfet) ||
             (component.mosfet_model.has_value() && component.type != CircuitComponentType::Mosfet) ||
             (component.amplifier_model.has_value() && component.type != CircuitComponentType::OpAmp &&
-             component.type != CircuitComponentType::Ota)) {
+             component.type != CircuitComponentType::Ota) ||
+            (component.triode_model.has_value() && component.type != CircuitComponentType::Triode)) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
         }
         if (component.type != CircuitComponentType::Resistor && component.type != CircuitComponentType::Capacitor &&
@@ -727,7 +784,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             component.type != CircuitComponentType::Potentiometer && component.type != CircuitComponentType::Vccs &&
             component.type != CircuitComponentType::IdealOpAmp && component.type != CircuitComponentType::OpAmp &&
             component.type != CircuitComponentType::Ota && component.type != CircuitComponentType::Bjt &&
-            component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet) {
+            component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet &&
+            component.type != CircuitComponentType::Triode) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
         }
         if (component.type == CircuitComponentType::Bjt) {
@@ -838,6 +896,32 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
             }
         }
+        if (component.type == CircuitComponentType::Triode) {
+            if (component.pins.size() != 3U ||
+                (!component.triode_model.has_value() && !component.model.has_value()) ||
+                component.value.has_value() || component.tolerance.has_value() ||
+                component.diode_model.has_value() || component.potentiometer.has_value() ||
+                component.controlled_source.has_value() || component.bjt_model.has_value() ||
+                component.jfet_model.has_value() || component.mosfet_model.has_value() ||
+                component.amplifier_model.has_value() || component.switch_spec.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            if (component.model.has_value() && !component.triode_model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& triode = *component.triode_model;
+            if (triode.kind != "space-charge" || triode.model_version != 1U) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            const NonlinearTriodeModel model{
+                .amplification_factor = triode.amplification_factor,
+                .perveance = triode.perveance,
+                .max_current = triode.max_current,
+                .max_step = triode.max_step};
+            if (!ValidateNonlinearTriodeModel(model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+        }
         if ((component.type == CircuitComponentType::Resistor || component.type == CircuitComponentType::Capacitor ||
              component.type == CircuitComponentType::Inductor ||
              component.type == CircuitComponentType::VoltageSource || component.type == CircuitComponentType::Potentiometer) &&
@@ -924,7 +1008,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
     for (const auto& component : circuit.components) {
         const auto positive = FindNode(circuit, component.pins[0]);
         const bool is_three_terminal = component.type == CircuitComponentType::Bjt ||
-            component.type == CircuitComponentType::Jfet || component.type == CircuitComponentType::Mosfet;
+            component.type == CircuitComponentType::Jfet || component.type == CircuitComponentType::Mosfet ||
+            component.type == CircuitComponentType::Triode;
         const auto negative = FindNode(circuit, component.pins[is_three_terminal ? 2U : 1U]);
         if (positive == -2 || negative == -2 || positive == negative) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
@@ -1036,6 +1121,30 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                                     .max_current = mosfet.max_current,
                                                     .max_step = mosfet.max_step}};
             if (!ValidateNonlinearMosfetModel(element.nonlinear_mosfet_model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            prepared.elements_.push_back(element);
+            continue;
+        }
+        if (component.type == CircuitComponentType::Triode) {
+            const auto grid = FindNode(circuit, component.pins[1]);
+            if (grid == -2 || grid == positive || grid == negative) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+            }
+            const auto& triode = *component.triode_model;
+            MnaPreparedCircuit::Element element{};
+            element.type = CircuitComponentType::Triode;
+            element.positive_node = positive;
+            element.negative_node = negative;
+            element.triode_grid_node = grid;
+            element.branch_index = kNoIndex;
+            element.initial = component.initial.value_or(0.0);
+            element.nonlinear_triode_model = {
+                .amplification_factor = triode.amplification_factor,
+                .perveance = triode.perveance,
+                .max_current = triode.max_current,
+                .max_step = triode.max_step};
+            if (!ValidateNonlinearTriodeModel(element.nonlinear_triode_model)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
             prepared.elements_.push_back(element);
@@ -1213,7 +1322,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
     for (auto& component : bound.components) {
         if (component.type != CircuitComponentType::Diode && component.type != CircuitComponentType::Bjt &&
             component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet &&
-            component.type != CircuitComponentType::OpAmp && component.type != CircuitComponentType::Ota) {
+            component.type != CircuitComponentType::OpAmp && component.type != CircuitComponentType::Ota &&
+            component.type != CircuitComponentType::Triode) {
             continue;
         }
         if (!component.model.has_value()) {
@@ -1228,6 +1338,9 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
             }
             if ((component.type == CircuitComponentType::OpAmp || component.type == CircuitComponentType::Ota) &&
                 component.amplifier_model.has_value()) {
+                continue;
+            }
+            if (component.type == CircuitComponentType::Triode && component.triode_model.has_value()) {
                 continue;
             }
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
@@ -1317,6 +1430,29 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
                 .gain = *gain,
                 .minimum_output = *minimum,
                 .maximum_output = *maximum,
+                .max_step = *max_step};
+            continue;
+        }
+        if (component.type == CircuitComponentType::Triode) {
+            const auto result = model_database.Bind({*component.model, ModelKind::Triode});
+            if (!result.model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& record = *result.model;
+            const auto amplification = ModelParameter(record, "amplification-factor");
+            const auto perveance = ModelParameter(record, "perveance");
+            const auto max_current = ModelParameter(record, "max-current");
+            const auto max_step = ModelParameter(record, "max-step");
+            if (!amplification.has_value() || !perveance.has_value() ||
+                !max_current.has_value() || !max_step.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            component.triode_model = CircuitTriodeModel{
+                .kind = "space-charge",
+                .model_version = 1U,
+                .amplification_factor = *amplification,
+                .perveance = *perveance,
+                .max_current = *max_current,
                 .max_step = *max_step};
             continue;
         }

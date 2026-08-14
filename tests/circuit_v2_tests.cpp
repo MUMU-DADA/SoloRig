@@ -1344,6 +1344,107 @@ TEST_CASE("M18-C5 amplifier runtime rejects failures and remains preallocated at
     REQUIRE(singular.circuit->Solve(0.0).error == solo_rig::MnaSolveError::SingularMatrix);
 }
 
+TEST_CASE("M18-C6 triode inline and audited references reach prepared Solve") {
+    REQUIRE(solo_rig::ParseCircuitV2Json(ReadFixture("m18c6_invalid_triode_inline.json")).errors ==
+            std::vector<solo_rig::CircuitLoadError>{solo_rig::CircuitLoadError::InvalidValue});
+    const auto inline_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c6_triode_inline.json"));
+    REQUIRE(inline_graph.circuit.has_value());
+    auto inline_compiled = solo_rig::CompileMnaCircuit(*inline_graph.circuit);
+    REQUIRE(inline_compiled.circuit.has_value());
+    REQUIRE(inline_compiled.circuit->Prepare(48000.0));
+    REQUIRE(std::fabs(inline_compiled.circuit->Solve(-1.0).output_voltage - 12.0) < 1.0e-8);
+    REQUIRE(inline_compiled.circuit->Solve(0.0).output_voltage < 12.0);
+
+    const auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c6_triode_reference.json"));
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c6_cleanroom_triode_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*graph.circuit).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(48000.0));
+    double previous = 12.0;
+    for (const double grid : {-1.0, -0.1, 0.0, 0.1, 0.25}) {
+        const auto solved = compiled.circuit->Solve(grid);
+        REQUIRE(solved.Succeeded());
+        REQUIRE(solved.output_voltage <= previous + 1.0e-10);
+        previous = solved.output_voltage;
+    }
+    const auto unknown = solo_rig::ParseCircuitV2Json(ReadFixture("m18c6_unknown_triode_reference.json"));
+    REQUIRE(unknown.circuit.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*unknown.circuit, *database.database).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+}
+
+TEST_CASE("M18-C6 dynamic triode matches independent backward-Euler and Newton reference after Reset") {
+    const auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c6_dynamic_triode_reference.json"));
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c6_cleanroom_triode_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(48000.0));
+    const auto run = [](solo_rig::MnaPreparedCircuit& circuit) {
+        constexpr double input_conductance = 1.0 / 1000.0;
+        constexpr double capacitor_conductance = 1.0e-6 * 48000.0;
+        double grid_history = -0.5;
+        double final_plate = 0.0;
+        for (const double input : {-0.8, -0.2, 0.1, 0.3, -0.1}) {
+            const double grid = (input_conductance * input + capacitor_conductance * grid_history) /
+                (input_conductance + capacitor_conductance);
+            double plate = 12.0;
+            for (std::uint32_t iteration = 0; iteration < 64U; ++iteration) {
+                const double control = std::max(0.0, grid + plate / 100.0);
+                const double current = 0.001 * control * std::sqrt(control);
+                const double derivative = control > 0.0 ? 0.0015 * std::sqrt(control) / 100.0 : 0.0;
+                const double residual = (plate - 12.0) / 10000.0 + current;
+                plate -= residual / (1.0 / 10000.0 + derivative);
+            }
+            const auto solved = circuit.Solve(input);
+            REQUIRE(solved.Succeeded());
+            REQUIRE(std::fabs(solved.output_voltage - plate) < 1.0e-8);
+            grid_history = grid;
+            final_plate = plate;
+        }
+        return final_plate;
+    };
+    const auto first = run(*compiled.circuit);
+    compiled.circuit->Reset();
+    REQUIRE(std::fabs(run(*compiled.circuit) - first) < 1.0e-10);
+}
+
+TEST_CASE("M18-C6 triode runtime rejects failures and remains preallocated at 192 kHz 4x") {
+    auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c6_triode_reference.json"));
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c6_cleanroom_triode_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    graph.circuit->solver.oversampling = 4U;
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(192000.0));
+    REQUIRE(compiled.circuit->Solve(std::numeric_limits<double>::quiet_NaN()).error ==
+            solo_rig::MnaSolveError::NonFinite);
+    constexpr auto contract = solo_rig::MnaPreparedCircuit::ProcessContract();
+    static_assert(!contract.process_allocates && !contract.process_locks &&
+                  !contract.process_reads_files && !contract.process_parses_json);
+    for (std::uint32_t sample = 0; sample < 1024U; ++sample) {
+        REQUIRE(compiled.circuit->Solve(sample % 2U == 0U ? -0.5 : 0.2).Succeeded());
+    }
+    graph.circuit->solver.oversampling = 1U;
+    graph.circuit->solver.convergence.max_iterations = 1U;
+    auto bounded = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(bounded.circuit.has_value());
+    REQUIRE(bounded.circuit->Prepare(48000.0));
+    REQUIRE(bounded.circuit->Solve(0.2).error == solo_rig::MnaSolveError::NonConvergent);
+    graph.circuit->components.erase(graph.circuit->components.begin() + 1);
+    graph.circuit->supplies.clear();
+    auto singular = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(singular.circuit.has_value());
+    REQUIRE(singular.circuit->Prepare(48000.0));
+    REQUIRE(singular.circuit->Solve(0.0).error == solo_rig::MnaSolveError::SingularMatrix);
+}
+
 TEST_CASE("M18-C1 MNA solves forward conduction reverse breakdown and zero bias") {
     auto diode_compiled = solo_rig::CompileMnaCircuit(
         *solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_diode_forward.json")).circuit);

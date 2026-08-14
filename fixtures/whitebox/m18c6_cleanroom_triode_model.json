@@ -1,0 +1,7 @@
+{
+  "version":1,"schema":"solorig-model-audit","modelId":"solorig.cleanroom.triode.space-charge.v1","deviceFamily":"clean-room-triode","partNumber":"self-authored-space-charge-triode-no-commercial-part","modelKind":"triode","runtimeStatus":"approved",
+  "parameters":[{"id":"amplification-factor","default":100.0,"min":1.0,"max":1.0e6,"unit":"1"},{"id":"perveance","default":0.001,"min":1.0e-12,"max":1.0e6,"unit":"A/V^1.5"},{"id":"max-current","default":0.01,"min":1.0e-12,"max":1.0e6,"unit":"A"},{"id":"max-step","default":0.5,"min":1.0e-20,"max":10.0,"unit":"V"}],
+  "source":{"origin":"SoloRig self-authored clean-room generic space-charge triode contract","version":"m18c6-clean-room-v1","integrity":"self:m18c6-triode-v1"},
+  "license":{"spdx":"MIT","permissionEvidence":"self-authored-clean-room","reviewStatus":"approved"},
+  "applicability":[{"quantity":"terminal-voltage","min":-1000.0,"max":1000.0,"unit":"V"}],"evidenceRefs":["test:m18c6-triode-iv-jacobian"]
+}

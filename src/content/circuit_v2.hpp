@@ -27,6 +27,7 @@ enum class CircuitComponentType {
     Bjt,
     Jfet,
     Mosfet,
+    Triode,
     Switch,
 };
 
@@ -86,6 +87,15 @@ struct CircuitAmplifierModel {
     double max_step{1.0};
 };
 
+struct CircuitTriodeModel {
+    std::string kind{"space-charge"};
+    std::uint32_t model_version{1};
+    double amplification_factor{100.0};
+    double perveance{1.0e-3};
+    double max_current{1.0e-2};
+    double max_step{1.0};
+};
+
 struct CircuitSwitchSpec {
     std::vector<std::string> states;
     std::uint32_t initial_state{};
@@ -130,6 +140,7 @@ struct CircuitComponent {
     std::optional<CircuitJfetModel> jfet_model;
     std::optional<CircuitMosfetModel> mosfet_model;
     std::optional<CircuitAmplifierModel> amplifier_model;
+    std::optional<CircuitTriodeModel> triode_model;
     std::optional<CircuitSwitchSpec> switch_spec;
 };
 

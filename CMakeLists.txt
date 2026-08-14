@@ -56,7 +56,12 @@ add_library(solo_rig_core STATIC
     src/core/rig_runtime.cpp
     src/dsp/diode_clipper.cpp
     src/dsp/mna_solver.cpp
-    src/dsp/nonlinear_device.cpp
+    src/dsp/nonlinear_amplifier.cpp
+    src/dsp/nonlinear_bjt.cpp
+    src/dsp/nonlinear_diode.cpp
+    src/dsp/nonlinear_jfet.cpp
+    src/dsp/nonlinear_mosfet.cpp
+    src/dsp/nonlinear_triode.cpp
     src/dsp/digital_delay.cpp
     src/dsp/impulse_response.cpp
     src/dsp/nam_processor.cpp
@@ -221,7 +226,12 @@ if(BUILD_TESTING)
         tests/realtime_contract_tests.cpp
         tests/wdf_runtime_tests.cpp
         tests/diode_clipper_tests.cpp
-        tests/nonlinear_device_tests.cpp
+        tests/nonlinear_amplifier_tests.cpp
+        tests/nonlinear_bjt_tests.cpp
+        tests/nonlinear_diode_tests.cpp
+        tests/nonlinear_jfet_tests.cpp
+        tests/nonlinear_mosfet_tests.cpp
+        tests/nonlinear_triode_tests.cpp
         tests/digital_delay_tests.cpp
         tests/impulse_response_tests.cpp
         tests/nam_processor_tests.cpp
