@@ -1,7 +1,9 @@
 #include "content/circuit_v2.hpp"
 
 #include "content/json.hpp"
+#include "dsp/nonlinear_transformer_core.hpp"
 #include "dsp/coupled_inductor.hpp"
+#include "dsp/nonlinear_diode_dynamic.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -358,6 +360,19 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                     ? std::optional<double>{} : NumberValue(Find(*model_object, "breakdownCurrent"));
                 const auto breakdown_slope = Find(*model_object, "breakdownSlope") == nullptr
                     ? std::optional<double>{} : NumberValue(Find(*model_object, "breakdownSlope"));
+                const auto junction_capacitance = Find(*model_object, "junctionCapacitance") == nullptr
+                    ? std::optional<double>(0.0) : NumberValue(Find(*model_object, "junctionCapacitance"));
+                const auto junction_potential = Find(*model_object, "junctionPotential") == nullptr
+                    ? std::optional<double>(0.7) : NumberValue(Find(*model_object, "junctionPotential"));
+                const auto grading_coefficient = Find(*model_object, "gradingCoefficient") == nullptr
+                    ? std::optional<double>(0.5) : NumberValue(Find(*model_object, "gradingCoefficient"));
+                const auto temperature_celsius = Find(*model_object, "temperatureCelsius") == nullptr
+                    ? std::optional<double>(25.0) : NumberValue(Find(*model_object, "temperatureCelsius"));
+                const auto leakage_current = Find(*model_object, "leakageCurrent") == nullptr
+                    ? std::optional<double>(0.0) : NumberValue(Find(*model_object, "leakageCurrent"));
+                const auto leakage_temperature_coefficient =
+                    Find(*model_object, "leakageTemperatureCoefficient") == nullptr
+                    ? std::optional<double>(0.0) : NumberValue(Find(*model_object, "leakageTemperatureCoefficient"));
                 const bool is_shockley = kind.has_value() && *kind == "shockley";
                 const bool is_zener = kind.has_value() && *kind == "zener";
                 const bool has_breakdown = breakdown_voltage.has_value() || breakdown_current.has_value() ||
@@ -371,7 +386,22 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                                   !breakdown_slope.has_value() || *breakdown_voltage < 0.1 ||
                                   *breakdown_voltage > 100.0 || *breakdown_current < 1.0e-12 ||
                                   *breakdown_current > 1.0 || *breakdown_slope < 1.0e-6 ||
-                                  *breakdown_slope > 10.0))) {
+                                  *breakdown_slope > 10.0)) ||
+                    !junction_capacitance.has_value() || !junction_potential.has_value() ||
+                    !grading_coefficient.has_value() || !temperature_celsius.has_value() ||
+                    !leakage_current.has_value() || !leakage_temperature_coefficient.has_value() ||
+                    !ValidateNonlinearDiodeDynamicModel({
+                        .static_model = {.kind = is_zener ? NonlinearDeviceKind::Zener : NonlinearDeviceKind::Diode,
+                                         .saturation_current = *saturation, .thermal_voltage = *thermal,
+                                         .breakdown_voltage = breakdown_voltage.value_or(0.0),
+                                         .breakdown_current = breakdown_current.value_or(0.0),
+                                         .breakdown_slope = breakdown_slope.value_or(0.0), .max_step = *max_step},
+                        .junction_capacitance = junction_capacitance.value_or(0.0),
+                        .junction_potential = junction_potential.value_or(0.7),
+                        .grading_coefficient = grading_coefficient.value_or(0.5),
+                        .temperature_celsius = temperature_celsius.value_or(25.0),
+                        .leakage_current = leakage_current.value_or(0.0),
+                        .leakage_temperature_coefficient = leakage_temperature_coefficient.value_or(0.0)})) {
                     return Failure(CircuitLoadError::InvalidValue);
                 }
                 parsed_component.model = is_shockley ? "inline-shockley" : "inline-zener";
@@ -382,7 +412,14 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                                                                    .breakdown_voltage = breakdown_voltage.value_or(0.0),
                                                                    .breakdown_current = breakdown_current.value_or(0.0),
                                                                    .breakdown_slope = breakdown_slope.value_or(0.0),
-                                                                   .max_step = *max_step};
+                                                                   .max_step = *max_step,
+                                                                   .junction_capacitance = *junction_capacitance,
+                                                                   .junction_potential = *junction_potential,
+                                                                   .grading_coefficient = *grading_coefficient,
+                                                                   .temperature_celsius = *temperature_celsius,
+                                                                   .leakage_current = *leakage_current,
+                                                                   .leakage_temperature_coefficient =
+                                                                       *leakage_temperature_coefficient};
             } else {
                 return Failure(CircuitLoadError::InvalidValue);
             }
@@ -501,18 +538,46 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                 ? std::nullopt : NumberValue(Find(*amplifier, "maximumOutput"));
             const auto max_step = amplifier == nullptr
                 ? std::nullopt : NumberValue(Find(*amplifier, "maxStep"));
+            const bool dynamic_kind = kind.has_value() && *kind == "generic-dynamic";
+            const auto dynamic_number = [amplifier](std::string_view key) {
+                return amplifier == nullptr ? std::nullopt : NumberValue(Find(*amplifier, key));
+            };
+            const auto gain_bandwidth = dynamic_number("gainBandwidth");
+            const auto slew_rate = dynamic_number("slewRate");
+            const auto input_resistance = dynamic_number("inputResistance");
+            const auto input_bias = dynamic_number("inputBiasCurrent");
+            const auto input_offset = dynamic_number("inputOffset");
+            const auto output_resistance = dynamic_number("outputResistance");
+            const auto output_limit = dynamic_number("outputCurrentLimit");
+            const auto supply_minimum = dynamic_number("supplyMinimum");
+            const auto supply_maximum = dynamic_number("supplyMaximum");
             const auto expected_kind = *type == CircuitComponentType::OpAmp ? "bounded-opamp" : "bounded-ota";
             const double minimum_gain = *type == CircuitComponentType::OpAmp ? 1.0 : 1.0e-12;
             const double maximum_gain = *type == CircuitComponentType::OpAmp ? 1.0e12 : 1.0e6;
             if (amplifier == nullptr && !parsed_component.model.has_value()) {
                 return Failure(CircuitLoadError::InvalidValue);
             }
-            if (amplifier != nullptr && (!kind.has_value() || *kind != expected_kind ||
-                !model_version.has_value() || *model_version != 1U || !gain.has_value() ||
-                *gain < minimum_gain || *gain > maximum_gain || !minimum.has_value() ||
-                !maximum.has_value() || *minimum < -1.0e6 || *maximum > 1.0e6 ||
-                *minimum >= *maximum || !max_step.has_value() || *max_step < 1.0e-20 ||
-                *max_step > 10.0 || parsed_component.value.has_value() ||
+            const bool valid_static = !dynamic_kind && kind.has_value() && *kind == expected_kind &&
+                model_version.has_value() && *model_version == 1U && gain.has_value() &&
+                *gain >= minimum_gain && *gain <= maximum_gain && minimum.has_value() &&
+                maximum.has_value() && *minimum >= -1.0e6 && *maximum <= 1.0e6 &&
+                *minimum < *maximum && max_step.has_value() && *max_step >= 1.0e-20 &&
+                *max_step <= 10.0;
+            const bool valid_dynamic = dynamic_kind && *type == CircuitComponentType::OpAmp &&
+                model_version.has_value() && *model_version == 2U && gain.has_value() && *gain >= 1.0 && *gain <= 1.0e8 &&
+                minimum.has_value() && maximum.has_value() && *minimum < *maximum && max_step.has_value() &&
+                *max_step >= 1.0e-20 && *max_step <= 10.0 && gain_bandwidth.has_value() && slew_rate.has_value() &&
+                input_resistance.has_value() && input_bias.has_value() && input_offset.has_value() &&
+                output_resistance.has_value() && output_limit.has_value() && supply_minimum.has_value() && supply_maximum.has_value() &&
+                *gain_bandwidth >= 1.0 && *gain_bandwidth <= 1.0e9 && *slew_rate >= 1.0e-3 && *slew_rate <= 1.0e9 &&
+                *input_resistance >= 1.0 && *input_resistance <= 1.0e15 && std::fabs(*input_bias) <= 1.0 &&
+                std::fabs(*input_offset) <= 1.0e3 && *output_resistance >= 1.0e-3 && *output_resistance <= 1.0e9 &&
+                *output_limit >= 1.0e-9 && *output_limit <= 1.0e6 && *supply_minimum >= -1.0e6 &&
+                *supply_maximum <= 1.0e6 && *supply_minimum < *supply_maximum &&
+                *minimum >= *supply_minimum && *maximum <= *supply_maximum;
+            if (amplifier != nullptr && (!(valid_static || valid_dynamic) ||
+                *minimum < -1.0e6 || *maximum > 1.0e6 ||
+                parsed_component.value.has_value() ||
                 parsed_component.tolerance.has_value() || parsed_component.model.has_value() ||
                 parsed_component.diode_model.has_value() || parsed_component.potentiometer.has_value() ||
                 parsed_component.controlled_source.has_value() || parsed_component.bjt_model.has_value() ||
@@ -526,7 +591,16 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                                                                           .gain = *gain,
                                                                           .minimum_output = *minimum,
                                                                           .maximum_output = *maximum,
-                                                                          .max_step = *max_step};
+                                                                          .max_step = *max_step,
+                                                                          .gain_bandwidth_hz = gain_bandwidth.value_or(0.0),
+                                                                          .slew_rate = slew_rate.value_or(0.0),
+                                                                          .input_resistance = input_resistance.value_or(0.0),
+                                                                          .input_bias_current = input_bias.value_or(0.0),
+                                                                          .input_offset = input_offset.value_or(0.0),
+                                                                          .output_resistance = output_resistance.value_or(0.0),
+                                                                          .output_current_limit = output_limit.value_or(0.0),
+                                                                          .supply_minimum = supply_minimum.value_or(0.0),
+                                                                          .supply_maximum = supply_maximum.value_or(0.0)};
             }
         }
         if (is_amplifier && !parsed_component.amplifier_model.has_value() && !parsed_component.model.has_value()) {
@@ -544,16 +618,34 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             const auto thermal = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "thermalVoltage"));
             const auto max_current = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "maxCurrent"));
             const auto max_step = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "maxStep"));
+            const auto early_voltage = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "earlyVoltage"));
+            const auto be_capacitance = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "beJunctionCapacitance"));
+            const auto bc_capacitance = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "bcJunctionCapacitance"));
+            const auto be_potential = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "beJunctionPotential"));
+            const auto bc_potential = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "bcJunctionPotential"));
+            const auto be_grading = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "beGradingCoefficient"));
+            const auto bc_grading = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "bcGradingCoefficient"));
+            const auto temperature = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "temperatureCelsius"));
+            const auto leakage_tempco = bjt == nullptr ? std::nullopt : NumberValue(Find(*bjt, "leakageTemperatureCoefficient"));
+            const bool dynamic_kind = kind.has_value() && *kind == "generic-dynamic";
             if (bjt == nullptr && !parsed_component.model.has_value()) {
                 return Failure(CircuitLoadError::InvalidValue);
             }
-            if (bjt != nullptr && (!kind.has_value() || *kind != "ebers-moll" || !model_version.has_value() ||
-                *model_version != 1U || !polarity.has_value() || (*polarity != "npn" && *polarity != "pnp") ||
+            if (bjt != nullptr && (!kind.has_value() || (!dynamic_kind && *kind != "ebers-moll") || !model_version.has_value() ||
+                ((dynamic_kind && *model_version != 2U) || (!dynamic_kind && *model_version != 1U)) || !polarity.has_value() || (*polarity != "npn" && *polarity != "pnp") ||
                 !saturation.has_value() || *saturation <= 0.0 || !forward_beta.has_value() || *forward_beta <= 0.0 ||
                 !reverse_beta.has_value() || *reverse_beta <= 0.0 || !thermal.has_value() || *thermal <= 0.0 ||
                 !max_current.has_value() || *max_current <= 0.0 || !max_step.has_value() || *max_step <= 0.0 ||
                 *saturation > 1.0 || *forward_beta > 1.0e6 || *reverse_beta > 1.0e6 || *thermal > 1.0 ||
-                *max_current > 1.0e6 || *max_step > 10.0 || parsed_component.value.has_value() ||
+                *max_current > 1.0e6 || *max_step > 10.0 || (dynamic_kind &&
+                (!early_voltage.has_value() || !be_capacitance.has_value() || !bc_capacitance.has_value() ||
+                 !be_potential.has_value() || !bc_potential.has_value() || !be_grading.has_value() ||
+                 !bc_grading.has_value() || !temperature.has_value() || !leakage_tempco.has_value() ||
+                 *early_voltage < 0.0 || *early_voltage > 1.0e6 || *be_capacitance < 0.0 || *be_capacitance > 1.0e-3 ||
+                 *bc_capacitance < 0.0 || *bc_capacitance > 1.0e-3 || *be_potential < 1.0e-3 || *be_potential > 100.0 ||
+                 *bc_potential < 1.0e-3 || *bc_potential > 100.0 || *be_grading < 0.0 || *be_grading > 1.0 ||
+                 *bc_grading < 0.0 || *bc_grading > 1.0 || *temperature < -100.0 || *temperature > 200.0 ||
+                 *leakage_tempco < -0.1 || *leakage_tempco > 0.1)) || parsed_component.value.has_value() ||
                 parsed_component.tolerance.has_value() || parsed_component.model.has_value() ||
                 parsed_component.diode_model.has_value() || parsed_component.potentiometer.has_value() ||
                 parsed_component.controlled_source.has_value() || parsed_component.switch_spec.has_value())) {
@@ -568,7 +660,16 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                                                          .reverse_beta = *reverse_beta,
                                                          .thermal_voltage = *thermal,
                                                          .max_current = *max_current,
-                                                         .max_step = *max_step};
+                                                         .max_step = *max_step,
+                                                         .early_voltage = early_voltage.value_or(0.0),
+                                                         .be_junction_capacitance = be_capacitance.value_or(0.0),
+                                                         .bc_junction_capacitance = bc_capacitance.value_or(0.0),
+                                                         .be_junction_potential = be_potential.value_or(0.7),
+                                                         .bc_junction_potential = bc_potential.value_or(0.7),
+                                                         .be_grading_coefficient = be_grading.value_or(0.5),
+                                                         .bc_grading_coefficient = bc_grading.value_or(0.5),
+                                                         .temperature_celsius = temperature.value_or(25.0),
+                                                         .leakage_temperature_coefficient = leakage_tempco.value_or(0.0)};
             }
         }
         if (is_bjt && !parsed_component.bjt_model.has_value() && !parsed_component.model.has_value()) {
@@ -585,11 +686,20 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                 ? std::nullopt : NumberValue(Find(*jfet, "transconductanceParameter"));
             const auto max_current = jfet == nullptr ? std::nullopt : NumberValue(Find(*jfet, "maxCurrent"));
             const auto max_step = jfet == nullptr ? std::nullopt : NumberValue(Find(*jfet, "maxStep"));
+            const auto modulation = jfet == nullptr ? std::nullopt : NumberValue(Find(*jfet, "channelLengthModulation"));
+            const auto temperature = jfet == nullptr ? std::nullopt : NumberValue(Find(*jfet, "temperatureCelsius"));
+            const auto gate_saturation = jfet == nullptr ? std::nullopt : NumberValue(Find(*jfet, "gateSaturationCurrent"));
+            const auto gate_thermal = jfet == nullptr ? std::nullopt : NumberValue(Find(*jfet, "gateThermalVoltage"));
+            const auto gate_capacitance = jfet == nullptr ? std::nullopt : NumberValue(Find(*jfet, "gateJunctionCapacitance"));
+            const auto gate_potential = jfet == nullptr ? std::nullopt : NumberValue(Find(*jfet, "gateJunctionPotential"));
+            const auto gate_grading = jfet == nullptr ? std::nullopt : NumberValue(Find(*jfet, "gateGradingCoefficient"));
+            const auto gate_tempco = jfet == nullptr ? std::nullopt : NumberValue(Find(*jfet, "gateLeakageTemperatureCoefficient"));
+            const bool dynamic_kind = kind.has_value() && *kind == "generic-dynamic";
             if (jfet == nullptr && !parsed_component.model.has_value()) {
                 return Failure(CircuitLoadError::InvalidValue);
             }
-            if (jfet != nullptr && (!kind.has_value() || *kind != "square-law" || !model_version.has_value() ||
-                *model_version != 1U || !polarity.has_value() ||
+            if (jfet != nullptr && (!kind.has_value() || (!dynamic_kind && *kind != "square-law") || !model_version.has_value() ||
+                ((dynamic_kind && *model_version != 2U) || (!dynamic_kind && *model_version != 1U)) || !polarity.has_value() ||
                 (*polarity != "n-channel" && *polarity != "p-channel") || !pinch_off.has_value() ||
                 *pinch_off < 1.0e-6 || *pinch_off > 100.0 || !transconductance.has_value() ||
                 *transconductance < 1.0e-12 || *transconductance > 1.0e6 || !max_current.has_value() ||
@@ -598,7 +708,14 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                 parsed_component.tolerance.has_value() || parsed_component.model.has_value() ||
                 parsed_component.diode_model.has_value() || parsed_component.potentiometer.has_value() ||
                 parsed_component.controlled_source.has_value() || parsed_component.bjt_model.has_value() ||
-                parsed_component.switch_spec.has_value())) {
+                parsed_component.switch_spec.has_value() || (dynamic_kind &&
+                (!modulation.has_value() || !temperature.has_value() || !gate_saturation.has_value() ||
+                 !gate_thermal.has_value() || !gate_capacitance.has_value() || !gate_potential.has_value() ||
+                 !gate_grading.has_value() || !gate_tempco.has_value() || *modulation < 0.0 || *modulation > 10.0 ||
+                 *temperature < -100.0 || *temperature > 200.0 || *gate_saturation < 0.0 || *gate_saturation > 1.0 ||
+                 *gate_thermal < 1.0e-6 || *gate_thermal > 1.0 || *gate_capacitance < 0.0 || *gate_capacitance > 1.0e-3 ||
+                 *gate_potential < 1.0e-3 || *gate_potential > 100.0 || *gate_grading < 0.0 || *gate_grading > 1.0 ||
+                 *gate_tempco < -0.1 || *gate_tempco > 0.1)))) {
                 return Failure(CircuitLoadError::InvalidValue);
             }
             if (jfet != nullptr) {
@@ -608,7 +725,15 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                                                                 .pinch_off_voltage = *pinch_off,
                                                                 .transconductance_parameter = *transconductance,
                                                                 .max_current = *max_current,
-                                                                .max_step = *max_step};
+                                                                .max_step = *max_step,
+                                                                .channel_length_modulation = modulation.value_or(0.0),
+                                                                .temperature_celsius = temperature.value_or(25.0),
+                                                                .gate_saturation_current = gate_saturation.value_or(0.0),
+                                                                .gate_thermal_voltage = gate_thermal.value_or(0.02585),
+                                                                .gate_junction_capacitance = gate_capacitance.value_or(0.0),
+                                                                .gate_junction_potential = gate_potential.value_or(0.7),
+                                                                .gate_grading_coefficient = gate_grading.value_or(0.5),
+                                                                .gate_leakage_temperature_coefficient = gate_tempco.value_or(0.0)};
             }
         }
         if (is_jfet && !parsed_component.jfet_model.has_value() && !parsed_component.model.has_value()) {
@@ -625,11 +750,22 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                 ? std::nullopt : NumberValue(Find(*mosfet, "transconductanceParameter"));
             const auto max_current = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "maxCurrent"));
             const auto max_step = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "maxStep"));
+            const auto channel_modulation = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "channelLengthModulation"));
+            const auto subthreshold_current = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "subthresholdCurrent"));
+            const auto subthreshold_slope = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "subthresholdSlopeVoltage"));
+            const auto temperature = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "temperatureCelsius"));
+            const auto body_diode_current = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "bodyDiodeSaturationCurrent"));
+            const auto body_diode_voltage = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "bodyDiodeThermalVoltage"));
+            const auto gate_capacitance = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "gateJunctionCapacitance"));
+            const auto gate_potential = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "gateJunctionPotential"));
+            const auto gate_grading = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "gateGradingCoefficient"));
+            const bool dynamic = kind.has_value() && *kind == "generic-dynamic" &&
+                model_version.has_value() && *model_version == 2U;
             if (mosfet == nullptr && !parsed_component.model.has_value()) {
                 return Failure(CircuitLoadError::InvalidValue);
             }
-            if (mosfet != nullptr && (!kind.has_value() || *kind != "enhancement-square-law" ||
-                !model_version.has_value() || *model_version != 1U || !polarity.has_value() ||
+            if (mosfet != nullptr && ((!dynamic && (!kind.has_value() || *kind != "enhancement-square-law" ||
+                !model_version.has_value() || *model_version != 1U)) || !polarity.has_value() ||
                 (*polarity != "n-channel" && *polarity != "p-channel") || !threshold.has_value() ||
                 *threshold < 1.0e-6 || *threshold > 100.0 || !transconductance.has_value() ||
                 *transconductance < 1.0e-12 || *transconductance > 1.0e6 || !max_current.has_value() ||
@@ -638,7 +774,16 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                 parsed_component.tolerance.has_value() || parsed_component.model.has_value() ||
                 parsed_component.diode_model.has_value() || parsed_component.potentiometer.has_value() ||
                 parsed_component.controlled_source.has_value() || parsed_component.bjt_model.has_value() ||
-                parsed_component.jfet_model.has_value() || parsed_component.switch_spec.has_value())) {
+                parsed_component.jfet_model.has_value() || parsed_component.switch_spec.has_value() ||
+                (dynamic && (!channel_modulation.has_value() || *channel_modulation < 0.0 || *channel_modulation > 10.0 ||
+                             !subthreshold_current.has_value() || *subthreshold_current < 0.0 || *subthreshold_current > 1.0 ||
+                             !subthreshold_slope.has_value() || *subthreshold_slope < 1.0e-4 || *subthreshold_slope > 10.0 ||
+                             !temperature.has_value() || *temperature < -100.0 || *temperature > 200.0 ||
+                             !body_diode_current.has_value() || *body_diode_current < 0.0 || *body_diode_current > 1.0 ||
+                             !body_diode_voltage.has_value() || *body_diode_voltage < 1.0e-6 || *body_diode_voltage > 1.0 ||
+                             !gate_capacitance.has_value() || *gate_capacitance < 0.0 || *gate_capacitance > 1.0e-3 ||
+                             !gate_potential.has_value() || *gate_potential < 1.0e-3 || *gate_potential > 100.0 ||
+                             !gate_grading.has_value() || *gate_grading < 0.0 || *gate_grading > 1.0)))) {
                 return Failure(CircuitLoadError::InvalidValue);
             }
             if (mosfet != nullptr) {
@@ -648,7 +793,16 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                                                                    .threshold_voltage = *threshold,
                                                                    .transconductance_parameter = *transconductance,
                                                                    .max_current = *max_current,
-                                                                   .max_step = *max_step};
+                                                                   .max_step = *max_step,
+                                                                   .channel_length_modulation = dynamic ? *channel_modulation : 0.0,
+                                                                   .subthreshold_current = dynamic ? *subthreshold_current : 0.0,
+                                                                   .subthreshold_slope_voltage = dynamic ? *subthreshold_slope : 0.08,
+                                                                   .temperature_celsius = dynamic ? *temperature : 25.0,
+                                                                   .body_diode_saturation_current = dynamic ? *body_diode_current : 0.0,
+                                                                   .body_diode_thermal_voltage = dynamic ? *body_diode_voltage : 0.02585,
+                                                                   .gate_junction_capacitance = dynamic ? *gate_capacitance : 0.0,
+                                                                   .gate_junction_potential = dynamic ? *gate_potential : 0.7,
+                                                                   .gate_grading_coefficient = dynamic ? *gate_grading : 0.5};
             }
         }
         if (is_mosfet && !parsed_component.mosfet_model.has_value() && !parsed_component.model.has_value()) {
@@ -825,6 +979,20 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                 ? std::nullopt : NumberValue(Find(*model, "primaryResistance"));
             const auto secondary_resistance = model == nullptr
                 ? std::nullopt : NumberValue(Find(*model, "secondaryResistance"));
+            const auto saturation_flux = model == nullptr
+                ? std::nullopt : NumberValue(Find(*model, "saturationFlux"));
+            const auto hysteresis_width = model == nullptr
+                ? std::nullopt : NumberValue(Find(*model, "hysteresisWidth"));
+            const auto hysteresis_rate = model == nullptr
+                ? std::nullopt : NumberValue(Find(*model, "hysteresisRate"));
+            const auto remanent_flux = model == nullptr
+                ? std::nullopt : NumberValue(Find(*model, "remanentFlux"));
+            const auto max_flux = model == nullptr
+                ? std::nullopt : NumberValue(Find(*model, "maxFlux"));
+            const auto max_current = model == nullptr
+                ? std::nullopt : NumberValue(Find(*model, "maxCurrent"));
+            const auto max_step = model == nullptr
+                ? std::nullopt : NumberValue(Find(*model, "maxStep"));
             if (model == nullptr && !parsed_component.model.has_value()) {
                 return Failure(CircuitLoadError::InvalidValue);
             }
@@ -832,10 +1000,20 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                 parsed_component.initial.has_value()) {
                 return Failure(CircuitLoadError::InvalidValue);
             }
-            const bool complete = kind.has_value() && *kind == "lossy-linear" && model_version.has_value() &&
+            const bool linear_complete = kind.has_value() && *kind == "lossy-linear" && model_version.has_value() &&
                 *model_version == 1U && turns_ratio.has_value() && magnetizing.has_value() &&
                 primary_leakage.has_value() && secondary_leakage.has_value() &&
-                primary_resistance.has_value() && secondary_resistance.has_value();
+                primary_resistance.has_value() && secondary_resistance.has_value() &&
+                !saturation_flux.has_value() && !hysteresis_width.has_value() &&
+                !hysteresis_rate.has_value() && !remanent_flux.has_value() &&
+                !max_flux.has_value() && !max_current.has_value() && !max_step.has_value();
+            const bool nonlinear_complete = kind.has_value() && *kind == "saturating-hysteretic" &&
+                model_version.has_value() && *model_version == 1U && turns_ratio.has_value() &&
+                magnetizing.has_value() && primary_leakage.has_value() && secondary_leakage.has_value() &&
+                primary_resistance.has_value() && secondary_resistance.has_value() &&
+                saturation_flux.has_value() && hysteresis_width.has_value() && hysteresis_rate.has_value() &&
+                remanent_flux.has_value() && max_flux.has_value() && max_current.has_value() && max_step.has_value();
+            const bool complete = linear_complete || nonlinear_complete;
             const CoupledInductorModel runtime_model{
                 .turns_ratio = turns_ratio.value_or(0.0),
                 .magnetizing_inductance = magnetizing.value_or(0.0),
@@ -843,7 +1021,18 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                 .secondary_leakage_inductance = secondary_leakage.value_or(0.0),
                 .primary_resistance = primary_resistance.value_or(0.0),
                 .secondary_resistance = secondary_resistance.value_or(0.0)};
+            const NonlinearTransformerCoreModel nonlinear_runtime_model{
+                .magnetizing_inductance = magnetizing.value_or(0.0),
+                .saturation_flux = saturation_flux.value_or(1.0),
+                .hysteresis_width = hysteresis_width.value_or(0.1),
+                .hysteresis_rate = hysteresis_rate.value_or(1000.0),
+                .remanent_flux = remanent_flux.value_or(0.0),
+                .max_flux = max_flux.value_or(2.0),
+                .max_current = max_current.value_or(10.0),
+                .max_step = max_step.value_or(1.0)};
             if (model != nullptr && (!complete || !ValidateCoupledInductorModel(runtime_model) ||
+                (*kind == "saturating-hysteretic" &&
+                 !ValidateNonlinearTransformerCoreModel(nonlinear_runtime_model)) ||
                 parsed_component.model.has_value() ||
                 parsed_component.diode_model.has_value() || parsed_component.potentiometer.has_value() ||
                 parsed_component.controlled_source.has_value() || parsed_component.bjt_model.has_value() ||
@@ -874,7 +1063,14 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                     .primary_leakage_inductance = *primary_leakage,
                     .secondary_leakage_inductance = *secondary_leakage,
                     .primary_resistance = *primary_resistance,
-                    .secondary_resistance = *secondary_resistance};
+                    .secondary_resistance = *secondary_resistance,
+                    .saturation_flux = saturation_flux.value_or(1.0),
+                    .hysteresis_width = hysteresis_width.value_or(0.1),
+                    .hysteresis_rate = hysteresis_rate.value_or(1000.0),
+                    .remanent_flux = remanent_flux.value_or(0.0),
+                    .max_flux = max_flux.value_or(2.0),
+                    .max_current = max_current.value_or(10.0),
+                    .max_step = max_step.value_or(1.0)};
             }
         }
         circuit.components.push_back(std::move(parsed_component));

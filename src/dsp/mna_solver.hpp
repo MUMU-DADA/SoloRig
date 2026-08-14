@@ -5,6 +5,11 @@
 #include "core/realtime_contract.hpp"
 #include "dsp/coupled_inductor.hpp"
 #include "dsp/nonlinear_device.hpp"
+#include "dsp/nonlinear_diode_dynamic.hpp"
+#include "dsp/nonlinear_bjt_dynamic.hpp"
+#include "dsp/nonlinear_jfet_dynamic.hpp"
+#include "dsp/nonlinear_transformer_core.hpp"
+#include "dsp/nonlinear_opamp_dynamic.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -76,14 +81,26 @@ public:
         double value{};
         double initial{};
         NonlinearDeviceModel nonlinear_model{};
+        NonlinearDiodeDynamicModel nonlinear_diode_dynamic_model{};
         double controlled_gain{};
         double controlled_minimum{};
         double controlled_maximum{};
         bool controlled_has_limits{};
         NonlinearBjtModel nonlinear_bjt_model{};
+        NonlinearBjtDynamicModel nonlinear_bjt_dynamic_model{};
+        std::uint32_t bjt_be_history_index{UINT32_MAX};
+        std::uint32_t bjt_bc_history_index{UINT32_MAX};
         NonlinearJfetModel nonlinear_jfet_model{};
+        NonlinearJfetDynamicModel nonlinear_jfet_dynamic_model{};
+        std::uint32_t jfet_gs_history_index{UINT32_MAX};
+        std::uint32_t jfet_gd_history_index{UINT32_MAX};
         NonlinearMosfetModel nonlinear_mosfet_model{};
+        NonlinearMosfetDynamicModel nonlinear_mosfet_dynamic_model{};
+        std::uint32_t mosfet_gs_history_index{UINT32_MAX};
+        std::uint32_t mosfet_gd_history_index{UINT32_MAX};
         NonlinearAmplifierModel nonlinear_amplifier_model{};
+        NonlinearOpAmpDynamicModel nonlinear_opamp_dynamic_model{};
+        std::uint32_t opamp_dynamic_history_index{UINT32_MAX};
         NonlinearTriodeModel nonlinear_triode_model{};
         NonlinearPentodeModel nonlinear_pentode_model{};
         NonlinearBeamTetrodeModel nonlinear_beam_tetrode_model{};
@@ -92,9 +109,11 @@ public:
         std::int32_t secondary_negative_node{-1};
         std::uint32_t secondary_branch_index{UINT32_MAX};
         std::uint32_t secondary_inductor_history_index{UINT32_MAX};
+        std::uint32_t transformer_core_history_index{UINT32_MAX};
         double secondary_initial{};
         CoupledInductorModel coupled_inductor_model{};
         CoupledInductorCoefficients coupled_inductor_coefficients{};
+        NonlinearTransformerCoreModel nonlinear_transformer_core_model{};
     };
 
 private:
@@ -103,6 +122,14 @@ private:
     std::vector<Element> elements_;
     std::vector<double> capacitor_history_;
     std::vector<double> inductor_history_;
+    std::vector<NonlinearTransformerCoreState> transformer_core_history_;
+    std::vector<double> bjt_be_history_;
+    std::vector<double> bjt_bc_history_;
+    std::vector<double> jfet_gs_history_;
+    std::vector<double> jfet_gd_history_;
+    std::vector<double> mosfet_gs_history_;
+    std::vector<double> mosfet_gd_history_;
+    std::vector<double> opamp_dynamic_history_;
     std::vector<double> matrix_;
     std::vector<double> rhs_;
     std::vector<double> solution_;

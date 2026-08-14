@@ -775,7 +775,7 @@ TEST_CASE("MNA explicitly rejects unimplemented dynamic controls instead of sile
       "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
     })");
     REQUIRE(parsed.circuit.has_value());
-    const auto compiled = solo_rig::CompileMnaCircuit(*parsed.circuit);
+    auto compiled = solo_rig::CompileMnaCircuit(*parsed.circuit);
     REQUIRE(!compiled.circuit.has_value());
     REQUIRE(compiled.error == solo_rig::MnaCompileError::UnsupportedComponent);
 }
@@ -1942,6 +1942,109 @@ TEST_CASE("M18-C8a coupled-inductor rejects mixed fields and wrong-kind audit bi
     REQUIRE(wrong_database.database.has_value());
     REQUIRE(solo_rig::CompileMnaCircuit(*graph.circuit, *wrong_database.database).error ==
             solo_rig::MnaCompileError::MissingModelAuthorization);
+}
+
+TEST_CASE("M18-C8b saturating-hysteretic transformer parses and binds through MNA") {
+    auto parsed = solo_rig::ParseCircuitV2Json(
+        ReadFixture("m18c8b_saturating_transformer_inline.json"));
+    REQUIRE(parsed.errors.empty());
+    REQUIRE(parsed.circuit.has_value());
+    auto compiled = solo_rig::CompileMnaCircuit(*parsed.circuit);
+    REQUIRE(compiled.error == std::nullopt);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(192000.0));
+    const auto low = compiled.circuit->Solve(0.1);
+    const auto high = compiled.circuit->Solve(4.0);
+    REQUIRE(low.Succeeded());
+    REQUIRE(high.Succeeded());
+    REQUIRE(std::isfinite(low.output_voltage));
+    REQUIRE(std::isfinite(high.output_voltage));
+    REQUIRE(solo_rig::IsRealtimeSafe(compiled.circuit->ProcessContract()));
+}
+
+TEST_CASE("M18-C8b audited transformer reference supports dynamic Reset and oversampling") {
+    const auto database = solo_rig::BuildModelDatabase(
+        ReadFixture("m18c8b_cleanroom_transformer_model.json"));
+    REQUIRE(database.error == std::nullopt);
+    auto parsed = solo_rig::ParseCircuitV2Json(
+        ReadFixture("m18c8b_saturating_transformer_reference.json"));
+    REQUIRE(parsed.errors.empty());
+    REQUIRE(parsed.circuit.has_value());
+    parsed.circuit->solver.oversampling = 4U;
+    auto compiled = solo_rig::CompileMnaCircuit(*parsed.circuit, *database.database);
+    REQUIRE(compiled.error == std::nullopt);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(192000.0));
+    for (int index = 0; index < 128; ++index) {
+        const auto result = compiled.circuit->Solve(index < 64 ? 3.0 : -3.0);
+        REQUIRE(result.Succeeded());
+        REQUIRE(std::isfinite(result.output_voltage));
+    }
+    compiled.circuit->Reset();
+    const auto first = compiled.circuit->Solve(0.25);
+    compiled.circuit->Reset();
+    const auto second = compiled.circuit->Solve(0.25);
+    REQUIRE(first.Succeeded());
+    REQUIRE(second.Succeeded());
+    REQUIRE(std::fabs(first.output_voltage - second.output_voltage) < 1.0e-12);
+}
+
+TEST_CASE("M18-C8b audited magnetizing inductance reaches the nonlinear runtime") {
+    auto audit_source = ReadFixture("m18c8b_cleanroom_transformer_model.json");
+    const auto marker = std::string("\"id\":\"magnetizing-inductance\",\"default\":1.0");
+    const auto marker_position = audit_source.find(marker);
+    REQUIRE(marker_position != std::string::npos);
+    audit_source.replace(marker_position, marker.size(),
+                         "\"id\":\"magnetizing-inductance\",\"default\":2.0");
+    const auto low_database = solo_rig::BuildModelDatabase(
+        ReadFixture("m18c8b_cleanroom_transformer_model.json"));
+    const auto high_database = solo_rig::BuildModelDatabase(audit_source);
+    auto parsed = solo_rig::ParseCircuitV2Json(
+        ReadFixture("m18c8b_saturating_transformer_reference.json"));
+    REQUIRE(low_database.database.has_value());
+    REQUIRE(high_database.database.has_value());
+    REQUIRE(parsed.circuit.has_value());
+    auto low = solo_rig::CompileMnaCircuit(*parsed.circuit, *low_database.database);
+    auto high = solo_rig::CompileMnaCircuit(*parsed.circuit, *high_database.database);
+    REQUIRE(low.circuit.has_value());
+    REQUIRE(high.circuit.has_value());
+    REQUIRE(low.circuit->Prepare(192000.0));
+    REQUIRE(high.circuit->Prepare(192000.0));
+    const auto low_result = low.circuit->Solve(0.01);
+    const auto high_result = high.circuit->Solve(0.01);
+    REQUIRE(low_result.Succeeded());
+    REQUIRE(high_result.Succeeded());
+    REQUIRE(std::fabs(low_result.output_voltage - high_result.output_voltage) > 1.0e-12);
+}
+
+TEST_CASE("M18-C8b rejects invalid nonlinear core fields without linear fallback") {
+    const auto parsed = solo_rig::ParseCircuitV2Json(
+        ReadFixture("m18c8b_invalid_transformer_inline.json"));
+    REQUIRE(!parsed.circuit.has_value());
+    REQUIRE(!parsed.errors.empty());
+}
+
+TEST_CASE("M18-C8b magnetizing inductance changes the dynamic MNA result") {
+    auto parsed = solo_rig::ParseCircuitV2Json(
+        ReadFixture("m18c8b_saturating_transformer_inline.json"));
+    REQUIRE(parsed.circuit.has_value());
+    auto low_circuit = *parsed.circuit;
+    auto high_circuit = *parsed.circuit;
+    low_circuit.components.front().coupled_inductor_model->magnetizing_inductance = 0.5;
+    high_circuit.components.front().coupled_inductor_model->magnetizing_inductance = 2.0;
+    auto low = solo_rig::CompileMnaCircuit(low_circuit);
+    auto high = solo_rig::CompileMnaCircuit(high_circuit);
+    REQUIRE(low.circuit.has_value());
+    REQUIRE(high.circuit.has_value());
+    REQUIRE(low.circuit->Prepare(192000.0));
+    REQUIRE(high.circuit->Prepare(192000.0));
+    const auto low_result = low.circuit->Solve(0.01);
+    const auto high_result = high.circuit->Solve(0.01);
+    REQUIRE(low_result.Succeeded());
+    REQUIRE(high_result.Succeeded());
+    REQUIRE(std::isfinite(low_result.output_voltage));
+    REQUIRE(std::isfinite(high_result.output_voltage));
+    REQUIRE(std::fabs(low_result.output_voltage - high_result.output_voltage) > 1.0e-12);
 }
 
 TEST_CASE("M18-C1 MNA solves forward conduction reverse breakdown and zero bias") {

@@ -1,0 +1,29 @@
+{
+      "version":1,
+      "schema":"solorig-model-audit",
+      "modelId":"solorig.cleanroom.opamp.dynamic.v1",
+      "deviceFamily":"clean-room-opamp",
+      "partNumber":"self-authored-dynamic-opamp-no-commercial-part",
+      "modelKind":"opamp",
+      "runtimeStatus":"approved",
+      "source": {"origin": "SoloRig self-authored clean-room generic dynamic opamp", "version": "1", "integrity": "local"},
+      "license": {"spdx": "MIT", "permissionEvidence": "self-authored-clean-room", "reviewStatus": "approved"},
+      "parameters": [
+        {"id":"open-loop-gain","default":100,"min":1,"max":100000,"unit":"1"},
+        {"id":"gain-bandwidth","default":1000,"min":1,"max":1000000,"unit":"Hz"},
+        {"id":"slew-rate","default":1000000,"min":0.001,"max":1000000000,"unit":"V/s"},
+        {"id":"input-resistance","default":1000000,"min":1,"max":1000000000000000,"unit":"ohm"},
+        {"id":"input-bias-current","default":0.000002,"min":-1,"max":1,"unit":"A"},
+        {"id":"input-offset","default":0.01,"min":-1000,"max":1000,"unit":"V"},
+        {"id":"output-resistance","default":100,"min":0.001,"max":1000000000,"unit":"ohm"},
+        {"id":"output-current-limit","default":0.1,"min":0.000000001,"max":1000000,"unit":"A"},
+        {"id":"supply-minimum","default":-12,"min":-1000000,"max":1000000,"unit":"V"},
+        {"id":"supply-maximum","default":12,"min":-1000000,"max":1000000,"unit":"V"},
+        {"id":"minimum-output","default":-10,"min":-1000000,"max":1000000,"unit":"V"},
+        {"id":"maximum-output","default":10,"min":-1000000,"max":1000000,"unit":"V"},
+        {"id":"max-step","default":1,"min":0.00000000000000000001,"max":10,"unit":"V"}
+      ],
+      "applicability": [{"quantity":"terminal-voltage","min":-20,"max":20,"unit":"V"}],
+      "evidenceRefs": ["m18c9e_dynamic_opamp_binding"]
+}
+

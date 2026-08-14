@@ -60,6 +60,15 @@ struct CircuitBjtModel {
     double thermal_voltage{0.02585};
     double max_current{1.0e-2};
     double max_step{1.0};
+    double early_voltage{0.0};
+    double be_junction_capacitance{0.0};
+    double bc_junction_capacitance{0.0};
+    double be_junction_potential{0.7};
+    double bc_junction_potential{0.7};
+    double be_grading_coefficient{0.5};
+    double bc_grading_coefficient{0.5};
+    double temperature_celsius{25.0};
+    double leakage_temperature_coefficient{0.0};
 };
 
 struct CircuitJfetModel {
@@ -70,6 +79,14 @@ struct CircuitJfetModel {
     double transconductance_parameter{1.0e-3};
     double max_current{1.0e-2};
     double max_step{1.0};
+    double channel_length_modulation{0.0};
+    double temperature_celsius{25.0};
+    double gate_saturation_current{0.0};
+    double gate_thermal_voltage{0.02585};
+    double gate_junction_capacitance{0.0};
+    double gate_junction_potential{0.7};
+    double gate_grading_coefficient{0.5};
+    double gate_leakage_temperature_coefficient{0.0};
 };
 
 struct CircuitMosfetModel {
@@ -80,6 +97,15 @@ struct CircuitMosfetModel {
     double transconductance_parameter{1.0e-3};
     double max_current{1.0e-2};
     double max_step{1.0};
+    double channel_length_modulation{};
+    double subthreshold_current{};
+    double subthreshold_slope_voltage{0.08};
+    double temperature_celsius{25.0};
+    double body_diode_saturation_current{};
+    double body_diode_thermal_voltage{0.02585};
+    double gate_junction_capacitance{};
+    double gate_junction_potential{0.7};
+    double gate_grading_coefficient{0.5};
 };
 
 struct CircuitAmplifierModel {
@@ -89,6 +115,15 @@ struct CircuitAmplifierModel {
     double minimum_output{};
     double maximum_output{};
     double max_step{1.0};
+    double gain_bandwidth_hz{};
+    double slew_rate{};
+    double input_resistance{};
+    double input_bias_current{};
+    double input_offset{};
+    double output_resistance{};
+    double output_current_limit{};
+    double supply_minimum{};
+    double supply_maximum{};
 };
 
 struct CircuitTriodeModel {
@@ -141,6 +176,13 @@ struct CircuitCoupledInductorModel {
     double secondary_leakage_inductance{};
     double primary_resistance{};
     double secondary_resistance{};
+    double saturation_flux{1.0};
+    double hysteresis_width{0.1};
+    double hysteresis_rate{1000.0};
+    double remanent_flux{};
+    double max_flux{2.0};
+    double max_current{10.0};
+    double max_step{1.0};
 };
 
 struct CircuitSwitchSpec {
@@ -157,6 +199,12 @@ struct CircuitDiodeModel {
     double breakdown_current{};
     double breakdown_slope{};
     double max_step{1.0};
+    double junction_capacitance{};
+    double junction_potential{0.7};
+    double grading_coefficient{0.5};
+    double temperature_celsius{25.0};
+    double leakage_current{};
+    double leakage_temperature_coefficient{};
 };
 
 struct CircuitPort {

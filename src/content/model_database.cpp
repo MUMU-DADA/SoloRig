@@ -2,6 +2,8 @@
 
 #include "content/json.hpp"
 #include "dsp/coupled_inductor.hpp"
+#include "dsp/nonlinear_diode_dynamic.hpp"
+#include "dsp/nonlinear_transformer_core.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -73,6 +75,69 @@ bool IsApprovedKind(ModelKind kind) {
            kind == ModelKind::TestMathematical;
 }
 
+bool HasDiodeParameterContract(const ModelAuditRecord& model) {
+    if (model.kind != ModelKind::Diode && model.kind != ModelKind::Zener) {
+        return true;
+    }
+    struct Required { std::string_view id; std::string_view unit; double minimum; double maximum; };
+    constexpr Required base[] = {
+        {"saturation-current", "A", 1.0e-30, 1.0e-3},
+        {"thermal-voltage", "V", 1.0e-6, 1.0},
+        {"max-step", "V", 1.0e-6, 10.0}};
+    constexpr Required zener[] = {
+        {"breakdown-voltage", "V", 0.1, 100.0},
+        {"breakdown-current", "A", 1.0e-12, 1.0},
+        {"breakdown-slope", "V", 1.0e-6, 10.0}};
+    constexpr Required dynamic[] = {
+        {"junction-capacitance", "F", 0.0, 1.0e-3},
+        {"junction-potential", "V", 1.0e-3, 100.0},
+        {"grading-coefficient", "1", 0.0, 1.0},
+        {"temperature-celsius", "degC", -100.0, 200.0},
+        {"leakage-current", "A", 0.0, 1.0},
+        {"leakage-temperature-coefficient", "1/K", -0.1, 0.1}};
+    const std::size_t static_count = std::size(base) +
+        (model.kind == ModelKind::Zener ? std::size(zener) : 0U);
+    const bool has_dynamic = model.parameters.size() == static_count + std::size(dynamic);
+    if (model.parameters.size() != static_count && !has_dynamic) {
+        return false;
+    }
+    const auto matches = [&model](const Required& expected) {
+        return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
+            return parameter.id == expected.id && parameter.unit == expected.unit &&
+                   std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
+                   parameter.default_value <= expected.maximum && std::isfinite(parameter.minimum) &&
+                   std::isfinite(parameter.maximum) && parameter.minimum >= expected.minimum &&
+                   parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
+                   parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
+        }) == 1;
+    };
+    if (!std::all_of(std::begin(base), std::end(base), matches) ||
+        (model.kind == ModelKind::Zener && !std::all_of(std::begin(zener), std::end(zener), matches)) ||
+        (has_dynamic && !std::all_of(std::begin(dynamic), std::end(dynamic), matches))) {
+        return false;
+    }
+    const auto value = [&model](std::string_view id, double fallback = 0.0) {
+        const auto parameter = std::find_if(model.parameters.begin(), model.parameters.end(),
+                                            [id](const auto& item) { return item.id == id; });
+        return parameter == model.parameters.end() ? fallback : parameter->default_value;
+    };
+    return ValidateNonlinearDiodeDynamicModel({
+        .static_model = {.kind = model.kind == ModelKind::Zener ? NonlinearDeviceKind::Zener
+                                                                : NonlinearDeviceKind::Diode,
+                         .saturation_current = value("saturation-current"),
+                         .thermal_voltage = value("thermal-voltage"),
+                         .breakdown_voltage = value("breakdown-voltage"),
+                         .breakdown_current = value("breakdown-current"),
+                         .breakdown_slope = value("breakdown-slope"),
+                         .max_step = value("max-step")},
+        .junction_capacitance = value("junction-capacitance"),
+        .junction_potential = value("junction-potential", 0.7),
+        .grading_coefficient = value("grading-coefficient", 0.5),
+        .temperature_celsius = value("temperature-celsius", 25.0),
+        .leakage_current = value("leakage-current"),
+        .leakage_temperature_coefficient = value("leakage-temperature-coefficient")});
+}
+
 bool HasBjtParameterContract(const ModelAuditRecord& model) {
     if (model.kind != ModelKind::Bjt) {
         return true;
@@ -90,10 +155,32 @@ bool HasBjtParameterContract(const ModelAuditRecord& model) {
         {"thermal-voltage", "V", 1.0e-6, 1.0},
         {"max-current", "A", 1.0e-12, 1.0e6},
         {"max-step", "V", 1.0e-20, 10.0}};
-    if (model.parameters.size() != std::size(required)) {
+    if (model.parameters.size() == std::size(required)) {
+        return std::all_of(std::begin(required), std::end(required), [&model](const auto& expected) {
+            return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
+                return parameter.id == expected.id && parameter.unit == expected.unit &&
+                       std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
+                       parameter.default_value <= expected.maximum && std::isfinite(parameter.minimum) &&
+                       std::isfinite(parameter.maximum) && parameter.minimum >= expected.minimum &&
+                       parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
+                       parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
+            }) == 1;
+        });
+    }
+    constexpr RequiredParameter dynamic[] = {
+        {"early-voltage", "V", 0.0, 1.0e6},
+        {"be-junction-capacitance", "F", 0.0, 1.0e-3},
+        {"bc-junction-capacitance", "F", 0.0, 1.0e-3},
+        {"be-junction-potential", "V", 1.0e-3, 100.0},
+        {"bc-junction-potential", "V", 1.0e-3, 100.0},
+        {"be-grading-coefficient", "1", 0.0, 1.0},
+        {"bc-grading-coefficient", "1", 0.0, 1.0},
+        {"temperature-celsius", "degC", -100.0, 200.0},
+        {"leakage-temperature-coefficient", "1/K", -0.1, 0.1}};
+    if (model.parameters.size() != std::size(required) + std::size(dynamic)) {
         return false;
     }
-    return std::all_of(std::begin(required), std::end(required), [&model](const auto& expected) {
+    const auto valid = [&model](const auto& expected) {
         return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
             return parameter.id == expected.id && parameter.unit == expected.unit &&
                    std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
@@ -102,7 +189,9 @@ bool HasBjtParameterContract(const ModelAuditRecord& model) {
                    parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
                    parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
         }) == 1;
-    });
+    };
+    return std::all_of(std::begin(required), std::end(required), valid) &&
+           std::all_of(std::begin(dynamic), std::end(dynamic), valid);
 }
 
 bool HasJfetParameterContract(const ModelAuditRecord& model) {
@@ -120,10 +209,7 @@ bool HasJfetParameterContract(const ModelAuditRecord& model) {
         {"transconductance-parameter", "A/V^2", 1.0e-12, 1.0e6},
         {"max-current", "A", 1.0e-12, 1.0e6},
         {"max-step", "V", 1.0e-20, 10.0}};
-    if (model.parameters.size() != std::size(required)) {
-        return false;
-    }
-    return std::all_of(std::begin(required), std::end(required), [&model](const auto& expected) {
+    const auto valid = [&model](const auto& expected) {
         return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
             return parameter.id == expected.id && parameter.unit == expected.unit &&
                    std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
@@ -132,7 +218,22 @@ bool HasJfetParameterContract(const ModelAuditRecord& model) {
                    parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
                    parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
         }) == 1;
-    });
+    };
+    if (model.parameters.size() == std::size(required)) {
+        return std::all_of(std::begin(required), std::end(required), valid);
+    }
+    constexpr RequiredParameter dynamic[] = {
+        {"channel-length-modulation", "1/V", 0.0, 10.0},
+        {"temperature-celsius", "degC", -100.0, 200.0},
+        {"gate-saturation-current", "A", 0.0, 1.0},
+        {"gate-thermal-voltage", "V", 1.0e-6, 1.0},
+        {"gate-junction-capacitance", "F", 0.0, 1.0e-3},
+        {"gate-junction-potential", "V", 1.0e-3, 100.0},
+        {"gate-grading-coefficient", "1", 0.0, 1.0},
+        {"gate-leakage-temperature-coefficient", "1/K", -0.1, 0.1}};
+    return model.parameters.size() == std::size(required) + std::size(dynamic) &&
+           std::all_of(std::begin(required), std::end(required), valid) &&
+           std::all_of(std::begin(dynamic), std::end(dynamic), valid);
 }
 
 bool HasMosfetParameterContract(const ModelAuditRecord& model) {
@@ -150,10 +251,7 @@ bool HasMosfetParameterContract(const ModelAuditRecord& model) {
         {"transconductance-parameter", "A/V^2", 1.0e-12, 1.0e6},
         {"max-current", "A", 1.0e-12, 1.0e6},
         {"max-step", "V", 1.0e-20, 10.0}};
-    if (model.parameters.size() != std::size(required)) {
-        return false;
-    }
-    return std::all_of(std::begin(required), std::end(required), [&model](const auto& expected) {
+    const auto valid = [&model](const auto& expected) {
         return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
             return parameter.id == expected.id && parameter.unit == expected.unit &&
                    std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
@@ -162,7 +260,23 @@ bool HasMosfetParameterContract(const ModelAuditRecord& model) {
                    parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
                    parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
         }) == 1;
-    });
+    };
+    if (model.parameters.size() == std::size(required)) {
+        return std::all_of(std::begin(required), std::end(required), valid);
+    }
+    constexpr RequiredParameter dynamic[] = {
+        {"channel-length-modulation", "1/V", 0.0, 10.0},
+        {"subthreshold-current", "A", 0.0, 1.0},
+        {"subthreshold-slope-voltage", "V", 1.0e-4, 10.0},
+        {"temperature-celsius", "degC", -100.0, 200.0},
+        {"body-diode-saturation-current", "A", 0.0, 1.0},
+        {"body-diode-thermal-voltage", "V", 1.0e-6, 1.0},
+        {"gate-junction-capacitance", "F", 0.0, 1.0e-3},
+        {"gate-junction-potential", "V", 1.0e-3, 100.0},
+        {"gate-grading-coefficient", "1", 0.0, 1.0}};
+    return model.parameters.size() == std::size(required) + std::size(dynamic) &&
+           std::all_of(std::begin(required), std::end(required), valid) &&
+           std::all_of(std::begin(dynamic), std::end(dynamic), valid);
 }
 
 bool HasAmplifierParameterContract(const ModelAuditRecord& model) {
@@ -176,13 +290,28 @@ bool HasAmplifierParameterContract(const ModelAuditRecord& model) {
         double maximum;
     };
     const bool is_opamp = model.kind == ModelKind::Opamp;
-    const RequiredParameter required[] = {
+    const bool dynamic = std::any_of(model.parameters.begin(), model.parameters.end(), [](const auto& parameter) {
+        return parameter.id == "gain-bandwidth";
+    });
+    std::vector<RequiredParameter> required{
         {is_opamp ? "open-loop-gain" : "transconductance", is_opamp ? "1" : "A/V",
          is_opamp ? 1.0 : 1.0e-12, is_opamp ? 1.0e12 : 1.0e6},
         {"minimum-output", is_opamp ? "V" : "A", -1.0e6, 1.0e6},
         {"maximum-output", is_opamp ? "V" : "A", -1.0e6, 1.0e6},
         {"max-step", "V", 1.0e-20, 10.0}};
-    if (model.parameters.size() != std::size(required)) {
+    if (dynamic && is_opamp) {
+        required.insert(required.begin() + 1, {
+            "gain-bandwidth", "Hz", 1.0, 1.0e9});
+        required.insert(required.begin() + 2, {"slew-rate", "V/s", 1.0e-3, 1.0e9});
+        required.insert(required.begin() + 3, {"input-resistance", "ohm", 1.0, 1.0e15});
+        required.insert(required.begin() + 4, {"input-bias-current", "A", -1.0, 1.0});
+        required.insert(required.begin() + 5, {"input-offset", "V", -1.0e3, 1.0e3});
+        required.insert(required.begin() + 6, {"output-resistance", "ohm", 1.0e-3, 1.0e9});
+        required.insert(required.begin() + 7, {"output-current-limit", "A", 1.0e-9, 1.0e6});
+        required.insert(required.begin() + 8, {"supply-minimum", "V", -1.0e6, 1.0e6});
+        required.insert(required.begin() + 9, {"supply-maximum", "V", -1.0e6, 1.0e6});
+    }
+    if (model.parameters.size() != required.size()) {
         return false;
     }
     const bool parameters_valid = std::all_of(
@@ -205,8 +334,19 @@ bool HasAmplifierParameterContract(const ModelAuditRecord& model) {
     const auto maximum = std::find_if(model.parameters.begin(), model.parameters.end(), [](const auto& parameter) {
         return parameter.id == "maximum-output";
     });
-    return minimum != model.parameters.end() && maximum != model.parameters.end() &&
-           minimum->default_value < maximum->default_value;
+    if (minimum == model.parameters.end() || maximum == model.parameters.end() ||
+        minimum->default_value >= maximum->default_value) return false;
+    if (!dynamic) return true;
+    const auto supply_minimum = std::find_if(model.parameters.begin(), model.parameters.end(), [](const auto& parameter) {
+        return parameter.id == "supply-minimum";
+    });
+    const auto supply_maximum = std::find_if(model.parameters.begin(), model.parameters.end(), [](const auto& parameter) {
+        return parameter.id == "supply-maximum";
+    });
+    return supply_minimum != model.parameters.end() && supply_maximum != model.parameters.end() &&
+           supply_minimum->default_value < supply_maximum->default_value &&
+           minimum->default_value >= supply_minimum->default_value &&
+           maximum->default_value <= supply_maximum->default_value;
 }
 
 bool HasTriodeParameterContract(const ModelAuditRecord& model) {
@@ -309,15 +449,33 @@ bool HasVariMuParameterContract(const ModelAuditRecord& model) {
 bool HasTransformerCoreParameterContract(const ModelAuditRecord& model) {
     if (model.kind != ModelKind::TransformerCore) return true;
     struct Required { std::string_view id; std::string_view unit; double minimum; double maximum; };
-    constexpr Required required[] = {
+    constexpr Required linear_required[] = {
         {"turns-ratio", "1", 1.0e-6, 1.0e6},
         {"magnetizing-inductance", "H", 1.0e-12, 1.0e6},
         {"primary-leakage-inductance", "H", 0.0, 1.0e6},
         {"secondary-leakage-inductance", "H", 0.0, 1.0e6},
         {"primary-resistance", "ohm", 0.0, 1.0e12},
         {"secondary-resistance", "ohm", 0.0, 1.0e12}};
-    if (model.parameters.size() != std::size(required)) return false;
-    const bool fields_valid = std::all_of(std::begin(required), std::end(required), [&model](const auto& expected) {
+    constexpr Required nonlinear_required[] = {
+        {"turns-ratio", "1", 1.0e-6, 1.0e6},
+        {"magnetizing-inductance", "H", 1.0e-12, 1.0e6},
+        {"primary-leakage-inductance", "H", 0.0, 1.0e6},
+        {"secondary-leakage-inductance", "H", 0.0, 1.0e6},
+        {"primary-resistance", "ohm", 0.0, 1.0e12},
+        {"secondary-resistance", "ohm", 0.0, 1.0e12},
+        {"saturation-flux", "Wb", 1.0e-12, 1.0e6},
+        {"hysteresis-width", "Wb", 0.0, 1.0e6},
+        {"hysteresis-rate", "1/s", 1.0e-12, 1.0e9},
+        {"remanent-flux", "Wb", -1.0e6, 1.0e6},
+        {"max-flux", "Wb", 1.0e-12, 1.0e6},
+        {"max-current", "A", 1.0e-12, 1.0e6},
+        {"max-step", "A", 1.0e-12, 1.0e6}};
+    const auto* required = model.model_id == "solorig.cleanroom.transformer-core.saturating-hysteretic.v1"
+        ? nonlinear_required : linear_required;
+    const auto required_count = model.model_id == "solorig.cleanroom.transformer-core.saturating-hysteretic.v1"
+        ? std::size(nonlinear_required) : std::size(linear_required);
+    if (model.parameters.size() != required_count) return false;
+    const bool fields_valid = std::all_of(required, required + required_count, [&model](const auto& expected) {
         return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
             return parameter.id == expected.id && parameter.unit == expected.unit &&
                    std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
@@ -332,13 +490,24 @@ bool HasTransformerCoreParameterContract(const ModelAuditRecord& model) {
         return std::find_if(model.parameters.begin(), model.parameters.end(),
                             [id](const auto& parameter) { return parameter.id == id; })->default_value;
     };
-    return ValidateCoupledInductorModel({
+    const bool linear_valid = ValidateCoupledInductorModel({
         .turns_ratio = value("turns-ratio"),
         .magnetizing_inductance = value("magnetizing-inductance"),
         .primary_leakage_inductance = value("primary-leakage-inductance"),
         .secondary_leakage_inductance = value("secondary-leakage-inductance"),
         .primary_resistance = value("primary-resistance"),
         .secondary_resistance = value("secondary-resistance")});
+    if (!linear_valid) return false;
+    if (model.model_id != "solorig.cleanroom.transformer-core.saturating-hysteretic.v1") return true;
+    return ValidateNonlinearTransformerCoreModel({
+        .magnetizing_inductance = value("magnetizing-inductance"),
+        .saturation_flux = value("saturation-flux"),
+        .hysteresis_width = value("hysteresis-width"),
+        .hysteresis_rate = value("hysteresis-rate"),
+        .remanent_flux = value("remanent-flux"),
+        .max_flux = value("max-flux"),
+        .max_current = value("max-current"),
+        .max_step = value("max-step")});
 }
 
 bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
@@ -351,8 +520,11 @@ bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
         return true;
     }
     if (model.kind == ModelKind::Opamp || model.kind == ModelKind::Ota) {
+        const bool dynamic = std::any_of(model.parameters.begin(), model.parameters.end(), [](const auto& parameter) {
+            return parameter.id == "gain-bandwidth";
+        });
         const auto expected_part = model.kind == ModelKind::Opamp
-            ? "self-authored-bounded-opamp-no-commercial-part"
+            ? (dynamic ? "self-authored-dynamic-opamp-no-commercial-part" : "self-authored-bounded-opamp-no-commercial-part")
             : "self-authored-bounded-ota-no-commercial-part";
         return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
                model.license.permission_evidence == "self-authored-clean-room" &&
@@ -381,8 +553,10 @@ bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
     if (model.kind == ModelKind::TransformerCore) {
         return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
                model.license.permission_evidence == "self-authored-clean-room" &&
-               model.part_number == "self-authored-lossy-linear-transformer-core-no-commercial-part" &&
-               model.model_id == "solorig.cleanroom.transformer-core.lossy-linear.v1";
+               ((model.part_number == "self-authored-lossy-linear-transformer-core-no-commercial-part" &&
+                 model.model_id == "solorig.cleanroom.transformer-core.lossy-linear.v1") ||
+                (model.part_number == "self-authored-saturating-hysteretic-transformer-core-no-commercial-part" &&
+                 model.model_id == "solorig.cleanroom.transformer-core.saturating-hysteretic.v1"));
     }
     if (model.kind == ModelKind::Bjt || model.kind == ModelKind::Jfet || model.kind == ModelKind::Mosfet) {
         const bool polarity_allowed = model.kind == ModelKind::Bjt
@@ -600,6 +774,8 @@ std::optional<ModelAuditError> ModelDatabase::Register(ModelAuditRecord model) {
         return ModelAuditError::MissingModelAuthorization;
     }
     if (!IsAuthorizedCleanRoomDevice(model) ||
+        ((model.kind == ModelKind::Diode || model.kind == ModelKind::Zener) &&
+         !HasDiodeParameterContract(model)) ||
         (model.kind == ModelKind::Bjt && (!model.polarity.has_value() || !HasBjtParameterContract(model))) ||
         (model.kind == ModelKind::Jfet && (!model.polarity.has_value() || !HasJfetParameterContract(model))) ||
         (model.kind == ModelKind::Mosfet && (!model.polarity.has_value() || !HasMosfetParameterContract(model))) ||

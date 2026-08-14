@@ -1,0 +1,21 @@
+{
+  "version":1,"schema":"solorig-model-audit","modelId":"solorig.cleanroom.mosfet.n-channel.dynamic.v2","deviceFamily":"clean-room-mosfet","partNumber":"self-authored-n-channel-no-commercial-part","modelKind":"mosfet","polarity":"n-channel","runtimeStatus":"approved",
+  "parameters":[
+    {"id":"threshold-voltage","default":1.0,"min":1.0e-6,"max":100.0,"unit":"V"},
+    {"id":"transconductance-parameter","default":0.001,"min":1.0e-12,"max":1.0e6,"unit":"A/V^2"},
+    {"id":"max-current","default":0.01,"min":1.0e-12,"max":1.0e6,"unit":"A"},
+    {"id":"max-step","default":0.5,"min":1.0e-20,"max":10.0,"unit":"V"},
+    {"id":"channel-length-modulation","default":0.05,"min":0.0,"max":10.0,"unit":"1/V"},
+    {"id":"subthreshold-current","default":1.0e-12,"min":0.0,"max":1.0,"unit":"A"},
+    {"id":"subthreshold-slope-voltage","default":0.08,"min":1.0e-4,"max":10.0,"unit":"V"},
+    {"id":"temperature-celsius","default":25.0,"min":-100.0,"max":200.0,"unit":"degC"},
+    {"id":"body-diode-saturation-current","default":1.0e-12,"min":0.0,"max":1.0,"unit":"A"},
+    {"id":"body-diode-thermal-voltage","default":0.02585,"min":1.0e-6,"max":1.0,"unit":"V"},
+    {"id":"gate-junction-capacitance","default":1.0e-12,"min":0.0,"max":1.0e-3,"unit":"F"},
+    {"id":"gate-junction-potential","default":0.7,"min":1.0e-3,"max":100.0,"unit":"V"},
+    {"id":"gate-grading-coefficient","default":0.5,"min":0.0,"max":1.0,"unit":"1"}
+  ],
+  "source":{"origin":"SoloRig self-authored clean-room generic MOSFET dynamic contract","version":"m18c9d-clean-room-v2","integrity":"self:m18c9d-n-channel-v2"},
+  "license":{"spdx":"MIT","permissionEvidence":"self-authored-clean-room","reviewStatus":"approved"},
+  "applicability":[{"quantity":"terminal-voltage","min":-20.0,"max":20.0,"unit":"V"}],"evidenceRefs":["test:m18c9d-mosfet-dynamic-iv-jacobian"]
+}

@@ -1,5 +1,12 @@
 #include "dsp/mna_solver.hpp"
 
+#include "content/nonlinear_bjt_binding.hpp"
+#include "content/nonlinear_jfet_binding.hpp"
+#include "content/nonlinear_mosfet_binding.hpp"
+#include "content/nonlinear_opamp_binding.hpp"
+
+#include "content/nonlinear_diode_binding.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -133,6 +140,57 @@ void StampCoupledInductor(std::vector<double>& matrix,
     rhs[element.secondary_branch_index] -= mutual_dynamic * primary_previous;
 }
 
+void StampNonlinearCoupledInductor(std::vector<double>& matrix,
+                                   std::vector<double>& rhs,
+                                   std::uint32_t size,
+                                   const MnaPreparedCircuit::Element& element,
+                                   double inverse_dt,
+                                   double primary_previous,
+                                   double secondary_previous,
+                                   double primary_guess,
+                                   double secondary_guess,
+                                   double previous_flux,
+                                   double hysteresis) noexcept {
+    const double n = element.coupled_inductor_model.turns_ratio;
+    const double magnetizing_previous = primary_guess + secondary_guess / n;
+    const auto& model = element.nonlinear_transformer_core_model;
+    const auto evaluation = EvaluateNonlinearTransformerCore(
+        model, magnetizing_previous, hysteresis);
+    const double derivative = evaluation.Succeeded() ? evaluation.differential_flux : std::numeric_limits<double>::quiet_NaN();
+    const double primary_dynamic = element.coupled_inductor_model.primary_leakage_inductance * inverse_dt;
+    const double secondary_dynamic = element.coupled_inductor_model.secondary_leakage_inductance * inverse_dt;
+    const double core_dynamic = derivative * inverse_dt;
+    const double correction = evaluation.Succeeded()
+        ? (evaluation.flux - derivative * magnetizing_previous - previous_flux) * inverse_dt
+        : std::numeric_limits<double>::quiet_NaN();
+    auto stamp_branch_voltage = [&matrix, size](std::int32_t positive, std::int32_t negative,
+                                                  std::uint32_t branch) {
+        if (positive >= 0) {
+            matrix[static_cast<std::size_t>(positive) * size + branch] += 1.0;
+            matrix[static_cast<std::size_t>(branch) * size + static_cast<std::size_t>(positive)] += 1.0;
+        }
+        if (negative >= 0) {
+            matrix[static_cast<std::size_t>(negative) * size + branch] -= 1.0;
+            matrix[static_cast<std::size_t>(branch) * size + static_cast<std::size_t>(negative)] -= 1.0;
+        }
+    };
+    stamp_branch_voltage(element.positive_node, element.negative_node, element.branch_index);
+    stamp_branch_voltage(element.secondary_positive_node, element.secondary_negative_node,
+                         element.secondary_branch_index);
+    matrix[static_cast<std::size_t>(element.branch_index) * size + element.branch_index] -=
+        element.coupled_inductor_model.primary_resistance + primary_dynamic + core_dynamic;
+    matrix[static_cast<std::size_t>(element.branch_index) * size + element.secondary_branch_index] -=
+        core_dynamic / n;
+    matrix[static_cast<std::size_t>(element.secondary_branch_index) * size + element.branch_index] -=
+        core_dynamic / n;
+    matrix[static_cast<std::size_t>(element.secondary_branch_index) * size + element.secondary_branch_index] -=
+        element.coupled_inductor_model.secondary_resistance + secondary_dynamic + core_dynamic / (n * n);
+    rhs[element.branch_index] -= primary_dynamic * primary_previous;
+    rhs[element.secondary_branch_index] -= secondary_dynamic * secondary_previous;
+    rhs[element.branch_index] += correction;
+    rhs[element.secondary_branch_index] += correction / n;
+}
+
 void StampVccs(std::vector<double>& matrix,
                std::vector<double>& rhs,
                std::uint32_t size,
@@ -258,15 +316,57 @@ void StampOpAmp(std::vector<double>& matrix,
     rhs[element.branch_index] += equivalent_voltage;
 }
 
+void StampDynamicOpAmp(std::vector<double>& matrix,
+                       std::vector<double>& rhs,
+                       std::uint32_t size,
+                       const MnaPreparedCircuit::Element& element,
+                       const std::vector<double>& guess,
+                       double previous_state,
+                       double timestep) noexcept {
+    const double voltages[4] = {
+        element.positive_node >= 0 ? guess[static_cast<std::size_t>(element.positive_node)] : 0.0,
+        element.negative_node >= 0 ? guess[static_cast<std::size_t>(element.negative_node)] : 0.0,
+        element.control_positive_node >= 0 ? guess[static_cast<std::size_t>(element.control_positive_node)] : 0.0,
+        element.control_negative_node >= 0 ? guess[static_cast<std::size_t>(element.control_negative_node)] : 0.0};
+    const auto evaluation = EvaluateNonlinearOpAmpDynamic(
+        element.nonlinear_opamp_dynamic_model, voltages[0], voltages[1], voltages[2], voltages[3],
+        previous_state, timestep);
+    const std::int32_t nodes[4] = {element.positive_node, element.negative_node,
+                                   element.control_positive_node, element.control_negative_node};
+    if (!evaluation.Succeeded()) {
+        if (element.positive_node >= 0) {
+            rhs[static_cast<std::size_t>(element.positive_node)] = std::numeric_limits<double>::quiet_NaN();
+        }
+        return;
+    }
+    for (std::size_t row = 0; row < 4U; ++row) {
+        if (nodes[row] < 0) continue;
+        double equivalent = evaluation.currents[row];
+        for (std::size_t column = 0; column < 4U; ++column) {
+            equivalent -= evaluation.jacobian[row][column] * voltages[column];
+            if (nodes[column] >= 0) {
+                matrix[static_cast<std::size_t>(nodes[row]) * size +
+                       static_cast<std::size_t>(nodes[column])] += evaluation.jacobian[row][column];
+            }
+        }
+        rhs[static_cast<std::size_t>(nodes[row])] -= equivalent;
+    }
+}
+
 void StampBjt(std::vector<double>& matrix,
               std::vector<double>& rhs,
               std::uint32_t size,
               const MnaPreparedCircuit::Element& element,
-              const std::vector<double>& guess) noexcept {
+              const std::vector<double>& guess,
+              double conductance_scale,
+              double previous_be_voltage,
+              double previous_bc_voltage) noexcept {
     const auto collector = element.positive_node >= 0 ? guess[static_cast<std::size_t>(element.positive_node)] : 0.0;
     const auto base = element.bjt_base_node >= 0 ? guess[static_cast<std::size_t>(element.bjt_base_node)] : 0.0;
     const auto emitter = element.negative_node >= 0 ? guess[static_cast<std::size_t>(element.negative_node)] : 0.0;
-    const auto evaluation = EvaluateNonlinearBjt(element.nonlinear_bjt_model, collector, base, emitter);
+    const auto evaluation = EvaluateNonlinearBjtDynamic(
+        element.nonlinear_bjt_dynamic_model, collector, base, emitter,
+        previous_be_voltage, previous_bc_voltage, conductance_scale);
     if (!evaluation.Succeeded()) {
         StampConductance(matrix, size, element.positive_node, element.negative_node,
                          std::numeric_limits<double>::quiet_NaN());
@@ -294,11 +394,16 @@ void StampJfet(std::vector<double>& matrix,
                std::vector<double>& rhs,
                std::uint32_t size,
                const MnaPreparedCircuit::Element& element,
-               const std::vector<double>& guess) noexcept {
+               const std::vector<double>& guess,
+               double conductance_scale,
+               double previous_gs_voltage,
+               double previous_gd_voltage) noexcept {
     const auto drain = element.positive_node >= 0 ? guess[static_cast<std::size_t>(element.positive_node)] : 0.0;
     const auto gate = element.jfet_gate_node >= 0 ? guess[static_cast<std::size_t>(element.jfet_gate_node)] : 0.0;
     const auto source = element.negative_node >= 0 ? guess[static_cast<std::size_t>(element.negative_node)] : 0.0;
-    const auto evaluation = EvaluateNonlinearJfet(element.nonlinear_jfet_model, drain, gate, source);
+    const auto evaluation = EvaluateNonlinearJfetDynamic(
+        element.nonlinear_jfet_dynamic_model, drain, gate, source,
+        previous_gs_voltage, previous_gd_voltage, conductance_scale);
     if (!evaluation.Succeeded()) {
         StampConductance(matrix, size, element.positive_node, element.negative_node,
                          std::numeric_limits<double>::quiet_NaN());
@@ -342,6 +447,41 @@ void StampMosfet(std::vector<double>& matrix,
         if (nodes[row] < 0) {
             continue;
         }
+        double equivalent_current = evaluation.currents[row];
+        for (std::size_t column = 0; column < 3U; ++column) {
+            equivalent_current -= evaluation.jacobian[row][column] * voltages[column];
+            if (nodes[column] >= 0) {
+                matrix[static_cast<std::size_t>(nodes[row]) * size + static_cast<std::size_t>(nodes[column])] +=
+                    evaluation.jacobian[row][column];
+            }
+        }
+        rhs[static_cast<std::size_t>(nodes[row])] -= equivalent_current;
+    }
+}
+
+void StampMosfetDynamic(std::vector<double>& matrix,
+                        std::vector<double>& rhs,
+                        std::uint32_t size,
+                        const MnaPreparedCircuit::Element& element,
+                        const std::vector<double>& guess,
+                        double previous_gs_voltage,
+                        double previous_gd_voltage,
+                        double conductance_scale) noexcept {
+    const auto drain = element.positive_node >= 0 ? guess[static_cast<std::size_t>(element.positive_node)] : 0.0;
+    const auto gate = element.mosfet_gate_node >= 0 ? guess[static_cast<std::size_t>(element.mosfet_gate_node)] : 0.0;
+    const auto source = element.negative_node >= 0 ? guess[static_cast<std::size_t>(element.negative_node)] : 0.0;
+    const auto evaluation = EvaluateNonlinearMosfetDynamic(
+        element.nonlinear_mosfet_dynamic_model, drain, gate, source,
+        previous_gs_voltage, previous_gd_voltage, conductance_scale);
+    if (!evaluation.Succeeded()) {
+        StampConductance(matrix, size, element.positive_node, element.negative_node,
+                         std::numeric_limits<double>::quiet_NaN());
+        return;
+    }
+    const std::int32_t nodes[3] = {element.positive_node, element.mosfet_gate_node, element.negative_node};
+    const double voltages[3] = {drain, gate, source};
+    for (std::size_t row = 0; row < 3U; ++row) {
+        if (nodes[row] < 0) continue;
         double equivalent_current = evaluation.currents[row];
         for (std::size_t column = 0; column < 3U; ++column) {
             equivalent_current -= evaluation.jacobian[row][column] * voltages[column];
@@ -484,11 +624,14 @@ void StampDiode(std::vector<double>& matrix,
                 std::vector<double>& rhs,
                 std::uint32_t size,
                 const MnaPreparedCircuit::Element& element,
-                const std::vector<double>& guess) noexcept {
+                const std::vector<double>& guess,
+                double conductance_scale,
+                double previous_voltage) noexcept {
     const auto positive = element.positive_node >= 0 ? guess[static_cast<std::size_t>(element.positive_node)] : 0.0;
     const auto negative = element.negative_node >= 0 ? guess[static_cast<std::size_t>(element.negative_node)] : 0.0;
     const auto voltage = positive - negative;
-    const auto evaluation = EvaluateNonlinearDevice(element.nonlinear_model, voltage);
+    const auto evaluation = EvaluateNonlinearDiodeDynamic(
+        element.nonlinear_diode_dynamic_model, voltage, previous_voltage, conductance_scale);
     if (!evaluation.Succeeded()) {
         StampConductance(matrix, size, element.positive_node, element.negative_node,
                          std::numeric_limits<double>::quiet_NaN());
@@ -576,6 +719,13 @@ void MnaPreparedCircuit::Reset() noexcept {
     for (auto& history : capacitor_history_) {
         history = 0.0;
     }
+    std::fill(bjt_be_history_.begin(), bjt_be_history_.end(), 0.0);
+    std::fill(bjt_bc_history_.begin(), bjt_bc_history_.end(), 0.0);
+    std::fill(jfet_gs_history_.begin(), jfet_gs_history_.end(), 0.0);
+    std::fill(jfet_gd_history_.begin(), jfet_gd_history_.end(), 0.0);
+    std::fill(mosfet_gs_history_.begin(), mosfet_gs_history_.end(), 0.0);
+    std::fill(mosfet_gd_history_.begin(), mosfet_gd_history_.end(), 0.0);
+    std::fill(opamp_dynamic_history_.begin(), opamp_dynamic_history_.end(), 0.0);
     for (const auto& element : elements_) {
         if (element.history_index != kNoIndex) {
             capacitor_history_[element.history_index] = element.initial;
@@ -585,6 +735,38 @@ void MnaPreparedCircuit::Reset() noexcept {
         }
         if (element.secondary_inductor_history_index != kNoIndex) {
             inductor_history_[element.secondary_inductor_history_index] = element.secondary_initial;
+        }
+        if (element.transformer_core_history_index != kNoIndex) {
+            transformer_core_history_[element.transformer_core_history_index] = {
+                .flux = element.nonlinear_transformer_core_model.remanent_flux,
+                .hysteresis = element.nonlinear_transformer_core_model.remanent_flux};
+        }
+        if (element.bjt_be_history_index != kNoIndex) {
+            const double polarity = element.nonlinear_bjt_dynamic_model.static_model.polarity == BjtPolarity::Npn ? 1.0 : -1.0;
+            bjt_be_history_[element.bjt_be_history_index] = polarity * element.initial;
+        }
+        if (element.bjt_bc_history_index != kNoIndex) {
+            const double polarity = element.nonlinear_bjt_dynamic_model.static_model.polarity == BjtPolarity::Npn ? 1.0 : -1.0;
+            bjt_bc_history_[element.bjt_bc_history_index] = polarity * element.initial;
+        }
+        if (element.jfet_gs_history_index != kNoIndex) {
+            const double polarity = element.nonlinear_jfet_dynamic_model.static_model.polarity == JfetPolarity::NChannel ? 1.0 : -1.0;
+            jfet_gs_history_[element.jfet_gs_history_index] = polarity * element.initial;
+        }
+        if (element.jfet_gd_history_index != kNoIndex) {
+            const double polarity = element.nonlinear_jfet_dynamic_model.static_model.polarity == JfetPolarity::NChannel ? 1.0 : -1.0;
+            jfet_gd_history_[element.jfet_gd_history_index] = polarity * element.initial;
+        }
+        if (element.mosfet_gs_history_index != kNoIndex) {
+            const double polarity = element.nonlinear_mosfet_dynamic_model.static_model.polarity == MosfetPolarity::NChannel ? 1.0 : -1.0;
+            mosfet_gs_history_[element.mosfet_gs_history_index] = polarity * element.initial;
+        }
+        if (element.mosfet_gd_history_index != kNoIndex) {
+            const double polarity = element.nonlinear_mosfet_dynamic_model.static_model.polarity == MosfetPolarity::NChannel ? 1.0 : -1.0;
+            mosfet_gd_history_[element.mosfet_gd_history_index] = polarity * element.initial;
+        }
+        if (element.opamp_dynamic_history_index != kNoIndex) {
+            opamp_dynamic_history_[element.opamp_dynamic_history_index] = element.initial;
         }
     }
     std::fill(matrix_.begin(), matrix_.end(), 0.0);
@@ -640,6 +822,7 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                    element.type == CircuitComponentType::Triode || element.type == CircuitComponentType::Pentode ||
                    element.type == CircuitComponentType::BeamTetrode ||
                    element.type == CircuitComponentType::VariMu ||
+                   element.transformer_core_history_index != kNoIndex ||
                    element.controlled_has_limits;
         });
         bool converged = !has_nonlinearity;
@@ -666,26 +849,57 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                                   inductor_history_[element.inductor_history_index]);
                     break;
                 }
-                case CircuitComponentType::CoupledInductor:
-                    StampCoupledInductor(matrix_, rhs_, matrix_size_, element, conductance_scale,
-                        inductor_history_[element.inductor_history_index],
-                        inductor_history_[element.secondary_inductor_history_index]);
+                case CircuitComponentType::CoupledInductor: {
+                    const auto primary_previous = inductor_history_[element.inductor_history_index];
+                    const auto secondary_previous = inductor_history_[element.secondary_inductor_history_index];
+                    if (element.transformer_core_history_index != kNoIndex) {
+                        const auto primary_guess = solution_[element.branch_index];
+                        const auto secondary_guess = solution_[element.secondary_branch_index];
+                        const auto& state = transformer_core_history_[element.transformer_core_history_index];
+                        StampNonlinearCoupledInductor(matrix_, rhs_, matrix_size_, element, conductance_scale,
+                            primary_previous, secondary_previous, primary_guess, secondary_guess,
+                            state.flux, state.hysteresis);
+                    } else {
+                        StampCoupledInductor(matrix_, rhs_, matrix_size_, element, conductance_scale,
+                            primary_previous, secondary_previous);
+                    }
                     break;
+                }
                 case CircuitComponentType::VoltageSource:
                     StampVoltageSource(matrix_, rhs_, matrix_size_, element.positive_node, element.negative_node,
                                        element.branch_index, element.value);
                     break;
                 case CircuitComponentType::Diode:
-                    StampDiode(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    StampDiode(matrix_, rhs_, matrix_size_, element, newton_previous_, conductance_scale,
+                               capacitor_history_[element.history_index]);
                     break;
-                case CircuitComponentType::Bjt:
-                    StampBjt(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                case CircuitComponentType::Bjt: {
+                    const double previous_be = element.bjt_be_history_index != kNoIndex
+                        ? bjt_be_history_[element.bjt_be_history_index] : 0.0;
+                    const double previous_bc = element.bjt_bc_history_index != kNoIndex
+                        ? bjt_bc_history_[element.bjt_bc_history_index] : 0.0;
+                    StampBjt(matrix_, rhs_, matrix_size_, element, newton_previous_, conductance_scale,
+                             previous_be, previous_bc);
                     break;
-                case CircuitComponentType::Jfet:
-                    StampJfet(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                }
+                case CircuitComponentType::Jfet: {
+                    const double previous_gs = element.jfet_gs_history_index != kNoIndex
+                        ? jfet_gs_history_[element.jfet_gs_history_index] : 0.0;
+                    const double previous_gd = element.jfet_gd_history_index != kNoIndex
+                        ? jfet_gd_history_[element.jfet_gd_history_index] : 0.0;
+                    StampJfet(matrix_, rhs_, matrix_size_, element, newton_previous_, conductance_scale,
+                              previous_gs, previous_gd);
                     break;
+                }
                 case CircuitComponentType::Mosfet:
-                    StampMosfet(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    if (element.mosfet_gs_history_index != kNoIndex) {
+                        const auto previous_gs = mosfet_gs_history_[element.mosfet_gs_history_index];
+                        const auto previous_gd = mosfet_gd_history_[element.mosfet_gd_history_index];
+                        StampMosfetDynamic(matrix_, rhs_, matrix_size_, element, newton_previous_,
+                                           previous_gs, previous_gd, conductance_scale);
+                    } else {
+                        StampMosfet(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    }
                     break;
                 case CircuitComponentType::Vccs:
                     StampVccs(matrix_, rhs_, matrix_size_, element, newton_previous_);
@@ -694,7 +908,13 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     StampIdealOpAmp(matrix_, rhs_, matrix_size_, element, newton_previous_);
                     break;
                 case CircuitComponentType::OpAmp:
-                    StampOpAmp(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    if (element.opamp_dynamic_history_index != kNoIndex) {
+                        StampDynamicOpAmp(matrix_, rhs_, matrix_size_, element, newton_previous_,
+                                          opamp_dynamic_history_[element.opamp_dynamic_history_index],
+                                          1.0 / conductance_scale);
+                    } else {
+                        StampOpAmp(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    }
                     break;
                 case CircuitComponentType::Ota:
                     StampOta(matrix_, rhs_, matrix_size_, element, newton_previous_);
@@ -881,6 +1101,21 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                             nonlinear_step_scale, element.nonlinear_vari_mu_model.max_step / largest);
                     }
                 }
+                if (element.transformer_core_history_index != kNoIndex) {
+                    const double old_primary = newton_previous_[element.branch_index];
+                    const double old_secondary = newton_previous_[element.secondary_branch_index];
+                    const double new_primary = solution_[element.branch_index];
+                    const double new_secondary = solution_[element.secondary_branch_index];
+                    const double current_step = std::fabs(
+                        (new_primary + new_secondary / element.coupled_inductor_model.turns_ratio) -
+                        (old_primary + old_secondary / element.coupled_inductor_model.turns_ratio));
+                    if (current_step > element.nonlinear_transformer_core_model.max_step &&
+                        std::isfinite(current_step)) {
+                        nonlinear_step_scale = std::min(
+                            nonlinear_step_scale,
+                            element.nonlinear_transformer_core_model.max_step / current_step);
+                    }
+                }
             }
             // Nonlinear junction steps are damped, rather than allocating a second
             // trial vector. If the bounded iteration budget is exhausted the
@@ -921,6 +1156,66 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
             if (element.secondary_inductor_history_index != kNoIndex) {
                 inductor_history_[element.secondary_inductor_history_index] =
                     solution_[element.secondary_branch_index];
+            }
+            if (element.transformer_core_history_index != kNoIndex) {
+                const double primary = solution_[element.branch_index];
+                const double secondary = solution_[element.secondary_branch_index];
+                auto& state = transformer_core_history_[element.transformer_core_history_index];
+                if (!AdvanceNonlinearTransformerCoreState(
+                        element.nonlinear_transformer_core_model,
+                        primary + secondary / element.coupled_inductor_model.turns_ratio,
+                        1.0 / conductance_scale, state)) {
+                    return {.error = MnaSolveError::NonFinite};
+                }
+            }
+            if (element.bjt_be_history_index != kNoIndex) {
+                const double polarity = element.nonlinear_bjt_dynamic_model.static_model.polarity == BjtPolarity::Npn ? 1.0 : -1.0;
+                const double base = element.bjt_base_node >= 0 ? solution_[element.bjt_base_node] : 0.0;
+                const double emitter = element.negative_node >= 0 ? solution_[element.negative_node] : 0.0;
+                bjt_be_history_[element.bjt_be_history_index] = polarity * (base - emitter);
+            }
+            if (element.bjt_bc_history_index != kNoIndex) {
+                const double polarity = element.nonlinear_bjt_dynamic_model.static_model.polarity == BjtPolarity::Npn ? 1.0 : -1.0;
+                const double base = element.bjt_base_node >= 0 ? solution_[element.bjt_base_node] : 0.0;
+                const double collector = element.positive_node >= 0 ? solution_[element.positive_node] : 0.0;
+                bjt_bc_history_[element.bjt_bc_history_index] = polarity * (base - collector);
+            }
+            if (element.jfet_gs_history_index != kNoIndex) {
+                const double polarity = element.nonlinear_jfet_dynamic_model.static_model.polarity == JfetPolarity::NChannel ? 1.0 : -1.0;
+                const double gate = element.jfet_gate_node >= 0 ? solution_[element.jfet_gate_node] : 0.0;
+                const double source = element.negative_node >= 0 ? solution_[element.negative_node] : 0.0;
+                jfet_gs_history_[element.jfet_gs_history_index] = polarity * (gate - source);
+            }
+            if (element.jfet_gd_history_index != kNoIndex) {
+                const double polarity = element.nonlinear_jfet_dynamic_model.static_model.polarity == JfetPolarity::NChannel ? 1.0 : -1.0;
+                const double gate = element.jfet_gate_node >= 0 ? solution_[element.jfet_gate_node] : 0.0;
+                const double drain = element.positive_node >= 0 ? solution_[element.positive_node] : 0.0;
+                jfet_gd_history_[element.jfet_gd_history_index] = polarity * (gate - drain);
+            }
+            if (element.mosfet_gs_history_index != kNoIndex) {
+                const double polarity = element.nonlinear_mosfet_dynamic_model.static_model.polarity == MosfetPolarity::NChannel ? 1.0 : -1.0;
+                const double gate = element.mosfet_gate_node >= 0 ? solution_[element.mosfet_gate_node] : 0.0;
+                const double source = element.negative_node >= 0 ? solution_[element.negative_node] : 0.0;
+                mosfet_gs_history_[element.mosfet_gs_history_index] = polarity * (gate - source);
+            }
+            if (element.mosfet_gd_history_index != kNoIndex) {
+                const double polarity = element.nonlinear_mosfet_dynamic_model.static_model.polarity == MosfetPolarity::NChannel ? 1.0 : -1.0;
+                const double gate = element.mosfet_gate_node >= 0 ? solution_[element.mosfet_gate_node] : 0.0;
+                const double drain = element.positive_node >= 0 ? solution_[element.positive_node] : 0.0;
+                mosfet_gd_history_[element.mosfet_gd_history_index] = polarity * (gate - drain);
+            }
+            if (element.opamp_dynamic_history_index != kNoIndex) {
+                const double output_positive = element.positive_node >= 0 ? solution_[element.positive_node] : 0.0;
+                const double output_negative = element.negative_node >= 0 ? solution_[element.negative_node] : 0.0;
+                const double control_positive = element.control_positive_node >= 0 ? solution_[element.control_positive_node] : 0.0;
+                const double control_negative = element.control_negative_node >= 0 ? solution_[element.control_negative_node] : 0.0;
+                const auto state = EvaluateNonlinearOpAmpDynamic(
+                    element.nonlinear_opamp_dynamic_model, output_positive, output_negative,
+                    control_positive, control_negative,
+                    opamp_dynamic_history_[element.opamp_dynamic_history_index],
+                    1.0 / conductance_scale);
+                if (!state.Succeeded()) return {.error = MnaSolveError::NonFinite};
+                opamp_dynamic_history_[element.opamp_dynamic_history_index] = state.state_voltage;
             }
         }
         result.output_voltage = output_node_ >= 0 ? solution_[output_node_] : 0.0;
@@ -1016,7 +1311,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
             }
             const auto& bjt = *component.bjt_model;
-            if (bjt.kind != "ebers-moll" || bjt.model_version != 1U ||
+            const bool dynamic_bjt = bjt.kind == "generic-dynamic" && bjt.model_version == 2U;
+            if ((!dynamic_bjt && (bjt.kind != "ebers-moll" || bjt.model_version != 1U)) ||
                 (bjt.polarity != "npn" && bjt.polarity != "pnp")) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
@@ -1027,6 +1323,22 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 bjt.forward_beta > 1.0e6 || bjt.reverse_beta <= 0.0 || bjt.reverse_beta > 1.0e6 ||
                 bjt.thermal_voltage <= 0.0 || bjt.thermal_voltage > 1.0 || bjt.max_current <= 0.0 ||
                 bjt.max_current > 1.0e6 || bjt.max_step <= 0.0 || bjt.max_step > 10.0) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+            if (!ValidateNonlinearBjtDynamicModel({
+                    .static_model = {.polarity = bjt.polarity == "npn" ? BjtPolarity::Npn : BjtPolarity::Pnp,
+                        .saturation_current = bjt.saturation_current, .forward_beta = bjt.forward_beta,
+                        .reverse_beta = bjt.reverse_beta, .thermal_voltage = bjt.thermal_voltage,
+                        .max_current = bjt.max_current, .max_step = bjt.max_step},
+                    .early_voltage = bjt.early_voltage,
+                    .be_junction_capacitance = bjt.be_junction_capacitance,
+                    .bc_junction_capacitance = bjt.bc_junction_capacitance,
+                    .be_junction_potential = bjt.be_junction_potential,
+                    .bc_junction_potential = bjt.bc_junction_potential,
+                    .be_grading_coefficient = bjt.be_grading_coefficient,
+                    .bc_grading_coefficient = bjt.bc_grading_coefficient,
+                    .temperature_celsius = bjt.temperature_celsius,
+                    .leakage_temperature_coefficient = bjt.leakage_temperature_coefficient})) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
             }
         }
@@ -1042,7 +1354,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
             }
             const auto& jfet = *component.jfet_model;
-            if (jfet.kind != "square-law" || jfet.model_version != 1U ||
+            const bool dynamic_jfet = jfet.kind == "generic-dynamic" && jfet.model_version == 2U;
+            if ((!dynamic_jfet && (jfet.kind != "square-law" || jfet.model_version != 1U)) ||
                 (jfet.polarity != "n-channel" && jfet.polarity != "p-channel")) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
@@ -1053,6 +1366,18 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 .max_current = jfet.max_current,
                 .max_step = jfet.max_step};
             if (!ValidateNonlinearJfetModel(model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+            if (!ValidateNonlinearJfetDynamicModel({
+                    .static_model = model,
+                    .channel_length_modulation = jfet.channel_length_modulation,
+                    .temperature_celsius = jfet.temperature_celsius,
+                    .gate_saturation_current = jfet.gate_saturation_current,
+                    .gate_thermal_voltage = jfet.gate_thermal_voltage,
+                    .gate_junction_capacitance = jfet.gate_junction_capacitance,
+                    .gate_junction_potential = jfet.gate_junction_potential,
+                    .gate_grading_coefficient = jfet.gate_grading_coefficient,
+                    .gate_leakage_temperature_coefficient = jfet.gate_leakage_temperature_coefficient})) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
             }
         }
@@ -1068,7 +1393,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
             }
             const auto& mosfet = *component.mosfet_model;
-            if (mosfet.kind != "enhancement-square-law" || mosfet.model_version != 1U ||
+            const bool dynamic_mosfet = mosfet.kind == "generic-dynamic" && mosfet.model_version == 2U;
+            if ((!dynamic_mosfet && (mosfet.kind != "enhancement-square-law" || mosfet.model_version != 1U)) ||
                 (mosfet.polarity != "n-channel" && mosfet.polarity != "p-channel")) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
@@ -1098,18 +1424,34 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             const auto& amplifier = *component.amplifier_model;
             const auto expected_kind = component.type == CircuitComponentType::OpAmp
                 ? "bounded-opamp" : "bounded-ota";
-            if (amplifier.kind != expected_kind || amplifier.model_version != 1U) {
-                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
-            }
-            const NonlinearAmplifierModel model{
-                .kind = component.type == CircuitComponentType::OpAmp
-                    ? AmplifierKind::OpAmp : AmplifierKind::Ota,
-                .gain = amplifier.gain,
-                .minimum_output = amplifier.minimum_output,
-                .maximum_output = amplifier.maximum_output,
-                .max_step = amplifier.max_step};
-            if (!ValidateNonlinearAmplifierModel(model)) {
-                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            if (amplifier.kind == "generic-dynamic") {
+                if (component.type != CircuitComponentType::OpAmp || amplifier.model_version != 2U ||
+                    !ValidateNonlinearOpAmpDynamicModel({
+                        .gain = amplifier.gain, .gain_bandwidth_hz = amplifier.gain_bandwidth_hz,
+                        .slew_rate = amplifier.slew_rate, .input_resistance = amplifier.input_resistance,
+                        .input_bias_current = amplifier.input_bias_current, .input_offset = amplifier.input_offset,
+                        .output_resistance = amplifier.output_resistance, .output_current_limit = amplifier.output_current_limit,
+                        .supply_minimum = amplifier.supply_minimum, .supply_maximum = amplifier.supply_maximum,
+                        .minimum_output = amplifier.minimum_output, .maximum_output = amplifier.maximum_output,
+                        .max_step = amplifier.max_step}) ||
+                    (component.initial.has_value() && (*component.initial < amplifier.minimum_output ||
+                                                       *component.initial > amplifier.maximum_output))) {
+                    return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+                }
+            } else {
+                if (amplifier.kind != expected_kind || amplifier.model_version != 1U) {
+                    return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+                }
+                const NonlinearAmplifierModel model{
+                    .kind = component.type == CircuitComponentType::OpAmp
+                        ? AmplifierKind::OpAmp : AmplifierKind::Ota,
+                    .gain = amplifier.gain,
+                    .minimum_output = amplifier.minimum_output,
+                    .maximum_output = amplifier.maximum_output,
+                    .max_step = amplifier.max_step};
+                if (!ValidateNonlinearAmplifierModel(model)) {
+                    return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+                }
             }
         }
         if (component.type == CircuitComponentType::Triode) {
@@ -1219,8 +1561,20 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             const CoupledInductorModel model{item.turns_ratio, item.magnetizing_inductance,
                 item.primary_leakage_inductance, item.secondary_leakage_inductance,
                 item.primary_resistance, item.secondary_resistance};
-            if (item.kind != "lossy-linear" || item.model_version != 1U ||
-                !ValidateCoupledInductorModel(model)) {
+            const NonlinearTransformerCoreModel nonlinear_model{
+                .magnetizing_inductance = item.magnetizing_inductance,
+                .saturation_flux = item.saturation_flux,
+                .hysteresis_width = item.hysteresis_width,
+                .hysteresis_rate = item.hysteresis_rate,
+                .remanent_flux = item.remanent_flux,
+                .max_flux = item.max_flux,
+                .max_current = item.max_current,
+                .max_step = item.max_step};
+            if (item.model_version != 1U ||
+                (item.kind != "lossy-linear" && item.kind != "saturating-hysteretic") ||
+                !ValidateCoupledInductorModel(model) ||
+                (item.kind == "saturating-hysteretic" &&
+                 !ValidateNonlinearTransformerCoreModel(nonlinear_model))) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
             }
         }
@@ -1283,7 +1637,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
     const auto controlled_voltage_source_count = static_cast<std::uint32_t>(std::count_if(
         circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
             return component.type == CircuitComponentType::IdealOpAmp ||
-                   component.type == CircuitComponentType::OpAmp;
+                   (component.type == CircuitComponentType::OpAmp && component.amplifier_model.has_value() &&
+                    component.amplifier_model->kind != "generic-dynamic");
         }));
     const auto branch_count = voltage_source_count + inductor_count + coupled_inductor_branch_count +
                               controlled_voltage_source_count;
@@ -1353,10 +1708,32 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                                     .reverse_beta = bjt.reverse_beta,
                                                     .thermal_voltage = bjt.thermal_voltage,
                                                     .max_current = bjt.max_current,
-                                                    .max_step = bjt.max_step}};
-            if (!ValidateNonlinearBjtModel(element.nonlinear_bjt_model)) {
+                                                    .max_step = bjt.max_step},
+                                                .nonlinear_bjt_dynamic_model = {
+                                                    .static_model = {
+                                                        .polarity = bjt.polarity == "npn" ? BjtPolarity::Npn : BjtPolarity::Pnp,
+                                                        .saturation_current = bjt.saturation_current,
+                                                        .forward_beta = bjt.forward_beta,
+                                                        .reverse_beta = bjt.reverse_beta,
+                                                        .thermal_voltage = bjt.thermal_voltage,
+                                                        .max_current = bjt.max_current,
+                                                        .max_step = bjt.max_step},
+                                                    .early_voltage = bjt.early_voltage,
+                                                    .be_junction_capacitance = bjt.be_junction_capacitance,
+                                                    .bc_junction_capacitance = bjt.bc_junction_capacitance,
+                                                    .be_junction_potential = bjt.be_junction_potential,
+                                                    .bc_junction_potential = bjt.bc_junction_potential,
+                                                    .be_grading_coefficient = bjt.be_grading_coefficient,
+                                                    .bc_grading_coefficient = bjt.bc_grading_coefficient,
+                                                    .temperature_celsius = bjt.temperature_celsius,
+                                                    .leakage_temperature_coefficient = bjt.leakage_temperature_coefficient}};
+            if (!ValidateNonlinearBjtDynamicModel(element.nonlinear_bjt_dynamic_model)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
+            element.bjt_be_history_index = static_cast<std::uint32_t>(prepared.bjt_be_history_.size());
+            prepared.bjt_be_history_.push_back(0.0);
+            element.bjt_bc_history_index = static_cast<std::uint32_t>(prepared.bjt_bc_history_.size());
+            prepared.bjt_bc_history_.push_back(0.0);
             prepared.elements_.push_back(element);
             continue;
         }
@@ -1392,6 +1769,21 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             element.secondary_initial = component.secondary_initial_current.value_or(0.0);
             element.coupled_inductor_model = model;
             element.coupled_inductor_coefficients = *coefficients;
+            if (item.kind == "saturating-hysteretic") {
+                element.transformer_core_history_index =
+                    static_cast<std::uint32_t>(prepared.transformer_core_history_.size());
+                element.nonlinear_transformer_core_model = {
+                    .magnetizing_inductance = item.magnetizing_inductance,
+                    .saturation_flux = item.saturation_flux,
+                    .hysteresis_width = item.hysteresis_width,
+                    .hysteresis_rate = item.hysteresis_rate,
+                    .remanent_flux = item.remanent_flux,
+                    .max_flux = item.max_flux,
+                    .max_current = item.max_current,
+                    .max_step = item.max_step};
+                prepared.transformer_core_history_.push_back({
+                    .flux = item.remanent_flux, .hysteresis = item.remanent_flux});
+            }
             prepared.elements_.push_back(element);
             continue;
         }
@@ -1425,10 +1817,29 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                                     .pinch_off_voltage = jfet.pinch_off_voltage,
                                                     .transconductance_parameter = jfet.transconductance_parameter,
                                                     .max_current = jfet.max_current,
-                                                    .max_step = jfet.max_step}};
-            if (!ValidateNonlinearJfetModel(element.nonlinear_jfet_model)) {
+                                                    .max_step = jfet.max_step},
+                                                .nonlinear_jfet_dynamic_model = {
+                                                    .static_model = {
+                                                        .polarity = jfet.polarity == "n-channel" ? JfetPolarity::NChannel : JfetPolarity::PChannel,
+                                                        .pinch_off_voltage = jfet.pinch_off_voltage,
+                                                        .transconductance_parameter = jfet.transconductance_parameter,
+                                                        .max_current = jfet.max_current,
+                                                        .max_step = jfet.max_step},
+                                                    .channel_length_modulation = jfet.channel_length_modulation,
+                                                    .temperature_celsius = jfet.temperature_celsius,
+                                                    .gate_saturation_current = jfet.gate_saturation_current,
+                                                    .gate_thermal_voltage = jfet.gate_thermal_voltage,
+                                                    .gate_junction_capacitance = jfet.gate_junction_capacitance,
+                                                    .gate_junction_potential = jfet.gate_junction_potential,
+                                                    .gate_grading_coefficient = jfet.gate_grading_coefficient,
+                                                    .gate_leakage_temperature_coefficient = jfet.gate_leakage_temperature_coefficient}};
+            if (!ValidateNonlinearJfetDynamicModel(element.nonlinear_jfet_dynamic_model)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
+            element.jfet_gs_history_index = static_cast<std::uint32_t>(prepared.jfet_gs_history_.size());
+            prepared.jfet_gs_history_.push_back(0.0);
+            element.jfet_gd_history_index = static_cast<std::uint32_t>(prepared.jfet_gd_history_.size());
+            prepared.jfet_gd_history_.push_back(0.0);
             prepared.elements_.push_back(element);
             continue;
         }
@@ -1438,6 +1849,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
             }
             const auto& mosfet = *component.mosfet_model;
+            const bool dynamic_mosfet = mosfet.kind == "generic-dynamic" && mosfet.model_version == 2U;
             MnaPreparedCircuit::Element element{.type = CircuitComponentType::Mosfet,
                                                 .positive_node = positive,
                                                 .negative_node = negative,
@@ -1467,6 +1879,26 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                                     .max_step = mosfet.max_step}};
             if (!ValidateNonlinearMosfetModel(element.nonlinear_mosfet_model)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            if (dynamic_mosfet) {
+                element.nonlinear_mosfet_dynamic_model = {
+                    .static_model = element.nonlinear_mosfet_model,
+                    .channel_length_modulation = mosfet.channel_length_modulation,
+                    .subthreshold_current = mosfet.subthreshold_current,
+                    .subthreshold_slope_voltage = mosfet.subthreshold_slope_voltage,
+                    .temperature_celsius = mosfet.temperature_celsius,
+                    .body_diode_saturation_current = mosfet.body_diode_saturation_current,
+                    .body_diode_thermal_voltage = mosfet.body_diode_thermal_voltage,
+                    .gate_junction_capacitance = mosfet.gate_junction_capacitance,
+                    .gate_junction_potential = mosfet.gate_junction_potential,
+                    .gate_grading_coefficient = mosfet.gate_grading_coefficient};
+                if (!ValidateNonlinearMosfetDynamicModel(element.nonlinear_mosfet_dynamic_model)) {
+                    return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+                }
+                element.mosfet_gs_history_index = static_cast<std::uint32_t>(prepared.mosfet_gs_history_.size());
+                prepared.mosfet_gs_history_.push_back(0.0);
+                element.mosfet_gd_history_index = static_cast<std::uint32_t>(prepared.mosfet_gd_history_.size());
+                prepared.mosfet_gd_history_.push_back(0.0);
             }
             prepared.elements_.push_back(element);
             continue;
@@ -1607,7 +2039,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             element.negative_node = negative;
             element.control_positive_node = control_positive;
             element.control_negative_node = control_negative;
-            element.branch_index = component.type == CircuitComponentType::OpAmp
+            element.branch_index = component.type == CircuitComponentType::OpAmp && amplifier.kind != "generic-dynamic"
                 ? non_ground_nodes + branch++ : kNoIndex;
             element.initial = component.initial.value_or(0.0);
             element.nonlinear_amplifier_model = {
@@ -1617,7 +2049,21 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 .minimum_output = amplifier.minimum_output,
                 .maximum_output = amplifier.maximum_output,
                 .max_step = amplifier.max_step};
-            if (!ValidateNonlinearAmplifierModel(element.nonlinear_amplifier_model)) {
+            if (amplifier.kind == "generic-dynamic") {
+                element.opamp_dynamic_history_index = static_cast<std::uint32_t>(prepared.opamp_dynamic_history_.size());
+                prepared.opamp_dynamic_history_.push_back(element.initial);
+                element.nonlinear_opamp_dynamic_model = {
+                    .gain = amplifier.gain, .gain_bandwidth_hz = amplifier.gain_bandwidth_hz,
+                    .slew_rate = amplifier.slew_rate, .input_resistance = amplifier.input_resistance,
+                    .input_bias_current = amplifier.input_bias_current, .input_offset = amplifier.input_offset,
+                    .output_resistance = amplifier.output_resistance, .output_current_limit = amplifier.output_current_limit,
+                    .supply_minimum = amplifier.supply_minimum, .supply_maximum = amplifier.supply_maximum,
+                    .minimum_output = amplifier.minimum_output, .maximum_output = amplifier.maximum_output,
+                    .max_step = amplifier.max_step};
+                if (!ValidateNonlinearOpAmpDynamicModel(element.nonlinear_opamp_dynamic_model)) {
+                    return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+                }
+            } else if (!ValidateNonlinearAmplifierModel(element.nonlinear_amplifier_model)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
             prepared.elements_.push_back(element);
@@ -1689,9 +2135,19 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 .breakdown_current = component.diode_model->breakdown_current,
                 .breakdown_slope = component.diode_model->breakdown_slope,
                 .max_step = component.diode_model->max_step};
-            if (!ValidateNonlinearDeviceModel(element.nonlinear_model)) {
+            element.nonlinear_diode_dynamic_model = {
+                .static_model = element.nonlinear_model,
+                .junction_capacitance = component.diode_model->junction_capacitance,
+                .junction_potential = component.diode_model->junction_potential,
+                .grading_coefficient = component.diode_model->grading_coefficient,
+                .temperature_celsius = component.diode_model->temperature_celsius,
+                .leakage_current = component.diode_model->leakage_current,
+                .leakage_temperature_coefficient =
+                    component.diode_model->leakage_temperature_coefficient};
+            if (!ValidateNonlinearDiodeDynamicModel(element.nonlinear_diode_dynamic_model)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
+            element.history_index = history++;
         }
         prepared.elements_.push_back(element);
     }
@@ -1763,6 +2219,15 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
                 return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
             }
             const auto& record = *result.model;
+            if (component.type == CircuitComponentType::OpAmp &&
+                ModelParameter(record, "gain-bandwidth").has_value()) {
+                CircuitAmplifierModel dynamic_bound{};
+                if (!BindAuditedDynamicOpAmpModel(record, dynamic_bound)) {
+                    return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+                }
+                component.amplifier_model = dynamic_bound;
+                continue;
+            }
             const auto turns_ratio = ModelParameter(record, "turns-ratio");
             const auto magnetizing = ModelParameter(record, "magnetizing-inductance");
             const auto primary_leakage = ModelParameter(record, "primary-leakage-inductance");
@@ -1773,15 +2238,24 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
                 !primary_resistance || !secondary_resistance) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
+            const bool nonlinear = record.model_id ==
+                "solorig.cleanroom.transformer-core.saturating-hysteretic.v1";
             component.coupled_inductor_model = CircuitCoupledInductorModel{
-                .kind = "lossy-linear",
+                .kind = nonlinear ? "saturating-hysteretic" : "lossy-linear",
                 .model_version = 1U,
                 .turns_ratio = *turns_ratio,
                 .magnetizing_inductance = *magnetizing,
                 .primary_leakage_inductance = *primary_leakage,
                 .secondary_leakage_inductance = *secondary_leakage,
                 .primary_resistance = *primary_resistance,
-                .secondary_resistance = *secondary_resistance};
+                .secondary_resistance = *secondary_resistance,
+                .saturation_flux = ModelParameter(record, "saturation-flux").value_or(1.0),
+                .hysteresis_width = ModelParameter(record, "hysteresis-width").value_or(0.1),
+                .hysteresis_rate = ModelParameter(record, "hysteresis-rate").value_or(1000.0),
+                .remanent_flux = ModelParameter(record, "remanent-flux").value_or(0.0),
+                .max_flux = ModelParameter(record, "max-flux").value_or(2.0),
+                .max_current = ModelParameter(record, "max-current").value_or(10.0),
+                .max_step = ModelParameter(record, "max-step").value_or(1.0)};
             continue;
         }
         if (component.type == CircuitComponentType::Bjt) {
@@ -1789,22 +2263,11 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
             if (!result.model.has_value() || !result.model->polarity.has_value()) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
             }
-            const auto& record = *result.model;
-            const auto saturation = ModelParameter(record, "saturation-current");
-            const auto forward_beta = ModelParameter(record, "forward-beta");
-            const auto reverse_beta = ModelParameter(record, "reverse-beta");
-            const auto thermal = ModelParameter(record, "thermal-voltage");
-            const auto max_current = ModelParameter(record, "max-current");
-            const auto max_step = ModelParameter(record, "max-step");
-            if (!saturation.has_value() || !forward_beta.has_value() || !reverse_beta.has_value() ||
-                !thermal.has_value() || !max_current.has_value() || !max_step.has_value()) {
+            CircuitBjtModel dynamic_bound{};
+            if (!BindAuditedBjtModel(*result.model, dynamic_bound)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
-            component.bjt_model = CircuitBjtModel{
-                .kind = "ebers-moll", .model_version = 1U, .polarity = *record.polarity,
-                .saturation_current = *saturation, .forward_beta = *forward_beta,
-                .reverse_beta = *reverse_beta, .thermal_voltage = *thermal,
-                .max_current = *max_current, .max_step = *max_step};
+            component.bjt_model = dynamic_bound;
             continue;
         }
         if (component.type == CircuitComponentType::Jfet) {
@@ -1812,19 +2275,11 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
             if (!result.model.has_value() || !result.model->polarity.has_value()) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
             }
-            const auto& record = *result.model;
-            const auto pinch_off = ModelParameter(record, "pinch-off-voltage");
-            const auto transconductance = ModelParameter(record, "transconductance-parameter");
-            const auto max_current = ModelParameter(record, "max-current");
-            const auto max_step = ModelParameter(record, "max-step");
-            if (!pinch_off.has_value() || !transconductance.has_value() ||
-                !max_current.has_value() || !max_step.has_value()) {
+            CircuitJfetModel dynamic_jfet_bound{};
+            if (!BindAuditedJfetModel(*result.model, dynamic_jfet_bound)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
-            component.jfet_model = CircuitJfetModel{
-                .kind = "square-law", .model_version = 1U, .polarity = *record.polarity,
-                .pinch_off_voltage = *pinch_off, .transconductance_parameter = *transconductance,
-                .max_current = *max_current, .max_step = *max_step};
+            component.jfet_model = dynamic_jfet_bound;
             continue;
         }
         if (component.type == CircuitComponentType::Mosfet) {
@@ -1832,19 +2287,11 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
             if (!result.model.has_value() || !result.model->polarity.has_value()) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
             }
-            const auto& record = *result.model;
-            const auto threshold = ModelParameter(record, "threshold-voltage");
-            const auto transconductance = ModelParameter(record, "transconductance-parameter");
-            const auto max_current = ModelParameter(record, "max-current");
-            const auto max_step = ModelParameter(record, "max-step");
-            if (!threshold.has_value() || !transconductance.has_value() ||
-                !max_current.has_value() || !max_step.has_value()) {
+            CircuitMosfetModel mosfet_bound{};
+            if (!BindAuditedMosfetModel(*result.model, mosfet_bound)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
-            component.mosfet_model = CircuitMosfetModel{
-                .kind = "enhancement-square-law", .model_version = 1U, .polarity = *record.polarity,
-                .threshold_voltage = *threshold, .transconductance_parameter = *transconductance,
-                .max_current = *max_current, .max_step = *max_step};
+            component.mosfet_model = mosfet_bound;
             continue;
         }
         if (component.type == CircuitComponentType::OpAmp || component.type == CircuitComponentType::Ota) {
@@ -1967,27 +2414,10 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
         if (record == nullptr) {
             return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
         }
-        const auto saturation = ModelParameter(*record, "saturation-current");
-        const auto thermal = ModelParameter(*record, "thermal-voltage");
-        const auto max_step = ModelParameter(*record, "max-step");
-        const auto breakdown_voltage = ModelParameter(*record, "breakdown-voltage");
-        const auto breakdown_current = ModelParameter(*record, "breakdown-current");
-        const auto breakdown_slope = ModelParameter(*record, "breakdown-slope");
-        const bool is_zener = record->kind == ModelKind::Zener;
-        if (!saturation.has_value() || !thermal.has_value() || !max_step.has_value() ||
-            (is_zener && (!breakdown_voltage.has_value() || !breakdown_current.has_value() ||
-                           !breakdown_slope.has_value()))) {
+        component.diode_model.emplace();
+        if (!BindAuditedDiodeModel(*record, *component.diode_model)) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
         }
-        component.diode_model = CircuitDiodeModel{
-            .kind = is_zener ? "zener" : "shockley",
-            .model_version = 1U,
-            .saturation_current = *saturation,
-            .thermal_voltage = *thermal,
-            .breakdown_voltage = breakdown_voltage.value_or(0.0),
-            .breakdown_current = breakdown_current.value_or(0.0),
-            .breakdown_slope = breakdown_slope.value_or(0.0),
-            .max_step = *max_step};
     }
     return CompileMnaCircuit(bound);
 }

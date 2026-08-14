@@ -4,7 +4,7 @@
 
 ## 结论
 
-当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 diode/Zener、BJT、JFET、MOSFET、bounded opamp/OTA、triode、generic pentode、generic beam tetrode、generic vari-mu 和受限 lossy-linear coupled-inductor 等通用模型；M18-C8a 已由 `f33664a` 提交并通过全量门禁。它可以作为简单模拟削波、Fuzz、Boost、滤波、音调网络、部分运放/OTA、电子管级电路和线性耦合电感网络的结构基础。
+当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 diode/Zener、BJT、JFET、MOSFET、bounded opamp/OTA、triode、generic pentode、generic beam tetrode、generic vari-mu、受限 lossy-linear coupled-inductor 和 generic saturating-hysteretic transformer/core 模型。M18-C9a 当前在工作树增加 self-authored clean-room generic diode/Zener 结电容、静态温度和漏电修正，仍在本地验收，不构成商业器件或 1:1 证据。
 
 当前仍不能宣称覆盖“绝大多数单块效果器和箱头”。主要阻塞不只是元件数量，还包括实时旋钮/开关、行为模块、复杂拓扑编译、器件高阶物理、功放与电源/负载交互，以及 SPICE/golden/实机误差验证。
 
@@ -47,25 +47,25 @@
 
 | 元件/能力 | 状态 | 当前边界 |
 | --- | --- | --- |
-| Shockley diode | 已交付 | 通用静态 IV/Jacobian；没有结电容、反向恢复、温度和噪声。 |
-| Zener | 已交付 | 通用双指数静态模型；没有商业型号校准和动态击穿行为。 |
-| NPN/PNP BJT | 已交付 | clean-room Ebers-Moll v1；没有 Early 效应、结电容/电荷存储、击穿、温度/自热和噪声。 |
-| N/P channel JFET | 已交付 | 通用对称 square-law v1；栅极电流为零，没有 PN 栅结、寄生电容、沟道长度调制和击穿。 |
-| N/P channel MOSFET | 已交付 | 通用 enhancement square-law v1；没有 body 端、body diode/effect、亚阈值、寄生电容/电荷和沟道长度调制。 |
-| bounded opamp | 已交付 | 无频率状态的有界电压放大器；没有供电脚、阻抗、偏置/失调、共模范围、slew rate、GBW/极点、PSRR/CMRR 和噪声。 |
+| Shockley diode | 本地候选 | 保持通用静态 IV/Jacobian，C9a 新增 generic 电压相关结电容、BE 历史、静态温度/漏电修正和解析 Jacobian；没有反向恢复、噪声或商业型号校准。 |
+| Zener | 本地候选 | 在双指数静态模型上复用 C9a 动态结状态和温度/漏电修正；没有商业型号校准或 reverse-recovery/载流子存储。 |
+| NPN/PNP BJT | 本地候选（M18-C9b 实施中） | clean-room Ebers-Moll v1 兼容，并增加 generic Early 有限输出、BE/BC depletion companion 与静态温度修正；不含 charge-storage/reverse-recovery、击穿、自热、噪声或商业器件语义。 |
+| N/P channel JFET | 本地候选（M18-C9c 实施中） | clean-room square-law v1 兼容，并增加有限 channel-length modulation、静态温度、GS/GD PN leakage 与 depletion companion；不含 avalanche、charge storage、reverse recovery、自热、噪声或商业器件语义。 |
+| N/P channel MOSFET | 本地候选（M18-C9d 实施中） | enhancement square-law v1 兼容，并增加沟道 CLM/subthreshold、静态温度、source-tied body-to-drain PN 支路和 GS/GD depletion companion；沟道保持 drain/source 对称，body diode 固定方向并有意打破整体对称；不含 bulk 第四端、body-effect、复杂电荷、avalanche、自热、SOA、噪声或商业器件语义。 |
+| bounded opamp | 已交付；C9e dynamic opamp 本地候选（实施中） | v1 为无频率状态的有界电压放大器；C9e 沿用四端拓扑增加有限 GBW/主极点、slew、输入偏置/失调、输入/输出阻抗、输出限流、内部供电轨边界和 Reset 状态，不含显式供电脚或商业芯片语义。 |
 | bounded OTA | 已交付 | 无频率状态的有界跨导放大器；没有真实芯片控制、电源、频率和噪声特性。 |
 | triode | 已交付 | M18-C6 generic space-charge v1 已由 `667d1f2` 提交；没有栅极导通/漏电、极间电容、加热器、温度、自热、老化、microphonics 和商业管参数。 |
 | pentode | 已交付 | M18-C7a generic space-charge/screen-share v1 已由 `cd5f1bc` 提交；没有商业管型、真实 suppressor-grid/beam-forming、secondary emission、反向/栅极导通、动态电容和热行为。 |
 | beam tetrode | 已交付 | M18-C7b generic beam-capture v1 已由 `75f061d` 提交；平方有理 capture 不是实际 beam-forming，不含 secondary-emission kink、反向/栅极导通、动态电容、热行为或商业管参数。 |
 | vari-mu | 已交付 | M18-C7c generic 三端 remote-cutoff v1 已由 `bf47d2a` 提交；sidechain/envelope、attack/release、商业管型、动态电容、栅流和热行为不在范围内。 |
-| coupled-inductor / transformer-core | 已交付（受限） | M18-C8a 已由 `f33664a` 提交有损线性四端模型、匝比、绕组电阻、励磁/漏感、双初态和双支路运行时；仅批准 self-authored lossy-linear v1。饱和、磁滞、剩磁及商业变压器留给 C8b/后续。 |
+| coupled-inductor / transformer-core | 部分交付 | C8a `lossy-linear` 保持兼容；C8b 增加独立 `saturating-hysteretic` generic 模型，`magnetizing-inductance` 明确定义零点小信号磁通斜率，并进入 tanh 饱和和 Newton 动态印章；另含磁滞状态、剩磁初态、限幅和双绕组 BE/Reset/过采样路径。没有商业磁芯参数、真实磁滞回线、涡流、温度或 1:1 设备验收。 |
 
 ## 效果器类别覆盖判断
 
 | 效果器类别 | 当前判断 | 主要依据或缺口 |
 | --- | --- | --- |
 | 被动滤波、基础 EQ、音调网络 | 基础可表达 | R/C/L 和静态电位器已具备；实时旋钮和任意复杂拓扑仍受限。 |
-| 二极管削波、限幅、简单整流 | 通用模型可实现 | diode/Zener 已交付；高精度动态二极管和具体型号校准未完成。 |
+| 二极管削波、限幅、简单整流 | 通用模型可实现 | diode/Zener 静态路径已交付，C9a generic 动态结为本地候选；reverse-recovery、高精度电荷模型和具体型号校准未完成。 |
 | 晶体管 Fuzz、Boost、简单失真级 | 通用模型可实现 | BJT/JFET/MOSFET 已交付；高阶寄生、温度、容差和实机校准未完成。 |
 | 运放 Overdrive/Distortion、基础有源滤波 | 结构上可实现 | bounded opamp 已交付；真实运放频率、电源和瞬态限制未完成。 |
 | OTA 压缩、滤波和调制 | 部分可表达 | OTA 核心存在；包络、控制电流、实时参数和具体芯片行为不完整。 |
@@ -115,8 +115,9 @@
 | M18-C7b | generic beam tetrode | 已由 `75f061d` 完成提交；保持真实 beam-forming、secondary emission、商业管型及高阶物理边界。 |
 | M18-C7c | vari-mu | 已由 `bf47d2a` 完成提交；商业管型与压缩器行为仍排除。 |
 | M18-C8a | coupled inductor、lossy-linear transformer/core | 已由 `f33664a` 提交；核心 283/283、C ABI 9/9、VST3 7/7、Windows UI 6/6、CTest 5/5、Validator 47/47、C# 契约；manifest `517fdf472e9d40dd891595daf640c71d`。饱和/磁滞/剩磁留给 C8b。 |
-| M18-C8b | nonlinear transformer/core | 饱和、磁滞、剩磁及采样率/能量稳定性；不得用 C8a 线性模型冒充。 |
-| M18-C9 | 半导体与运放高阶物理 | 补齐二极管动态、BJT/JFET/MOSFET 寄生与温度、真实运放电源/频率/瞬态行为；逐项与参考模型比较。 |
+| M18-C8b | nonlinear transformer/core | 实施中：self-authored generic `saturating-hysteretic` v1，验证饱和、磁滞、剩磁、Reset、采样率/过采样和稳定拒绝边界；不得用 C8a 线性模型冒充商业磁芯。 |
+| M18-C9a | diode/Zener 动态结 | 本地候选：generic depletion 结电容、静态温度/漏电修正、BE/Reset/过采样/外部 runtime；不含 reverse-recovery、商业型号或 SPICE 等价。 |
+| M18-C9b+ | 其余半导体与运放高阶物理 | BJT/JFET/MOSFET 寄生与温度、真实运放电源/频率/瞬态行为仍待后续逐项授权与验证。 |
 | M18-C10 | 电源与负载交互 | 整流、纹波、Sag、供电恢复、扬声器动态阻抗及功放反馈联调。 |
 | M18-D1 | 实时控制和跨网络语义 | 电位器、开关、继电器、供电和子电路参数经有界实时邮箱更新，具备平滑、状态、自动化和 Reset 测试。 |
 | M18-D2 | 行为模块 | BBD/delay、VCO/VCA、envelope/LFO、光耦/LDR/灯泡、spring 可运行绑定和跨网络测试。 |

@@ -1,0 +1,22 @@
+{
+  "version":1,"schema":"solorig-model-audit","modelId":"solorig.cleanroom.jfet.dynamic.n.v2",
+  "deviceFamily":"clean-room-jfet-dynamic","partNumber":"self-authored-n-channel-dynamic-no-commercial-part",
+  "modelKind":"jfet","polarity":"n-channel","runtimeStatus":"approved",
+  "parameters":[
+    {"id":"pinch-off-voltage","default":1.0,"min":1.0e-6,"max":100.0,"unit":"V"},
+    {"id":"transconductance-parameter","default":0.001,"min":1.0e-12,"max":1.0e6,"unit":"A/V^2"},
+    {"id":"max-current","default":0.01,"min":1.0e-12,"max":1.0e6,"unit":"A"},
+    {"id":"max-step","default":0.5,"min":1.0e-20,"max":10.0,"unit":"V"},
+    {"id":"channel-length-modulation","default":0.1,"min":0.0,"max":10.0,"unit":"1/V"},
+    {"id":"temperature-celsius","default":25.0,"min":-100.0,"max":200.0,"unit":"degC"},
+    {"id":"gate-saturation-current","default":1.0e-12,"min":0.0,"max":1.0,"unit":"A"},
+    {"id":"gate-thermal-voltage","default":0.02585,"min":1.0e-6,"max":1.0,"unit":"V"},
+    {"id":"gate-junction-capacitance","default":2.0e-12,"min":0.0,"max":1.0e-3,"unit":"F"},
+    {"id":"gate-junction-potential","default":0.7,"min":1.0e-3,"max":100.0,"unit":"V"},
+    {"id":"gate-grading-coefficient","default":0.5,"min":0.0,"max":1.0,"unit":"1"},
+    {"id":"gate-leakage-temperature-coefficient","default":0.01,"min":-0.1,"max":0.1,"unit":"1/K"}
+  ],
+  "source":{"origin":"SoloRig self-authored clean-room mathematical contract","version":"m18c9c-v2","integrity":"self:m18c9c-n-v2"},
+  "license":{"spdx":"MIT","permissionEvidence":"self-authored-clean-room","reviewStatus":"approved"},
+  "applicability":[{"quantity":"terminal-voltage","min":-20.0,"max":20.0,"unit":"V"}],"evidenceRefs":["test:m18c9c-jfet-dynamic"]
+}

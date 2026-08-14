@@ -482,3 +482,19 @@ TEST_CASE("M18-C8a audits and binds only complete clean-room lossy-linear transf
     REQUIRE(transformer != contracts.end());
     REQUIRE(transformer->availability == solo_rig::ModelAvailability::Approved);
 }
+
+TEST_CASE("M18-C8b audits and binds only the generic saturating-hysteretic transformer model") {
+    const auto built = solo_rig::BuildModelDatabase(
+        ReadFixture("m18c8b_cleanroom_transformer_model.json"));
+    REQUIRE(built.error == std::nullopt);
+    REQUIRE(built.database.has_value());
+    REQUIRE(built.database->Bind({
+        "solorig.cleanroom.transformer-core.saturating-hysteretic.v1",
+        solo_rig::ModelKind::TransformerCore}).model.has_value());
+    const auto contracts = solo_rig::ModelKindContracts();
+    const auto transformer = std::find_if(contracts.begin(), contracts.end(), [](const auto& item) {
+        return item.kind == solo_rig::ModelKind::TransformerCore;
+    });
+    REQUIRE(transformer != contracts.end());
+    REQUIRE(transformer->availability == solo_rig::ModelAvailability::Approved);
+}

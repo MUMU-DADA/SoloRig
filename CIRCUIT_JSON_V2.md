@@ -45,15 +45,15 @@
 | `capacitor` | 支持 | 支持 | backward-Euler 电压历史，`initial` 为伏特 |
 | `inductor` | 支持 | 支持 | backward-Euler 分支电流历史，`value` 为亨利、`initial` 为安培 |
 | `voltage-source` | 支持 | 支持 | 额外 MNA branch unknown，`value` 为伏特 |
-| `diode` | 支持 | 支持 | M18-C1 统一 IV/Jacobian + 有界 Newton；inline `shockley`/`zener` clean-room 数学模型，或经 `ModelDatabase` 审计的安全字符串引用 |
+| `diode` | 支持 | 支持 | M18-C1 静态 IV/Jacobian + 有界 Newton；C9a 可选 generic 结电容、静态温度/漏电修正和 BE 结电压历史；inline `shockley`/`zener` 或经 `ModelDatabase` 审计的安全字符串引用 |
 | `potentiometer` | 支持 | 支持静态位置 | `value` 为总阻值；`potentiometer.position/minimum/maximum` 定义位置，`wiperNode` 或第三引脚定义滑片；Compile 时展开为两个预编译电阻 |
 | `vccs` | 支持 | 支持 | 四引脚 `[out+, out-, control+, control-]`；`controlledSource.kind=vccs`、`modelVersion=1`、有限 `gain`，可选电流限幅 |
 | `ideal-op-amp` | 支持 | 支持基础理想 VCVS | 四引脚 `[out+, out-, non-inverting, inverting]`；有限正 `gain`，可选输出电压限幅；不是非理想芯片模型 |
-| `opamp` | 支持 | 支持 clean-room bounded voltage-amplifier Newton | 四引脚 `[out+, out-, non-inverting, inverting]`；inline `amplifierModel.kind=bounded-opamp` 或经 `ModelDatabase` 审计的安全字符串引用 |
+| `opamp` | 支持 | 支持 clean-room bounded v1 与 generic-dynamic v2 Newton/BE | 四引脚 `[out+, out-, non-inverting, inverting]`；inline `amplifierModel.kind=bounded-opamp`/`generic-dynamic` 或经 `ModelDatabase` 审计的安全字符串引用 |
 | `ota` | 支持 | 支持 clean-room bounded transconductance-amplifier Newton | 四引脚 `[out+, out-, non-inverting, inverting]`；inline `amplifierModel.kind=bounded-ota` 或经 `ModelDatabase` 审计的安全字符串引用 |
-| `bjt` | 支持 | 支持 clean-room Ebers-Moll Newton | 三引脚 `[collector, base, emitter]`；兼容 inline `bjtModel`，或由 `ModelDatabase` 按 BJT 类型/极性绑定的安全字符串引用；`initial` 是基极节点电压初始猜测 |
-| `jfet` | 支持 | 支持 clean-room square-law Newton | 三引脚 `[drain, gate, source]`；兼容 inline `jfetModel`，或由 `ModelDatabase` 按 JFET 类型/极性绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
-| `mosfet` | 支持 | 支持 clean-room enhancement square-law Newton | 三引脚 `[drain, gate, source]`；兼容 inline `mosfetModel`，或由 `ModelDatabase` 按 MOSFET 类型/极性绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
+| `bjt` | 支持 | 支持 clean-room Ebers-Moll 与 C9b generic-dynamic Newton | 三引脚 `[collector, base, emitter]`；兼容 inline `bjtModel`，或由 `ModelDatabase` 按 BJT 类型/极性绑定的安全字符串引用；`initial` 是基极节点电压初始猜测，并作为 BE/BC 两路共同的极性归一化历史初态 |
+| `jfet` | 支持 | 支持 clean-room square-law 与 C9c generic-dynamic Newton | 三引脚 `[drain, gate, source]`；兼容 inline `jfetModel`，或由 `ModelDatabase` 按 JFET 类型/极性绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测，并作为 GS/GD 两路共同历史初态 |
+| `mosfet` | 支持 | 支持 clean-room enhancement square-law 与 C9d generic-dynamic Newton | 三引脚 `[drain, gate, source]`；body 永久 tied to source，不暴露第四端；兼容 inline `mosfetModel`，或由 `ModelDatabase` 按 MOSFET 类型/极性绑定的安全字符串引用；`initial` 是两路 GS/GD 历史共同初态 |
 | `triode` | 支持 | 支持 clean-room space-charge Newton | 三引脚 `[plate, grid, cathode]`；兼容 inline `triodeModel`，或由 `ModelDatabase` 按 triode 类型绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
 | `pentode` | 支持 | 支持 clean-room space-charge/screen-share Newton | 四引脚 `[plate, screen, grid, cathode]`；兼容 inline `pentodeModel`，或由 `ModelDatabase` 按 pentode 类型绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
 | `beam-tetrode` | 支持 | 支持 clean-room beam-capture Newton | 四引脚 `[plate, screen, grid, cathode]`；兼容 inline `beamTetrodeModel.kind=beam-capture`，或由 `ModelDatabase` 按 beam-tetrode 类型绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
@@ -65,13 +65,15 @@
 
 编译和 `Prepare` 阶段完成节点/分支/历史索引、矩阵和所有工作缓冲的分配；音频 `Process` 只复用这些缓冲，不读文件、不解析 JSON、不动态分配。外部 `module.json` 引用 v2 `logic/*.json` 时，加载器在非实时线程完成解析和编译，`MnaCircuitRuntime::Prepare` 为每个声道复制并准备状态，`Process` 实际调用统一 MNA 求解器。
 
-BJT 使用统一 `EvaluateNonlinearBjt` 的三端 Ebers-Moll 电流和完整显式 Jacobian：`forwardBeta`/`reverseBeta` 转换为正反向 transport alpha，`polarity` 决定 NPN/PNP 的结电压方向。指数自变量限制在 `[-60, 60]`，结电流限制在 `maxCurrent`，钳位分支的 Jacobian 与返回电流保持一致；Newton 的 BE/BC 结电压步长由 `maxStep` 阻尼。超过 `maxIterations` 或矩阵奇异时返回确定的 `NonConvergent`/`SingularMatrix`。审计字符串引用只在 `CompileMnaCircuit(circuit, ModelDatabase)` 或 `CreateModuleRuntime(package, ModelDatabase)` 的控制线程/Prepare 边界绑定为 POD，普通编译稳定返回 `MissingModelAuthorization`。该 clean-room v1 不包含结电容、Early 效应、热反馈、噪声、击穿或商业器件参数。
+BJT 使用统一三端 evaluator：`kind=ebers-moll, modelVersion=1` 保持旧六参数结果；`kind=generic-dynamic, modelVersion=2` 增加 Early 有限输出因子、BE/BC depletion companion、静态温度修正和完整显式 3x3 Jacobian。动态字段单位为 `earlyVoltage(V)`、两路 `*JunctionCapacitance(F)`、两路 `*JunctionPotential(V)`、两路 `*GradingCoefficient(1)`、`temperatureCelsius(degC)` 和 `leakageTemperatureCoefficient(1/K)`，范围与项目契约一致。BE/BC 历史在每个 oversampling 子步收敛后更新，Reset 恢复共同的 `initial` 极性归一化初态；超过 `maxIterations` 或矩阵奇异时返回确定的 `NonConvergent`/`SingularMatrix`。审计字符串引用只在 `CompileMnaCircuit(circuit, ModelDatabase)` 或 `CreateModuleRuntime(package, ModelDatabase)` 的控制线程/Prepare 边界绑定为 POD，普通编译稳定返回 `MissingModelAuthorization`。该 clean-room 模型不包含 charge-storage/reverse-recovery、击穿、self-heating、噪声、SOA、商业器件参数或 SPICE/1:1 等价。
 
-JFET 使用统一 `EvaluateNonlinearJfet` 的三端对称 square-law 沟道电流和完整显式 Jacobian：`polarity` 选择 N/P channel 镜像，正向与反向沟道按 drain/source 方向对称处理，cutoff、线性区和饱和区均有独立有限差分证据。`maxCurrent` 在平方乘法前钳位，钳位分支导数为零并与返回电流一致；`maxStep` 对 VGS/VDS Newton 步长阻尼。审计引用在同一 Prepare 边界绑定为 POD。该 clean-room v1 的 gate current 为零，不包含 PN gate junction、电容/电荷、沟道长度调制、击穿、温度、自热、噪声或商业参数。
+JFET 的 `kind=square-law, modelVersion=1` 保持旧四参数结果；`kind=generic-dynamic, modelVersion=2` 增加有限 channel-length modulation、温度修正、GS/GD PN gate leakage 与 depletion companion。动态字段单位为 `channelLengthModulation(1/V)`、`temperatureCelsius(degC)`、`gateSaturationCurrent(A)`、`gateThermalVoltage(V)`、`gateJunctionCapacitance(F)`、`gateJunctionPotential(V)`、`gateGradingCoefficient(1)` 和 `gateLeakageTemperatureCoefficient(1/K)`，范围与 C9c 契约一致。两路历史在每个 oversampling 子步收敛后更新，Reset 恢复共同 `initial` 极性归一化初态；审计引用在同一 Prepare 边界绑定为 POD。该 clean-room 模型不包含 avalanche、charge-storage/reverse-recovery、self-heating、噪声、商业参数或 SPICE/1:1。
 
-MOSFET 使用统一 `EvaluateNonlinearMosfet` 的三端对称 enhancement-mode square-law 沟道电流和完整显式 Jacobian：`thresholdVoltage` 定义正的阈值幅度，`polarity` 选择 N/P channel 镜像，正向与反向沟道按 drain/source 方向对称处理，cutoff、triode 和 saturation 区均有独立有限差分证据。`maxCurrent` 在平方乘法前钳位，钳位分支导数为零并与返回电流一致；`maxStep` 对 VGS/VDS Newton 步长阻尼。审计引用在同一 Prepare 边界绑定为 POD。该 clean-room v1 的 gate current 为零，不包含 body/bulk terminal、body diode/effect、亚阈值、沟道长度调制、寄生电容/电荷、击穿、温度、自热、噪声或商业参数。
+MOSFET v1 `enhancement-square-law` 保持旧四参数结果。C9d `generic-dynamic` v2 在三端 POD 上增加有限 channel-length modulation、连续有界 subthreshold、温度修正、source-tied body-to-drain PN 支路和 GS/GD depletion companion；沟道（含 subthreshold/CLM）保持 drain/source 对称，body diode 按 source-body 到 drain 的固定方向产生预期非对称。动态字段分别为 `channelLengthModulation` (1/V)、`subthresholdCurrent` (A)、`subthresholdSlopeVoltage` (V)、`temperatureCelsius` (degC)、`bodyDiodeSaturationCurrent` (A)、`bodyDiodeThermalVoltage` (V)、`gateJunctionCapacitance` (F)、`gateJunctionPotential` (V) 和 `gateGradingCoefficient` (1)，范围见项目契约。所有支路进入同一解析 3x3 Jacobian/Newton 印章；审计引用在 Prepare 绑定并在实时路径只使用 POD。该 clean-room v2 不包含 bulk 第四端、body-effect、Miller/charge partition、avalanche、self-heating、SOA、噪声、商业参数或 SPICE/1:1。
 
 M18-C5 的 `opamp`/`ota` 共用 `EvaluateNonlinearAmplifier` 有界传输 evaluator。运放把差分控制电压乘以 `gain` 后限制到 `minimumOutput`/`maximumOutput`，并以 branch residual 约束输出端电压；OTA 把差分控制电压映射为同样有界的输出电流并注入输出端 KCL。线性分支对正/负控制端的 Jacobian 分别为 `+gain`/`-gain`，硬饱和分支导数为零；乘法前按输入阈值判定饱和，极端有限输入不会先发生增益乘法溢出。`maxStep` 对差分控制电压的 Newton 步长阻尼。审计引用只在 Compile/Prepare 边界绑定为 POD；旧 `ideal-op-amp`/`vccs` 仍是 M9 兼容原语，不作为审计模型证据。
+
+M18-C9e 为 `opamp` 增加 `amplifierModel.kind=generic-dynamic`、`modelVersion=2`。除既有 `gain`、`minimumOutput`、`maximumOutput`、`maxStep` 外，必须提供 `gainBandwidth` (Hz)、`slewRate` (V/s)、`inputResistance` (ohm)、`inputBiasCurrent` (A)、`inputOffset` (V)、`outputResistance` (ohm)、`outputCurrentLimit` (A)、`supplyMinimum`/`supplyMaximum` (V)。四端端电流使用有限输入阻抗和平衡偏置支路；输出采用内部 BE 主极点/slew 状态驱动有限 `Rout` Norton 支路并限流。`initial` 表示输出差分状态初值。供电字段仅是内部输出状态边界，不是显式供电脚，也不表示 PSRR/CMRR 或商业运放宏模型。
 
 M18-C6 的 `triode` 使用统一 `EvaluateNonlinearTriode` 三端 space-charge evaluator。控制量为 `Vgk + Vpk / amplificationFactor`；只有 `Vpk > 0` 且控制量为正时，plate current 才是 `perveance * control^(3/2)`，grid current 为零，cathode current 与 plate current 相反。完整 3x3 Jacobian、KCL 和独立中心有限差分一致；`maxCurrent` 在幂运算前钳位且钳位分支导数为零，`maxStep` 对 Vgk/Vpk Newton 步长阻尼。审计引用只在 Compile/Prepare 边界绑定为 POD。该 generic v1 不包含 heater/filament、grid conduction/leakage、极间电容/电荷、独立高阶 plate resistance、secondary emission、温度/自热、老化、microphonics、噪声或商业管参数。
 
@@ -83,8 +85,12 @@ M18-C7c 的 `vari-mu` 使用独立 `EvaluateNonlinearVariMu` 三端 remote-cutof
 
 M18-C8a 的 `coupled-inductor` 是四端有损线性双绕组。定义 `n=Np/Ns`、`L1=Lm+Llp`、`L2=Lm/n^2+Lls`、`M=Lm/n`；dot 端固定正互感，需要反相时交换任一绕组引脚。每个 backward-Euler 子步预分配两个 branch unknown，分别印章绕组电阻、`L1/dt`、`L2/dt` 和对称 `M/dt` 交叉项，并在子步结束更新两路历史电流；`Reset`/重复 `Prepare` 恢复两个声明初态。模型必须提供正 `turnsRatio`/`magnetizingInductance`、非负两路 leakage/resistance，且 `[[L1,M],[M,L2]]` 严格正定，因此两路漏感不能同时为零。该 v1 只是固定参数 lossy-linear coupled-inductor，不包含饱和、磁滞、剩磁、涡流/频变损耗、寄生电容、温度、自热、商业磁芯或商业变压器参数。
 
+M18-C8b 的 `coupled-inductor` 还接受 `kind=saturating-hysteretic`：沿用同一四端语义和 C8a 绕组参数，新增 `saturationFlux`、`hysteresisWidth`、`hysteresisRate`、`remanentFlux`、`maxFlux`、`maxCurrent`、`maxStep`。其核心曲线为 `flux = saturationFlux * tanh(magnetizingInductance * magnetizingCurrent / saturationFlux) + hysteresis`，所以零点解析 `dflux/dcurrent` 为 `magnetizingInductance`；该必填参数同时进入 Newton 动态印章，不得静默失效。每个 backward-Euler 子步更新共享磁通/磁滞状态，`Reset` 恢复剩磁；它仍不代表真实材料回线、商业变压器、SPICE 等价或 1:1 设备。
+
 模块加载器对旧的 `schemaVersion: 1` + `kind: "analog-circuit"` 保持原受限 RC/二极管适配器；v2 读取根对象的 `version: 2`。未知版本、缺失字段、重复 ID、非法节点/引脚、范围值、缺失模型和危险路径均拒绝加载。v1 不会被静默转换为 v2，v2 也不会回退到旧硬编码拓扑。
 
 M18-C1 的 Zener 使用 self-authored 双指数静态数学契约，参数包括正向饱和电流/热电压、反向击穿电压/电流/斜率和最大 Newton 步长；这不是商业器件参数。安全字符串引用只有通过 `CompileMnaCircuit(circuit, ModelDatabase)` 才能在 Prepare 阶段绑定，普通编译稳定返回 `MissingModelAuthorization`；inline 模型对象不经过数据库，必须按本规范范围校验且只代表 generic clean-room 数学模型。
 
-本版本仍不宣称通用器件覆盖、真实设备 1:1 校准、实时参数控制电位器、开关/受控源控制、真实非理想/商业运放芯片、商业真空管、真实 beam-forming、非线性 transformer core、结电容、Early/热效应、供电下垂或测量基线自动校准；这些属于后续独立范围。M18-C2 至 C8a 已完成相应 generic 主线化，但不构成 PedalKernel 等价、完整输出变压器或完整白盒完成。
+M18-C9a 的 inline diode/Zener 模型可增加 `junctionCapacitance` (F)、`junctionPotential` (V)、`gradingCoefficient` (1)、`temperatureCelsius` (degC)、`leakageCurrent` (A) 和 `leakageTemperatureCoefficient` (1/K)。温度限于 -100 至 200 degC；25 degC 为参考。结电容为 `Cj0 * max(1-v/Vj, 0.05)^(-m)`，BE companion 保存正引脚到负引脚的前一子步结电压，`initial`/`Reset` 使用同一方向。每个过采样子步收敛后更新历史；动态电流和解析 Jacobian 进入同一 Newton 印章。默认新增字段保持 C1 静态兼容。该模型不包含 reverse-recovery、电荷存储、噪声、自热、商业器件或 SPICE 等价。
+
+本版本仍不宣称通用器件覆盖、真实设备 1:1 校准、实时参数控制电位器、开关/受控源控制、真实非理想/商业运放芯片、商业真空管、真实 beam-forming、reverse-recovery、BJT/JFET/MOSFET 高阶寄生/热效应、供电下垂或测量基线自动校准；这些属于后续独立范围。M18-C2 至 C9d 只完成相应 self-authored generic 主线化，不构成 PedalKernel、SPICE、完整输出变压器或完整白盒等价。
