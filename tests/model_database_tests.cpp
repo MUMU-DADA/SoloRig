@@ -90,8 +90,7 @@ TEST_CASE("M14 rejects missing fields, nonfinite values, ranges, version and unk
 
 TEST_CASE("M14 protected device contracts remain explicit after later family approvals") {
     const auto contracts = solo_rig::ModelKindContracts();
-    for (const auto kind : {solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
-                            solo_rig::ModelKind::TransformerCore}) {
+    for (const auto kind : {solo_rig::ModelKind::VariMu, solo_rig::ModelKind::TransformerCore}) {
         const auto found = std::find_if(contracts.begin(), contracts.end(),
                                         [kind](const auto& contract) { return contract.kind == kind; });
         REQUIRE(found != contracts.end());
@@ -131,8 +130,7 @@ TEST_CASE("M18-C1 registers only self-authored clean-room diode and Zener famili
         REQUIRE(found != contracts.end());
         REQUIRE(found->availability == solo_rig::ModelAvailability::Approved);
     }
-    for (const auto kind : {solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
-                            solo_rig::ModelKind::TransformerCore}) {
+    for (const auto kind : {solo_rig::ModelKind::VariMu, solo_rig::ModelKind::TransformerCore}) {
         const auto found = std::find_if(contracts.begin(), contracts.end(),
                                         [kind](const auto& contract) { return contract.kind == kind; });
         REQUIRE(found != contracts.end());
@@ -395,4 +393,21 @@ TEST_CASE("M18-C6 audits and registers only complete authorized clean-room triod
     });
     REQUIRE(triode != contracts.end());
     REQUIRE(triode->availability == solo_rig::ModelAvailability::Approved);
+}
+
+TEST_CASE("M18-C7a audits and registers only complete authorized clean-room pentode models") {
+    const auto built = solo_rig::BuildModelDatabase(ReadFixture("m18c7a_cleanroom_pentode_model.json"));
+    REQUIRE(built.database.has_value());
+    REQUIRE(built.database->Bind({"solorig.cleanroom.pentode.space-charge.v1",
+                                  solo_rig::ModelKind::Pentode}).model.has_value());
+    REQUIRE(solo_rig::BuildModelDatabase(ReadFixture("m18c7a_untrusted_pentode_model.json")).error ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+    REQUIRE(solo_rig::BuildModelDatabase(ReadFixture("m18c7a_incomplete_pentode_model.json")).error ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+    const auto contracts = solo_rig::ModelKindContracts();
+    const auto pentode = std::find_if(contracts.begin(), contracts.end(), [](const auto& item) {
+        return item.kind == solo_rig::ModelKind::Pentode;
+    });
+    REQUIRE(pentode != contracts.end());
+    REQUIRE(pentode->availability == solo_rig::ModelAvailability::Approved);
 }

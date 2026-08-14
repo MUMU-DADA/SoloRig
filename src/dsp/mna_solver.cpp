@@ -358,6 +358,37 @@ void StampTriode(std::vector<double>& matrix,
     }
 }
 
+void StampPentode(std::vector<double>& matrix, std::vector<double>& rhs, std::uint32_t size,
+                  const MnaPreparedCircuit::Element& element, const std::vector<double>& guess) noexcept {
+    const auto voltage = [&guess](std::int32_t node) { return node >= 0 ? guess[static_cast<std::size_t>(node)] : 0.0; };
+    const double plate = voltage(element.positive_node);
+    const double screen = voltage(element.pentode_screen_node);
+    const double grid = voltage(element.pentode_grid_node);
+    const double cathode = voltage(element.negative_node);
+    const auto evaluation = EvaluateNonlinearPentode(
+        element.nonlinear_pentode_model, plate, screen, grid, cathode);
+    if (!evaluation.Succeeded()) {
+        StampConductance(matrix, size, element.positive_node, element.negative_node,
+                         std::numeric_limits<double>::quiet_NaN());
+        return;
+    }
+    const std::int32_t nodes[4] = {element.positive_node, element.pentode_screen_node,
+                                   element.pentode_grid_node, element.negative_node};
+    const double voltages[4] = {plate, screen, grid, cathode};
+    for (std::size_t row = 0; row < 4U; ++row) {
+        if (nodes[row] < 0) continue;
+        double equivalent_current = evaluation.currents[row];
+        for (std::size_t column = 0; column < 4U; ++column) {
+            equivalent_current -= evaluation.jacobian[row][column] * voltages[column];
+            if (nodes[column] >= 0) {
+                matrix[static_cast<std::size_t>(nodes[row]) * size + static_cast<std::size_t>(nodes[column])] +=
+                    evaluation.jacobian[row][column];
+            }
+        }
+        rhs[static_cast<std::size_t>(nodes[row])] -= equivalent_current;
+    }
+}
+
 void StampDiode(std::vector<double>& matrix,
                 std::vector<double>& rhs,
                 std::uint32_t size,
@@ -486,6 +517,9 @@ void MnaPreparedCircuit::Reset() noexcept {
         if (element.type == CircuitComponentType::Triode && element.triode_grid_node >= 0) {
             solution_[element.triode_grid_node] = element.initial;
         }
+        if (element.type == CircuitComponentType::Pentode && element.pentode_grid_node >= 0) {
+            solution_[element.pentode_grid_node] = element.initial;
+        }
     }
 }
 
@@ -503,7 +537,7 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
             return element.type == CircuitComponentType::Diode || element.type == CircuitComponentType::Bjt ||
                    element.type == CircuitComponentType::Jfet || element.type == CircuitComponentType::Mosfet ||
                    element.type == CircuitComponentType::OpAmp || element.type == CircuitComponentType::Ota ||
-                   element.type == CircuitComponentType::Triode ||
+                   element.type == CircuitComponentType::Triode || element.type == CircuitComponentType::Pentode ||
                    element.controlled_has_limits;
         });
         bool converged = !has_nonlinearity;
@@ -560,6 +594,9 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     break;
                 case CircuitComponentType::Triode:
                     StampTriode(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    break;
+                case CircuitComponentType::Pentode:
+                    StampPentode(matrix_, rhs_, matrix_size_, element, newton_previous_);
                     break;
                 case CircuitComponentType::Potentiometer:
                 case CircuitComponentType::Switch:
@@ -684,6 +721,22 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                             nonlinear_step_scale, element.nonlinear_triode_model.max_step / largest_step);
                     }
                 }
+                if (element.type == CircuitComponentType::Pentode) {
+                    const auto old_p = element.positive_node >= 0 ? newton_previous_[element.positive_node] : 0.0;
+                    const auto old_s = element.pentode_screen_node >= 0 ? newton_previous_[element.pentode_screen_node] : 0.0;
+                    const auto old_g = element.pentode_grid_node >= 0 ? newton_previous_[element.pentode_grid_node] : 0.0;
+                    const auto old_k = element.negative_node >= 0 ? newton_previous_[element.negative_node] : 0.0;
+                    const auto new_p = element.positive_node >= 0 ? solution_[element.positive_node] : 0.0;
+                    const auto new_s = element.pentode_screen_node >= 0 ? solution_[element.pentode_screen_node] : 0.0;
+                    const auto new_g = element.pentode_grid_node >= 0 ? solution_[element.pentode_grid_node] : 0.0;
+                    const auto new_k = element.negative_node >= 0 ? solution_[element.negative_node] : 0.0;
+                    const double largest = std::max({std::fabs((new_p-new_k)-(old_p-old_k)),
+                        std::fabs((new_s-new_k)-(old_s-old_k)), std::fabs((new_g-new_k)-(old_g-old_k))});
+                    if (largest > element.nonlinear_pentode_model.max_step && std::isfinite(largest)) {
+                        nonlinear_step_scale = std::min(nonlinear_step_scale,
+                            element.nonlinear_pentode_model.max_step / largest);
+                    }
+                }
             }
             // Nonlinear junction steps are damped, rather than allocating a second
             // trial vector. If the bounded iteration budget is exhausted the
@@ -775,7 +828,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             (component.mosfet_model.has_value() && component.type != CircuitComponentType::Mosfet) ||
             (component.amplifier_model.has_value() && component.type != CircuitComponentType::OpAmp &&
              component.type != CircuitComponentType::Ota) ||
-            (component.triode_model.has_value() && component.type != CircuitComponentType::Triode)) {
+            (component.triode_model.has_value() && component.type != CircuitComponentType::Triode) ||
+            (component.pentode_model.has_value() && component.type != CircuitComponentType::Pentode)) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
         }
         if (component.type != CircuitComponentType::Resistor && component.type != CircuitComponentType::Capacitor &&
@@ -785,7 +839,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             component.type != CircuitComponentType::IdealOpAmp && component.type != CircuitComponentType::OpAmp &&
             component.type != CircuitComponentType::Ota && component.type != CircuitComponentType::Bjt &&
             component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet &&
-            component.type != CircuitComponentType::Triode) {
+            component.type != CircuitComponentType::Triode && component.type != CircuitComponentType::Pentode) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
         }
         if (component.type == CircuitComponentType::Bjt) {
@@ -922,6 +976,24 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
             }
         }
+        if (component.type == CircuitComponentType::Pentode) {
+            if (component.pins.size() != 4U || (!component.pentode_model.has_value() && !component.model.has_value()) ||
+                component.value.has_value() || component.tolerance.has_value() || component.diode_model.has_value() ||
+                component.potentiometer.has_value() || component.controlled_source.has_value() ||
+                component.bjt_model.has_value() || component.jfet_model.has_value() || component.mosfet_model.has_value() ||
+                component.amplifier_model.has_value() || component.triode_model.has_value() || component.switch_spec.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            if (component.model.has_value() && !component.pentode_model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& item = *component.pentode_model;
+            const NonlinearPentodeModel model{item.screen_amplification_factor, item.perveance, item.knee_voltage,
+                item.screen_current_fraction, item.max_current, item.max_step};
+            if (item.kind != "space-charge" || item.model_version != 1U || !ValidateNonlinearPentodeModel(model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+        }
         if ((component.type == CircuitComponentType::Resistor || component.type == CircuitComponentType::Capacitor ||
              component.type == CircuitComponentType::Inductor ||
              component.type == CircuitComponentType::VoltageSource || component.type == CircuitComponentType::Potentiometer) &&
@@ -1010,7 +1082,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         const bool is_three_terminal = component.type == CircuitComponentType::Bjt ||
             component.type == CircuitComponentType::Jfet || component.type == CircuitComponentType::Mosfet ||
             component.type == CircuitComponentType::Triode;
-        const auto negative = FindNode(circuit, component.pins[is_three_terminal ? 2U : 1U]);
+        const auto negative = FindNode(circuit, component.pins[
+            is_three_terminal ? 2U : (component.type == CircuitComponentType::Pentode ? 3U : 1U)]);
         if (positive == -2 || negative == -2 || positive == negative) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
         }
@@ -1147,6 +1220,27 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             if (!ValidateNonlinearTriodeModel(element.nonlinear_triode_model)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
             }
+            prepared.elements_.push_back(element);
+            continue;
+        }
+        if (component.type == CircuitComponentType::Pentode) {
+            const auto screen = FindNode(circuit, component.pins[1]);
+            const auto grid = FindNode(circuit, component.pins[2]);
+            if (screen == -2 || grid == -2 || screen == positive || screen == negative ||
+                grid == positive || grid == screen || grid == negative) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+            }
+            const auto& item = *component.pentode_model;
+            MnaPreparedCircuit::Element element{};
+            element.type = CircuitComponentType::Pentode;
+            element.positive_node = positive;
+            element.negative_node = negative;
+            element.pentode_screen_node = screen;
+            element.pentode_grid_node = grid;
+            element.branch_index = kNoIndex;
+            element.initial = component.initial.value_or(0.0);
+            element.nonlinear_pentode_model = {item.screen_amplification_factor, item.perveance,
+                item.knee_voltage, item.screen_current_fraction, item.max_current, item.max_step};
             prepared.elements_.push_back(element);
             continue;
         }
@@ -1323,7 +1417,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
         if (component.type != CircuitComponentType::Diode && component.type != CircuitComponentType::Bjt &&
             component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet &&
             component.type != CircuitComponentType::OpAmp && component.type != CircuitComponentType::Ota &&
-            component.type != CircuitComponentType::Triode) {
+            component.type != CircuitComponentType::Triode && component.type != CircuitComponentType::Pentode) {
             continue;
         }
         if (!component.model.has_value()) {
@@ -1343,6 +1437,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
             if (component.type == CircuitComponentType::Triode && component.triode_model.has_value()) {
                 continue;
             }
+            if (component.type == CircuitComponentType::Pentode && component.pentode_model.has_value()) continue;
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
         }
         if (component.type == CircuitComponentType::Bjt) {
@@ -1454,6 +1549,24 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
                 .perveance = *perveance,
                 .max_current = *max_current,
                 .max_step = *max_step};
+            continue;
+        }
+        if (component.type == CircuitComponentType::Pentode) {
+            const auto result = model_database.Bind({*component.model, ModelKind::Pentode});
+            if (!result.model.has_value()) return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            const auto& record = *result.model;
+            const auto amplification = ModelParameter(record, "screen-amplification-factor");
+            const auto perveance = ModelParameter(record, "perveance");
+            const auto knee = ModelParameter(record, "knee-voltage");
+            const auto fraction = ModelParameter(record, "screen-current-fraction");
+            const auto max_current = ModelParameter(record, "max-current");
+            const auto max_step = ModelParameter(record, "max-step");
+            if (!amplification || !perveance || !knee || !fraction || !max_current || !max_step) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            component.pentode_model = CircuitPentodeModel{.kind="space-charge", .model_version=1U,
+                .screen_amplification_factor=*amplification, .perveance=*perveance, .knee_voltage=*knee,
+                .screen_current_fraction=*fraction, .max_current=*max_current, .max_step=*max_step};
             continue;
         }
         if (component.diode_model.has_value()) {

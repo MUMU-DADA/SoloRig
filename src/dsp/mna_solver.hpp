@@ -64,6 +64,8 @@ public:
         std::int32_t jfet_gate_node{-1};
         std::int32_t mosfet_gate_node{-1};
         std::int32_t triode_grid_node{-1};
+        std::int32_t pentode_screen_node{-1};
+        std::int32_t pentode_grid_node{-1};
         std::uint32_t branch_index{};
         std::uint32_t history_index{UINT32_MAX};
         std::uint32_t inductor_history_index{UINT32_MAX};
@@ -79,6 +81,7 @@ public:
         NonlinearMosfetModel nonlinear_mosfet_model{};
         NonlinearAmplifierModel nonlinear_amplifier_model{};
         NonlinearTriodeModel nonlinear_triode_model{};
+        NonlinearPentodeModel nonlinear_pentode_model{};
     };
 
 private:

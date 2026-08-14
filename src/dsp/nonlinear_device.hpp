@@ -6,4 +6,5 @@
 #include "dsp/nonlinear_diode.hpp"
 #include "dsp/nonlinear_jfet.hpp"
 #include "dsp/nonlinear_mosfet.hpp"
+#include "dsp/nonlinear_pentode.hpp"
 #include "dsp/nonlinear_triode.hpp"

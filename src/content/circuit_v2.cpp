@@ -96,6 +96,9 @@ std::optional<CircuitComponentType> ComponentType(std::string_view text) {
     if (text == "triode") {
         return CircuitComponentType::Triode;
     }
+    if (text == "pentode") {
+        return CircuitComponentType::Pentode;
+    }
     if (text == "switch") {
         return CircuitComponentType::Switch;
     }
@@ -270,17 +273,20 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         const bool is_jfet = *type == CircuitComponentType::Jfet;
         const bool is_mosfet = *type == CircuitComponentType::Mosfet;
         const bool is_triode = *type == CircuitComponentType::Triode;
+        const bool is_pentode = *type == CircuitComponentType::Pentode;
         if ((Find(*component, "bjtModel") != nullptr && !is_bjt) ||
             (Find(*component, "jfetModel") != nullptr && !is_jfet) ||
             (Find(*component, "mosfetModel") != nullptr && !is_mosfet) ||
             (Find(*component, "amplifierModel") != nullptr && !is_amplifier) ||
             (Find(*component, "triodeModel") != nullptr && !is_triode) ||
+            (Find(*component, "pentodeModel") != nullptr && !is_pentode) ||
             (Find(*component, "controlledSource") != nullptr && !is_controlled_source)) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         if (pins->size() != 2U && !(is_potentiometer && pins->size() == 3U) &&
             !((is_controlled_source || is_amplifier) && pins->size() == 4U) &&
-            !((is_bjt || is_jfet || is_mosfet || is_triode) && pins->size() == 3U)) {
+            !((is_bjt || is_jfet || is_mosfet || is_triode) && pins->size() == 3U) &&
+            !(is_pentode && pins->size() == 4U)) {
             return Failure(CircuitLoadError::InvalidPin);
         }
         for (const auto& pin : *pins) {
@@ -667,6 +673,42 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             }
         }
         if (is_triode && !parsed_component.triode_model.has_value() && !parsed_component.model.has_value()) {
+            return Failure(CircuitLoadError::InvalidValue);
+        }
+        if (is_pentode) {
+            const auto* value = Find(*component, "pentodeModel");
+            const auto* model = value == nullptr ? nullptr : value->AsObject();
+            const auto kind = model == nullptr ? std::nullopt : StringValue(Find(*model, "kind"));
+            const auto model_version = model == nullptr ? std::nullopt : UnsignedValue(Find(*model, "modelVersion"));
+            const auto amplification = model == nullptr ? std::nullopt : NumberValue(Find(*model, "screenAmplificationFactor"));
+            const auto perveance = model == nullptr ? std::nullopt : NumberValue(Find(*model, "perveance"));
+            const auto knee = model == nullptr ? std::nullopt : NumberValue(Find(*model, "kneeVoltage"));
+            const auto fraction = model == nullptr ? std::nullopt : NumberValue(Find(*model, "screenCurrentFraction"));
+            const auto max_current = model == nullptr ? std::nullopt : NumberValue(Find(*model, "maxCurrent"));
+            const auto max_step = model == nullptr ? std::nullopt : NumberValue(Find(*model, "maxStep"));
+            if (model == nullptr && !parsed_component.model.has_value()) return Failure(CircuitLoadError::InvalidValue);
+            if (model != nullptr && (!kind.has_value() || *kind != "space-charge" || !model_version.has_value() ||
+                *model_version != 1U || !amplification.has_value() || *amplification < 1.0 || *amplification > 1.0e6 ||
+                !perveance.has_value() || *perveance < 1.0e-12 || *perveance > 1.0e6 || !knee.has_value() ||
+                *knee < 1.0e-6 || *knee > 1.0e6 || !fraction.has_value() || *fraction < 0.0 || *fraction > 0.5 ||
+                !max_current.has_value() || *max_current < 1.0e-12 || *max_current > 1.0e6 ||
+                !max_step.has_value() || *max_step < 1.0e-20 || *max_step > 10.0 ||
+                parsed_component.value.has_value() || parsed_component.tolerance.has_value() ||
+                parsed_component.model.has_value() || parsed_component.diode_model.has_value() ||
+                parsed_component.potentiometer.has_value() || parsed_component.controlled_source.has_value() ||
+                parsed_component.bjt_model.has_value() || parsed_component.jfet_model.has_value() ||
+                parsed_component.mosfet_model.has_value() || parsed_component.amplifier_model.has_value() ||
+                parsed_component.triode_model.has_value() || parsed_component.switch_spec.has_value())) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            if (model != nullptr) {
+                parsed_component.pentode_model = CircuitPentodeModel{
+                    .kind = *kind, .model_version = *model_version, .screen_amplification_factor = *amplification,
+                    .perveance = *perveance, .knee_voltage = *knee, .screen_current_fraction = *fraction,
+                    .max_current = *max_current, .max_step = *max_step};
+            }
+        }
+        if (is_pentode && !parsed_component.pentode_model.has_value() && !parsed_component.model.has_value()) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         circuit.components.push_back(std::move(parsed_component));

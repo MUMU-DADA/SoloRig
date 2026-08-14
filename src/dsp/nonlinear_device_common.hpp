@@ -12,6 +12,7 @@ enum class NonlinearDeviceKind {
     OpAmp,
     Ota,
     Triode,
+    Pentode,
 };
 
 enum class NonlinearDeviceError {
