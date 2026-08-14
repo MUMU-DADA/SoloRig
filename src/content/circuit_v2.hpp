@@ -33,6 +33,8 @@ enum class CircuitComponentType {
     VariMu,
     Switch,
     CoupledInductor,
+    SpeakerLoad,
+    Relay,
 };
 
 struct CircuitPotentiometerSpec {
@@ -188,6 +190,22 @@ struct CircuitCoupledInductorModel {
 struct CircuitSwitchSpec {
     std::vector<std::string> states;
     std::uint32_t initial_state{};
+    double open_resistance{1.0e9};
+    double closed_resistance{1.0e-3};
+};
+
+enum class CircuitParameterBindingProperty {
+    PotentiometerPosition,
+    SwitchState,
+    SupplyVoltage,
+};
+
+struct CircuitParameterBinding {
+    std::uint32_t model_version{1};
+    std::string parameter_id;
+    std::string target_id;
+    CircuitParameterBindingProperty property{CircuitParameterBindingProperty::PotentiometerPosition};
+    double smoothing_seconds{};
 };
 
 struct CircuitDiodeModel {
@@ -218,6 +236,55 @@ struct CircuitSupply {
     std::string positive_node;
     std::string negative_node;
     double voltage{};
+    std::string kind{"ideal"};
+    std::uint32_t model_version{1};
+    double source_resistance{};
+    double sag_resistance{};
+    double recovery_time_seconds{};
+    double ripple_amplitude{};
+    double ripple_frequency_hz{};
+    double maximum_sag{};
+    double maximum_load_current{};
+    double initial_sag{};
+};
+
+struct CircuitSpeakerLoadModel {
+    std::string kind{"electrodynamic"};
+    std::uint32_t model_version{1};
+    double voice_coil_resistance{};
+    double voice_coil_inductance{};
+    double force_factor{};
+    double moving_mass{};
+    double mechanical_resistance{};
+    double compliance{};
+    double nonlinear_stiffness{};
+    double nonlinear_displacement_scale{};
+    double maximum_current{};
+    double maximum_velocity{};
+    double maximum_displacement{};
+    double initial_current{};
+    double initial_velocity{};
+    double initial_displacement{};
+};
+
+struct CircuitRelayModel {
+    std::string kind{"generic-dynamic"};
+    std::uint32_t model_version{1};
+    double coil_resistance{};
+    double coil_inductance{};
+    double open_resistance{};
+    double closed_resistance{};
+    double pull_in_current{};
+    double drop_out_current{};
+    double operate_time_seconds{};
+    double release_time_seconds{};
+    double bounce_duration_seconds{};
+    double bounce_frequency_hz{};
+    double bounce_amplitude{};
+    double maximum_coil_current{};
+    bool initial_energized{};
+    std::uint32_t pole_count{1U};
+    double contact_gap{};
 };
 
 struct CircuitComponent {
@@ -240,6 +307,8 @@ struct CircuitComponent {
     std::optional<CircuitBeamTetrodeModel> beam_tetrode_model;
     std::optional<CircuitVariMuModel> vari_mu_model;
     std::optional<CircuitCoupledInductorModel> coupled_inductor_model;
+    std::optional<CircuitSpeakerLoadModel> speaker_load_model;
+    std::optional<CircuitRelayModel> relay_model;
     std::optional<double> primary_initial_current;
     std::optional<double> secondary_initial_current;
     std::optional<CircuitSwitchSpec> switch_spec;
@@ -272,6 +341,7 @@ struct CircuitNetlist {
     std::vector<CircuitPort> ports;
     std::vector<CircuitSupply> supplies;
     std::vector<CircuitComponent> components;
+    std::vector<CircuitParameterBinding> parameter_bindings;
     CircuitSolverConfig solver;
     std::optional<CircuitMeasurementBaseline> measurement_baseline;
 };

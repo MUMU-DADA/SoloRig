@@ -24,14 +24,19 @@ BehaviorLoweringResult LowerBehaviorModule(const BehaviorBindingRequest& request
     if (!kind.has_value()) {
         return {.plan = std::nullopt, .error = BehaviorLoweringError::UnknownBehavior};
     }
-    // M15 deliberately has no authorized behavior model or runtime lowering.
-    // Keep the binding visible as a refusal instead of hard-coding a pedal.
+    if (*kind == BehaviorKind::Bbd && request.model_id == "generic-bbd-v1") {
+        return {.plan = BehaviorLoweringPlan{.module_id = request.module_id,
+            .kind = *kind, .model_id = request.model_id, .status = WhiteboxPlanStatus::Ready},
+            .error = std::nullopt};
+    }
+    // Other behavior families and unrecognized BBD IDs remain blocked until
+    // they have an explicit clean-room model and runtime contract.
     return {.plan = std::nullopt, .error = BehaviorLoweringError::BlockedModel};
 }
 
 std::vector<BehaviorKindContract> BehaviorKindContracts() {
     return {
-        {BehaviorKind::Bbd, WhiteboxPlanStatus::Blocked},
+        {BehaviorKind::Bbd, WhiteboxPlanStatus::Ready},
         {BehaviorKind::Vco, WhiteboxPlanStatus::Blocked},
         {BehaviorKind::Vca, WhiteboxPlanStatus::Blocked},
         {BehaviorKind::Spring, WhiteboxPlanStatus::Blocked},

@@ -4,6 +4,10 @@
 #include "dsp/nonlinear_transformer_core.hpp"
 #include "dsp/coupled_inductor.hpp"
 #include "dsp/nonlinear_diode_dynamic.hpp"
+#include "dsp/dynamic_power_supply.hpp"
+#include "dsp/dynamic_speaker_load.hpp"
+#include "dsp/dynamic_relay.hpp"
+#include "dsp/dynamic_relay_routing.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -111,6 +115,12 @@ std::optional<CircuitComponentType> ComponentType(std::string_view text) {
     if (text == "coupled-inductor") {
         return CircuitComponentType::CoupledInductor;
     }
+    if (text == "speaker-load") {
+        return CircuitComponentType::SpeakerLoad;
+    }
+    if (text == "relay") {
+        return CircuitComponentType::Relay;
+    }
     if (text == "switch") {
         return CircuitComponentType::Switch;
     }
@@ -123,6 +133,19 @@ std::optional<CircuitPortDirection> PortDirection(std::string_view text) {
     }
     if (text == "output") {
         return CircuitPortDirection::Output;
+    }
+    return std::nullopt;
+}
+
+std::optional<CircuitParameterBindingProperty> ParameterBindingProperty(std::string_view text) {
+    if (text == "potentiometer.position") {
+        return CircuitParameterBindingProperty::PotentiometerPosition;
+    }
+    if (text == "switch.state") {
+        return CircuitParameterBindingProperty::SwitchState;
+    }
+    if (text == "supply.voltage") {
+        return CircuitParameterBindingProperty::SupplyVoltage;
     }
     return std::nullopt;
 }
@@ -254,7 +277,57 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             if (!node_ids.contains(*positive) || !node_ids.contains(*negative)) {
                 return Failure(CircuitLoadError::InvalidNode);
             }
-            circuit.supplies.push_back({.id = *id, .positive_node = *positive, .negative_node = *negative, .voltage = *voltage});
+            const auto kind_value = StringValue(Find(*supply, "kind"));
+            const std::string kind = kind_value.value_or("ideal");
+            const auto model_version = UnsignedValue(Find(*supply, "modelVersion"));
+            const auto number = [supply](std::string_view key) { return NumberValue(Find(*supply, key)); };
+            const auto source_resistance = number("sourceResistance");
+            const auto sag_resistance = number("sagResistance");
+            const auto recovery_time = number("recoveryTime");
+            const auto ripple_amplitude = number("rippleAmplitude");
+            const auto ripple_frequency = number("rippleFrequency");
+            const auto maximum_sag = number("maximumSag");
+            const auto maximum_load_current = number("maximumLoadCurrent");
+            const auto initial_sag = number("initialSag");
+            const bool has_dynamic_field = source_resistance.has_value() || sag_resistance.has_value() ||
+                recovery_time.has_value() || ripple_amplitude.has_value() || ripple_frequency.has_value() ||
+                maximum_sag.has_value() || maximum_load_current.has_value() || initial_sag.has_value();
+            const bool dynamic = kind == "rectified-reservoir";
+            if ((kind != "ideal" && !dynamic) ||
+                (!dynamic && (has_dynamic_field || (model_version.has_value() && *model_version != 1U))) ||
+                (dynamic && (!model_version.has_value() || *model_version != 1U || !source_resistance.has_value() ||
+                 !sag_resistance.has_value() || !recovery_time.has_value() || !ripple_amplitude.has_value() ||
+                 !ripple_frequency.has_value() || !maximum_sag.has_value() || !maximum_load_current.has_value() ||
+                 !initial_sag.has_value()))) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            CircuitSupply parsed_supply{.id = *id, .positive_node = *positive,
+                                        .negative_node = *negative, .voltage = *voltage,
+                                        .kind = kind, .model_version = model_version.value_or(1U)};
+            if (dynamic) {
+                parsed_supply.source_resistance = *source_resistance;
+                parsed_supply.sag_resistance = *sag_resistance;
+                parsed_supply.recovery_time_seconds = *recovery_time;
+                parsed_supply.ripple_amplitude = *ripple_amplitude;
+                parsed_supply.ripple_frequency_hz = *ripple_frequency;
+                parsed_supply.maximum_sag = *maximum_sag;
+                parsed_supply.maximum_load_current = *maximum_load_current;
+                parsed_supply.initial_sag = *initial_sag;
+                if (!ValidateDynamicPowerSupplyModel({
+                        .voltage = parsed_supply.voltage,
+                        .source_resistance = parsed_supply.source_resistance,
+                        .sag_resistance = parsed_supply.sag_resistance,
+                        .recovery_time_seconds = parsed_supply.recovery_time_seconds,
+                        .ripple_amplitude = parsed_supply.ripple_amplitude,
+                        .ripple_frequency_hz = parsed_supply.ripple_frequency_hz,
+                        .maximum_sag = parsed_supply.maximum_sag,
+                        .maximum_load_current = parsed_supply.maximum_load_current}) ||
+                    parsed_supply.initial_sag < 0.0 ||
+                    parsed_supply.initial_sag > parsed_supply.maximum_sag) {
+                    return Failure(CircuitLoadError::InvalidValue);
+                }
+            }
+            circuit.supplies.push_back(std::move(parsed_supply));
         }
     }
 
@@ -289,6 +362,8 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         const bool is_beam_tetrode = *type == CircuitComponentType::BeamTetrode;
         const bool is_vari_mu = *type == CircuitComponentType::VariMu;
         const bool is_coupled_inductor = *type == CircuitComponentType::CoupledInductor;
+        const bool is_speaker_load = *type == CircuitComponentType::SpeakerLoad;
+        const bool is_relay = *type == CircuitComponentType::Relay;
         if ((Find(*component, "bjtModel") != nullptr && !is_bjt) ||
             (Find(*component, "jfetModel") != nullptr && !is_jfet) ||
             (Find(*component, "mosfetModel") != nullptr && !is_mosfet) ||
@@ -298,6 +373,8 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             (Find(*component, "beamTetrodeModel") != nullptr && !is_beam_tetrode) ||
             (Find(*component, "variMuModel") != nullptr && !is_vari_mu) ||
             (Find(*component, "coupledInductorModel") != nullptr && !is_coupled_inductor) ||
+            (Find(*component, "speakerModel") != nullptr && !is_speaker_load) ||
+            (Find(*component, "relayModel") != nullptr && !is_relay) ||
             (Find(*component, "primaryInitialCurrent") != nullptr && !is_coupled_inductor) ||
             (Find(*component, "secondaryInitialCurrent") != nullptr && !is_coupled_inductor) ||
             (Find(*component, "controlledSource") != nullptr && !is_controlled_source)) {
@@ -306,7 +383,9 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         if (pins->size() != 2U && !(is_potentiometer && pins->size() == 3U) &&
             !((is_controlled_source || is_amplifier) && pins->size() == 4U) &&
             !((is_bjt || is_jfet || is_mosfet || is_triode || is_vari_mu) && pins->size() == 3U) &&
-            !((is_pentode || is_beam_tetrode || is_coupled_inductor) && pins->size() == 4U)) {
+            !((is_pentode || is_beam_tetrode || is_coupled_inductor) && pins->size() == 4U) &&
+            !(is_relay && (pins->size() == 4U || pins->size() == 5U || pins->size() == 8U ||
+                           pins->size() == 11U || pins->size() == 14U))) {
             return Failure(CircuitLoadError::InvalidPin);
         }
         for (const auto& pin : *pins) {
@@ -507,14 +586,27 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             const auto* switch_object = switch_value->AsObject();
             const auto states = switch_object == nullptr ? std::nullopt : StringArray(Find(*switch_object, "states"));
             const auto initial = switch_object == nullptr ? std::nullopt : UnsignedValue(Find(*switch_object, "initial"));
+            const auto open_resistance = switch_object == nullptr
+                ? std::nullopt : NumberValue(Find(*switch_object, "openResistance"));
+            const auto closed_resistance = switch_object == nullptr
+                ? std::nullopt : NumberValue(Find(*switch_object, "closedResistance"));
             if (!states.has_value() || states->empty() || !initial.has_value() || *initial >= states->size()) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            if (open_resistance.has_value() != closed_resistance.has_value() ||
+                (open_resistance.has_value() &&
+                 (*open_resistance <= 0.0 || *open_resistance > 1.0e15 ||
+                  *closed_resistance <= 0.0 || *closed_resistance > 1.0e15))) {
                 return Failure(CircuitLoadError::InvalidValue);
             }
             std::unordered_set<std::string> state_ids(states->begin(), states->end());
             if (state_ids.size() != states->size()) {
                 return Failure(CircuitLoadError::DuplicateId);
             }
-            parsed_component.switch_spec = CircuitSwitchSpec{.states = *states, .initial_state = *initial};
+            parsed_component.switch_spec = CircuitSwitchSpec{
+                .states = *states, .initial_state = *initial,
+                .open_resistance = open_resistance.value_or(1.0e9),
+                .closed_resistance = closed_resistance.value_or(1.0e-3)};
         }
         if (*type == CircuitComponentType::Potentiometer && !parsed_component.potentiometer.has_value()) {
             return Failure(CircuitLoadError::InvalidValue);
@@ -1073,7 +1165,181 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                     .max_step = max_step.value_or(1.0)};
             }
         }
+        if (is_speaker_load) {
+            const auto* value = Find(*component, "speakerModel");
+            const auto* model = value == nullptr ? nullptr : value->AsObject();
+            if (model == nullptr && !parsed_component.model.has_value()) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            if (model != nullptr) {
+                const auto kind = StringValue(Find(*model, "kind"));
+                const auto speaker_version = UnsignedValue(Find(*model, "modelVersion"));
+                const auto number = [model](std::string_view key) {
+                    return NumberValue(Find(*model, key));
+                };
+                const auto re = number("voiceCoilResistance");
+                const auto le = number("voiceCoilInductance");
+                const auto bl = number("forceFactor");
+                const auto mass = number("movingMass");
+                const auto damping = number("mechanicalResistance");
+                const auto compliance = number("compliance");
+                const auto nonlinear = number("nonlinearStiffness");
+                const auto scale = number("nonlinearDisplacementScale");
+                const auto maximum_current = number("maximumCurrent");
+                const auto maximum_velocity = number("maximumVelocity");
+                const auto maximum_displacement = number("maximumDisplacement");
+                const auto initial_current = number("initialCurrent");
+                const auto initial_velocity = number("initialVelocity");
+                const auto initial_displacement = number("initialDisplacement");
+                if (!kind.has_value() || *kind != "electrodynamic" ||
+                    !speaker_version.has_value() || *speaker_version != 1U ||
+                    !re.has_value() || !le.has_value() || !bl.has_value() ||
+                    !mass.has_value() || !damping.has_value() || !compliance.has_value() ||
+                    !nonlinear.has_value() || !scale.has_value() || !maximum_current.has_value() ||
+                    !maximum_velocity.has_value() || !maximum_displacement.has_value() ||
+                    !initial_current.has_value() || !initial_velocity.has_value() ||
+                    !initial_displacement.has_value() || parsed_component.model.has_value() ||
+                    parsed_component.value.has_value() || parsed_component.tolerance.has_value() ||
+                    parsed_component.initial.has_value()) {
+                    return Failure(CircuitLoadError::InvalidValue);
+                }
+                const DynamicSpeakerLoadModel runtime_model{
+                    *re, *le, *bl, *mass, *damping, *compliance, *nonlinear, *scale,
+                    *maximum_current, *maximum_velocity, *maximum_displacement};
+                if (!ValidateDynamicSpeakerLoadModel(runtime_model) ||
+                    std::fabs(*initial_current) > *maximum_current ||
+                    std::fabs(*initial_velocity) > *maximum_velocity ||
+                    std::fabs(*initial_displacement) > *maximum_displacement) {
+                    return Failure(CircuitLoadError::InvalidValue);
+                }
+                parsed_component.speaker_load_model = {
+                    .kind = *kind, .model_version = *speaker_version,
+                    .voice_coil_resistance = *re, .voice_coil_inductance = *le,
+                    .force_factor = *bl, .moving_mass = *mass,
+                    .mechanical_resistance = *damping, .compliance = *compliance,
+                    .nonlinear_stiffness = *nonlinear,
+                    .nonlinear_displacement_scale = *scale,
+                    .maximum_current = *maximum_current,
+                    .maximum_velocity = *maximum_velocity,
+                    .maximum_displacement = *maximum_displacement,
+                    .initial_current = *initial_current,
+                    .initial_velocity = *initial_velocity,
+                    .initial_displacement = *initial_displacement};
+            }
+        }
+        if (is_relay) {
+            const auto* value = Find(*component, "relayModel");
+            const auto* model = value == nullptr ? nullptr : value->AsObject();
+            const auto string = [model](std::string_view key) {
+                return model == nullptr ? std::nullopt : StringValue(Find(*model, key));
+            };
+            const auto number = [model](std::string_view key) {
+                return model == nullptr ? std::nullopt : NumberValue(Find(*model, key));
+            };
+            const auto kind = string("kind");
+            const auto relay_version = model == nullptr ? std::nullopt : UnsignedValue(Find(*model, "modelVersion"));
+            const auto coil_resistance = number("coilResistance");
+            const auto coil_inductance = number("coilInductance");
+            const auto open_resistance = number("openResistance");
+            const auto closed_resistance = number("closedResistance");
+            const auto pull_in = number("pullInCurrent");
+            const auto drop_out = number("dropOutCurrent");
+            const auto operate_time = number("operateTime");
+            const auto release_time = number("releaseTime");
+            const auto bounce_duration = number("bounceDuration");
+            const auto bounce_frequency = number("bounceFrequency");
+            const auto bounce_amplitude = number("bounceAmplitude");
+            const auto maximum_current = number("maximumCoilCurrent");
+            const auto initial_state = string("initialState");
+            const auto pole_count = model == nullptr ? std::nullopt : UnsignedValue(Find(*model, "poleCount"));
+            const auto contact_gap = number("contactGap");
+            const bool legacy = kind == "generic-dynamic" && relay_version == 1U;
+            const bool routed = kind == "generic-multi-contact" && relay_version == 2U;
+            if (model == nullptr || (!legacy && !routed) || !coil_resistance.has_value() ||
+                !coil_inductance.has_value() || !open_resistance.has_value() ||
+                !closed_resistance.has_value() || !pull_in.has_value() || !drop_out.has_value() ||
+                !operate_time.has_value() || !release_time.has_value() || !bounce_duration.has_value() ||
+                !bounce_frequency.has_value() || !bounce_amplitude.has_value() ||
+                !maximum_current.has_value() || !initial_state.has_value() ||
+                (legacy && (*initial_state != "open" && *initial_state != "closed")) ||
+                (routed && (*initial_state != "released" && *initial_state != "operated")) ||
+                (legacy && (pole_count.has_value() || contact_gap.has_value() || pins->size() != 4U)) ||
+                (routed && (!pole_count.has_value() || !contact_gap.has_value() ||
+                            pins->size() != 2U + 3U * *pole_count)) ||
+                parsed_component.value.has_value() || parsed_component.tolerance.has_value() ||
+                parsed_component.initial.has_value() || parsed_component.model.has_value()) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            const DynamicRelayModel runtime_model{*coil_resistance, *coil_inductance, *open_resistance,
+                *closed_resistance, *pull_in, *drop_out, *operate_time, *release_time,
+                *bounce_duration, *bounce_frequency, *bounce_amplitude, *maximum_current};
+            if (!ValidateDynamicRelayModel(runtime_model)) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            const DynamicRelayRoutingModel routing_model{
+                .pole_count = pole_count.value_or(1U), .contact_gap = contact_gap.value_or(0.0)};
+            if (routed && !ValidateDynamicRelayRoutingModel(routing_model)) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            parsed_component.relay_model = {.kind=*kind,.model_version=*relay_version,
+                .coil_resistance=*coil_resistance,.coil_inductance=*coil_inductance,
+                .open_resistance=*open_resistance,.closed_resistance=*closed_resistance,
+                .pull_in_current=*pull_in,.drop_out_current=*drop_out,
+                .operate_time_seconds=*operate_time,.release_time_seconds=*release_time,
+                .bounce_duration_seconds=*bounce_duration,.bounce_frequency_hz=*bounce_frequency,
+                .bounce_amplitude=*bounce_amplitude,.maximum_coil_current=*maximum_current,
+                .initial_energized=legacy ? *initial_state=="closed" : *initial_state=="operated",
+                .pole_count=routing_model.pole_count,.contact_gap=routing_model.contact_gap};
+        }
         circuit.components.push_back(std::move(parsed_component));
+    }
+
+    if (const auto* bindings_value = Find(object, "parameterBindings"); bindings_value != nullptr) {
+        const auto* bindings = bindings_value->AsArray();
+        if (bindings == nullptr) {
+            return Failure(CircuitLoadError::InvalidField);
+        }
+        std::unordered_set<std::string> parameter_ids;
+        std::unordered_set<std::string> targets;
+        for (const auto& binding_value : *bindings) {
+            const auto* binding = binding_value.AsObject();
+            if (binding == nullptr) {
+                return Failure(CircuitLoadError::InvalidField);
+            }
+            const auto model_version = UnsignedValue(Find(*binding, "modelVersion"));
+            const auto parameter = StringValue(Find(*binding, "parameter"));
+            const auto target = StringValue(Find(*binding, "target"));
+            const auto property_text = StringValue(Find(*binding, "property"));
+            const auto property = property_text.has_value()
+                ? ParameterBindingProperty(*property_text) : std::nullopt;
+            const auto smoothing = NumberValue(Find(*binding, "smoothingSeconds"));
+            if (!model_version.has_value() || *model_version != 1U || !parameter.has_value() ||
+                !target.has_value() || !property.has_value() || !smoothing.has_value() ||
+                *smoothing < 0.0 || *smoothing > 1.0e6) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            const std::string target_key = *target + "\n" + *property_text;
+            if (!parameter_ids.insert(*parameter).second || !targets.insert(target_key).second) {
+                return Failure(CircuitLoadError::DuplicateId);
+            }
+            const auto component = std::find_if(circuit.components.begin(), circuit.components.end(),
+                [&target](const CircuitComponent& item) { return item.id == *target; });
+            const auto supply = std::find_if(circuit.supplies.begin(), circuit.supplies.end(),
+                [&target](const CircuitSupply& item) { return item.id == *target; });
+            const bool matches =
+                (*property == CircuitParameterBindingProperty::PotentiometerPosition &&
+                 component != circuit.components.end() && component->type == CircuitComponentType::Potentiometer) ||
+                (*property == CircuitParameterBindingProperty::SwitchState && component != circuit.components.end() &&
+                 component->type == CircuitComponentType::Switch && component->switch_spec.has_value() &&
+                 component->switch_spec->states == std::vector<std::string>{"open", "closed"}) ||
+                (*property == CircuitParameterBindingProperty::SupplyVoltage && supply != circuit.supplies.end());
+            if (!matches) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            circuit.parameter_bindings.push_back({.model_version = *model_version,
+                .parameter_id = *parameter, .target_id = *target, .property = *property,
+                .smoothing_seconds = *smoothing});
+        }
     }
 
     const auto* solver_value = Find(object, "solver");

@@ -161,6 +161,40 @@ bool HasParameter(const EffectDescriptor& descriptor, const std::string& id) {
     return false;
 }
 
+std::optional<ModulePackageLoadError> ValidateCircuitParameterBindings(
+    const CircuitNetlist& circuit, const EffectDescriptor& descriptor) {
+    for (const auto& binding : circuit.parameter_bindings) {
+        const auto parameter = std::find_if(descriptor.parameters.begin(), descriptor.parameters.end(),
+            [&binding](const EffectParameter& item) { return item.id == binding.parameter_id; });
+        if (parameter == descriptor.parameters.end()) {
+            return ModulePackageLoadError::LogicParameterUnknown;
+        }
+        double minimum{};
+        double maximum{};
+        if (binding.property == CircuitParameterBindingProperty::PotentiometerPosition) {
+            const auto component = std::find_if(circuit.components.begin(), circuit.components.end(),
+                [&binding](const CircuitComponent& item) { return item.id == binding.target_id; });
+            if (component == circuit.components.end() || !component->potentiometer.has_value()) {
+                return ModulePackageLoadError::InvalidLogicDefinition;
+            }
+            minimum = component->potentiometer->minimum;
+            maximum = component->potentiometer->maximum;
+        } else if (binding.property == CircuitParameterBindingProperty::SwitchState) {
+            minimum = 0.0;
+            maximum = 1.0;
+        } else {
+            minimum = -1.0e6;
+            maximum = 1.0e6;
+        }
+        if (!std::isfinite(parameter->minimum) || !std::isfinite(parameter->maximum) ||
+            !std::isfinite(parameter->default_value) || parameter->minimum < minimum ||
+            parameter->maximum > maximum) {
+            return ModulePackageLoadError::InvalidLogicDefinition;
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<AnalogCircuitLogic> ParseAnalogCircuitLogic(const JsonValue::Object& object) {
     const auto solver = ReadString(object, "solver");
     const auto* component_values = Find(object, "components");
@@ -285,6 +319,9 @@ std::optional<ModulePackageLoadError> ParseModuleLogic(const std::filesystem::pa
             })
                 ? ModulePackageLoadError::InvalidLogicSchema
                 : ModulePackageLoadError::InvalidLogicDefinition;
+        }
+        if (const auto error = ValidateCircuitParameterBindings(*circuit.circuit, descriptor); error.has_value()) {
+            return error;
         }
         logic = *circuit.circuit;
         return std::nullopt;

@@ -55,6 +55,11 @@ add_library(solo_rig_core STATIC
     src/core/realtime_load_meter.cpp
     src/core/rig_runtime.cpp
     src/dsp/diode_clipper.cpp
+    src/dsp/dynamic_power_supply.cpp
+    src/dsp/dynamic_speaker_load.cpp
+    src/dsp/dynamic_relay.cpp
+    src/dsp/dynamic_relay_routing.cpp
+    src/dsp/generic_bbd.cpp
     src/dsp/coupled_inductor.cpp
     src/dsp/nonlinear_transformer_core.cpp
     src/dsp/mna_solver.cpp
@@ -79,6 +84,7 @@ add_library(solo_rig_core STATIC
     src/content/json.cpp
     src/content/circuit_v2.cpp
     src/content/whitebox_compiler.cpp
+    src/content/whitebox_subcircuit.cpp
     src/content/whitebox_runtime.cpp
     src/content/model_database.cpp
     src/content/nonlinear_diode_binding.cpp
@@ -86,8 +92,10 @@ add_library(solo_rig_core STATIC
     src/content/nonlinear_jfet_binding.cpp
     src/content/nonlinear_mosfet_binding.cpp
     src/content/nonlinear_opamp_binding.cpp
+    src/content/dynamic_speaker_load_binding.cpp
     src/content/topology_decomposition.cpp
     src/content/behavior_lowering.cpp
+    src/content/generic_bbd_binding.cpp
     src/content/evidence_chain.cpp
     src/content/wdf_runtime.cpp
     src/content/module_package.cpp
@@ -241,6 +249,22 @@ if(BUILD_TESTING)
         tests/realtime_contract_tests.cpp
         tests/wdf_runtime_tests.cpp
         tests/diode_clipper_tests.cpp
+        tests/dynamic_power_supply_tests.cpp
+        tests/dynamic_power_supply_mna_tests.cpp
+        tests/dynamic_power_supply_runtime_tests.cpp
+        tests/dynamic_speaker_load_tests.cpp
+        tests/dynamic_speaker_load_mna_tests.cpp
+        tests/dynamic_speaker_load_runtime_tests.cpp
+        tests/dynamic_speaker_load_binding_tests.cpp
+        tests/dynamic_relay_tests.cpp
+        tests/dynamic_relay_mna_tests.cpp
+        tests/dynamic_relay_runtime_tests.cpp
+        tests/dynamic_relay_routing_tests.cpp
+        tests/dynamic_relay_routing_mna_tests.cpp
+        tests/dynamic_relay_routing_runtime_tests.cpp
+        tests/generic_bbd_tests.cpp
+        tests/generic_bbd_binding_tests.cpp
+        tests/generic_bbd_runtime_tests.cpp
         tests/coupled_inductor_tests.cpp
         tests/nonlinear_transformer_core_tests.cpp
         tests/nonlinear_amplifier_tests.cpp
@@ -276,8 +300,14 @@ if(BUILD_TESTING)
         tests/tuner_tests.cpp
         tests/json_tests.cpp
         tests/circuit_v2_tests.cpp
+        tests/circuit_parameter_binding_parser_tests.cpp
+        tests/circuit_parameter_binding_mna_tests.cpp
+        tests/circuit_parameter_binding_runtime_tests.cpp
         tests/whitebox_contract_tests.cpp
         tests/whitebox_compiler_tests.cpp
+        tests/whitebox_subcircuit_parser_tests.cpp
+        tests/whitebox_subcircuit_flattening_tests.cpp
+        tests/whitebox_subcircuit_runtime_tests.cpp
         tests/whitebox_runtime_tests.cpp
         tests/model_database_tests.cpp
         tests/m15_planning_tests.cpp

@@ -1,6 +1,7 @@
 #include "content/whitebox_compiler.hpp"
 
 #include "content/json.hpp"
+#include "content/whitebox_subcircuit.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -289,33 +290,17 @@ WhiteboxCompileResult CompileWhiteboxGraphV2Json(std::string_view source) {
         if (subcircuits == nullptr) {
             return Failure(WhiteboxCompileError::InvalidSubcircuit);
         }
-        for (const auto& subcircuit_value : *subcircuits) {
-            const auto* subcircuit = subcircuit_value.AsObject();
-            const auto id = subcircuit == nullptr ? std::nullopt : StringValue(Find(*subcircuit, "id"));
-            const auto* ports_value = subcircuit == nullptr ? nullptr : Find(*subcircuit, "ports");
-            const auto* ports = ports_value == nullptr ? nullptr : ports_value->AsArray();
-            if (!id.has_value()) {
-                return Failure(WhiteboxCompileError::MissingField);
-            }
-            if (!ids.insert(*id).second) {
-                return Failure(WhiteboxCompileError::DuplicateId);
-            }
-            if (ports == nullptr || ports->size() < 2U) {
-                return Failure(WhiteboxCompileError::InvalidSubcircuit);
-            }
-            WhiteboxSubcircuit parsed_subcircuit{.id = *id};
-            for (const auto& port_value : *ports) {
-                const auto port = StringValue(&port_value);
-                if (!port.has_value() || !HasNode(node_ids, *port)) {
-                    return Failure(WhiteboxCompileError::InvalidSubcircuit);
-                }
-                parsed_subcircuit.ports.push_back(*port);
-            }
-            if (const auto model = StringValue(Find(*subcircuit, "modelReference")); model.has_value()) {
-                parsed_subcircuit.model_reference = *model;
-            }
-            graph.subcircuits_.push_back(std::move(parsed_subcircuit));
+        auto expansion = ExpandWhiteboxSubcircuits(*subcircuits, node_ids, ids, graph.components_.size());
+        if (expansion.error.has_value()) {
+            return Failure(*expansion.error);
         }
+        graph.nodes_.insert(graph.nodes_.end(),
+                            std::make_move_iterator(expansion.nodes.begin()),
+                            std::make_move_iterator(expansion.nodes.end()));
+        graph.components_.insert(graph.components_.end(),
+                                 std::make_move_iterator(expansion.components.begin()),
+                                 std::make_move_iterator(expansion.components.end()));
+        graph.subcircuits_ = std::move(expansion.unresolved);
     }
 
     if (const auto* models_value = Find(object, "modelReferences"); models_value != nullptr) {

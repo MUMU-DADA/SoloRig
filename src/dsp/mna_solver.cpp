@@ -4,6 +4,7 @@
 #include "content/nonlinear_jfet_binding.hpp"
 #include "content/nonlinear_mosfet_binding.hpp"
 #include "content/nonlinear_opamp_binding.hpp"
+#include "content/dynamic_speaker_load_binding.hpp"
 
 #include "content/nonlinear_diode_binding.hpp"
 
@@ -88,6 +89,87 @@ void StampVoltageSource(std::vector<double>& matrix,
         matrix[static_cast<std::size_t>(branch) * size + static_cast<std::size_t>(negative)] -= 1.0;
     }
     rhs[branch] += voltage;
+}
+
+void StampDynamicPowerSupply(std::vector<double>& matrix,
+                             std::vector<double>& rhs,
+                             std::uint32_t size,
+                             const MnaPreparedCircuit::Element& element,
+                             const std::vector<double>& guess,
+                             const DynamicPowerSupplyState& previous_state,
+                             double timestep_seconds) noexcept {
+    const double branch_current = guess[element.branch_index];
+    const auto evaluation = EvaluateDynamicPowerSupply(
+        element.dynamic_power_supply_model, branch_current, previous_state, timestep_seconds);
+    if (!evaluation.Succeeded()) {
+        rhs[element.branch_index] = std::numeric_limits<double>::quiet_NaN();
+        return;
+    }
+    StampVoltageSource(matrix, rhs, size, element.positive_node, element.negative_node,
+                       element.branch_index, evaluation.target_voltage -
+                           evaluation.target_voltage_derivative_current * branch_current);
+    matrix[static_cast<std::size_t>(element.branch_index) * size + element.branch_index] -=
+        element.dynamic_power_supply_model.source_resistance +
+        evaluation.target_voltage_derivative_current;
+}
+
+void StampDynamicRelay(std::vector<double>& matrix,
+                       std::vector<double>& rhs,
+                       std::uint32_t size,
+                       const MnaPreparedCircuit::Element& element,
+                       const std::vector<double>& guess,
+                       const DynamicRelayState& previous_state,
+                       double timestep_seconds) noexcept {
+    const double current = guess[element.branch_index];
+    const auto evaluation = EvaluateDynamicRelay(
+        element.dynamic_relay_model, current, previous_state, timestep_seconds);
+    if (!evaluation.Succeeded()) {
+        rhs[element.branch_index] = std::numeric_limits<double>::quiet_NaN();
+        return;
+    }
+    StampVoltageSource(matrix, rhs, size, element.positive_node, element.negative_node,
+        element.branch_index, evaluation.coil_voltage -
+            evaluation.coil_voltage_derivative_current * current);
+    matrix[static_cast<std::size_t>(element.branch_index) * size + element.branch_index] -=
+        evaluation.coil_voltage_derivative_current;
+    if (element.dynamic_relay_model_version == 1U) {
+        StampConductance(matrix, size, element.secondary_positive_node,
+            element.secondary_negative_node, 1.0 / evaluation.contact_resistance);
+        return;
+    }
+    const auto routing = EvaluateDynamicRelayRouting(
+        element.dynamic_relay_model, element.dynamic_relay_routing_model, previous_state);
+    if (!routing.Succeeded()) {
+        rhs[element.branch_index] = std::numeric_limits<double>::quiet_NaN();
+        return;
+    }
+    for (std::uint32_t pole = 0; pole < element.dynamic_relay_routing_model.pole_count; ++pole) {
+        StampConductance(matrix, size, element.relay_common_nodes[pole],
+            element.relay_normally_closed_nodes[pole], 1.0 / routing.normally_closed_resistance);
+        StampConductance(matrix, size, element.relay_common_nodes[pole],
+            element.relay_normally_open_nodes[pole], 1.0 / routing.normally_open_resistance);
+    }
+}
+
+void StampDynamicSpeakerLoad(std::vector<double>& matrix,
+                             std::vector<double>& rhs,
+                             std::uint32_t size,
+                             const MnaPreparedCircuit::Element& element,
+                             const std::vector<double>& guess,
+                             const DynamicSpeakerLoadState& previous_state,
+                             double timestep_seconds) noexcept {
+    const double branch_current = guess[element.branch_index];
+    const auto evaluation = EvaluateDynamicSpeakerLoad(
+        element.dynamic_speaker_load_model, branch_current, previous_state, timestep_seconds);
+    if (!evaluation.Succeeded()) {
+        rhs[element.branch_index] = std::numeric_limits<double>::quiet_NaN();
+        return;
+    }
+    StampVoltageSource(matrix, rhs, size, element.positive_node, element.negative_node,
+                       element.branch_index, evaluation.voltage -
+                           evaluation.voltage_derivative_current * branch_current);
+    matrix[static_cast<std::size_t>(element.branch_index) * size + element.branch_index] -=
+        evaluation.voltage_derivative_current;
 }
 
 // Backward-Euler inductor companion in branch-current MNA form:
@@ -715,7 +797,94 @@ bool MnaPreparedCircuit::Prepare(double sample_rate_hz) noexcept {
     return true;
 }
 
+std::size_t MnaPreparedCircuit::ControlCount() const noexcept {
+    return controls_.size();
+}
+
+std::optional<std::size_t> MnaPreparedCircuit::FindControl(std::string_view parameter_id) const noexcept {
+    for (std::size_t index = 0; index < controls_.size(); ++index) {
+        if (controls_[index].parameter_id == parameter_id) {
+            return index;
+        }
+    }
+    return std::nullopt;
+}
+
+bool MnaPreparedCircuit::SetControlTarget(std::size_t control_index, double value) noexcept {
+    if (control_index >= controls_.size() || !std::isfinite(value)) {
+        return false;
+    }
+    auto& control = controls_[control_index];
+    if (value < control.minimum || value > control.maximum) {
+        return false;
+    }
+    control.target = value;
+    return true;
+}
+
+std::optional<double> MnaPreparedCircuit::ControlValue(std::size_t control_index) const noexcept {
+    if (control_index >= controls_.size()) {
+        return std::nullopt;
+    }
+    return controls_[control_index].current;
+}
+
+bool MnaPreparedCircuit::ApplyControl(Control& control) noexcept {
+    if (control.primary_element_index >= elements_.size() || !std::isfinite(control.current)) {
+        return false;
+    }
+    auto& primary = elements_[control.primary_element_index];
+    switch (control.kind) {
+    case ControlKind::PotentiometerPosition: {
+        if (control.secondary_element_index >= elements_.size() || control.maximum <= control.minimum) {
+            return false;
+        }
+        const double normalized = (control.current - control.minimum) / (control.maximum - control.minimum);
+        constexpr double kMinimumResistance = 1.0e-12;
+        primary.value = std::max(control.scale_a * normalized, kMinimumResistance);
+        elements_[control.secondary_element_index].value =
+            std::max(control.scale_a * (1.0 - normalized), kMinimumResistance);
+        return std::isfinite(primary.value) && std::isfinite(elements_[control.secondary_element_index].value);
+    }
+    case ControlKind::SwitchState:
+        primary.value = control.scale_a + control.current * (control.scale_b - control.scale_a);
+        return std::isfinite(primary.value) && primary.value > 0.0;
+    case ControlKind::SupplyVoltage:
+        primary.value = control.current;
+        if (primary.dynamic_power_supply_state_index != kNoIndex) {
+            primary.dynamic_power_supply_model.voltage = control.current;
+        }
+        return true;
+    }
+    return false;
+}
+
+bool MnaPreparedCircuit::AdvanceControls(double timestep_seconds) noexcept {
+    if (!std::isfinite(timestep_seconds) || timestep_seconds <= 0.0) {
+        return false;
+    }
+    for (auto& control : controls_) {
+        if (control.smoothing_seconds == 0.0) {
+            control.current = control.target;
+        } else {
+            const double ratio = timestep_seconds / control.smoothing_seconds;
+            const double alpha = ratio / (1.0 + ratio);
+            control.current += alpha * (control.target - control.current);
+        }
+        control.current = std::clamp(control.current, control.minimum, control.maximum);
+        if (!ApplyControl(control)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void MnaPreparedCircuit::Reset() noexcept {
+    for (auto& control : controls_) {
+        control.current = control.initial;
+        control.target = control.initial;
+        static_cast<void>(ApplyControl(control));
+    }
     for (auto& history : capacitor_history_) {
         history = 0.0;
     }
@@ -726,6 +895,11 @@ void MnaPreparedCircuit::Reset() noexcept {
     std::fill(mosfet_gs_history_.begin(), mosfet_gs_history_.end(), 0.0);
     std::fill(mosfet_gd_history_.begin(), mosfet_gd_history_.end(), 0.0);
     std::fill(opamp_dynamic_history_.begin(), opamp_dynamic_history_.end(), 0.0);
+    std::fill(dynamic_power_supply_states_.begin(), dynamic_power_supply_states_.end(),
+              DynamicPowerSupplyState{});
+    std::fill(dynamic_speaker_load_states_.begin(), dynamic_speaker_load_states_.end(),
+              DynamicSpeakerLoadState{});
+    std::fill(dynamic_relay_states_.begin(), dynamic_relay_states_.end(), DynamicRelayState{});
     for (const auto& element : elements_) {
         if (element.history_index != kNoIndex) {
             capacitor_history_[element.history_index] = element.initial;
@@ -767,6 +941,17 @@ void MnaPreparedCircuit::Reset() noexcept {
         }
         if (element.opamp_dynamic_history_index != kNoIndex) {
             opamp_dynamic_history_[element.opamp_dynamic_history_index] = element.initial;
+        }
+        if (element.dynamic_power_supply_state_index != kNoIndex) {
+            dynamic_power_supply_states_[element.dynamic_power_supply_state_index] = {
+                .sag = element.initial, .ripple_phase = 0.0};
+        }
+        if (element.dynamic_speaker_load_state_index != kNoIndex) {
+            dynamic_speaker_load_states_[element.dynamic_speaker_load_state_index] =
+                element.dynamic_speaker_load_initial_state;
+        }
+        if (element.dynamic_relay_state_index != kNoIndex) {
+            dynamic_relay_states_[element.dynamic_relay_state_index] = element.dynamic_relay_initial_state;
         }
     }
     std::fill(matrix_.begin(), matrix_.end(), 0.0);
@@ -815,6 +1000,9 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
     MnaSolveResult result;
     const double conductance_scale = sample_rate_hz_ * static_cast<double>(oversampling_);
     for (std::uint32_t substep = 0; substep < oversampling_; ++substep) {
+        if (!AdvanceControls(1.0 / conductance_scale)) {
+            return {.error = MnaSolveError::NonFinite};
+        }
         const auto has_nonlinearity = std::any_of(elements_.begin(), elements_.end(), [](const auto& element) {
             return element.type == CircuitComponentType::Diode || element.type == CircuitComponentType::Bjt ||
                    element.type == CircuitComponentType::Jfet || element.type == CircuitComponentType::Mosfet ||
@@ -823,6 +1011,9 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                    element.type == CircuitComponentType::BeamTetrode ||
                    element.type == CircuitComponentType::VariMu ||
                    element.transformer_core_history_index != kNoIndex ||
+                   element.dynamic_power_supply_state_index != kNoIndex ||
+                   element.dynamic_speaker_load_state_index != kNoIndex ||
+                   element.dynamic_relay_state_index != kNoIndex ||
                    element.controlled_has_limits;
         });
         bool converged = !has_nonlinearity;
@@ -849,6 +1040,17 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                                   inductor_history_[element.inductor_history_index]);
                     break;
                 }
+                case CircuitComponentType::SpeakerLoad:
+                    StampDynamicSpeakerLoad(
+                        matrix_, rhs_, matrix_size_, element, solution_,
+                        dynamic_speaker_load_states_[element.dynamic_speaker_load_state_index],
+                        1.0 / conductance_scale);
+                    break;
+                case CircuitComponentType::Relay:
+                    StampDynamicRelay(matrix_, rhs_, matrix_size_, element, solution_,
+                        dynamic_relay_states_[element.dynamic_relay_state_index],
+                        1.0 / conductance_scale);
+                    break;
                 case CircuitComponentType::CoupledInductor: {
                     const auto primary_previous = inductor_history_[element.inductor_history_index];
                     const auto secondary_previous = inductor_history_[element.secondary_inductor_history_index];
@@ -866,8 +1068,15 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     break;
                 }
                 case CircuitComponentType::VoltageSource:
-                    StampVoltageSource(matrix_, rhs_, matrix_size_, element.positive_node, element.negative_node,
-                                       element.branch_index, element.value);
+                    if (element.dynamic_power_supply_state_index != kNoIndex) {
+                        StampDynamicPowerSupply(
+                            matrix_, rhs_, matrix_size_, element, newton_previous_,
+                            dynamic_power_supply_states_[element.dynamic_power_supply_state_index],
+                            1.0 / conductance_scale);
+                    } else {
+                        StampVoltageSource(matrix_, rhs_, matrix_size_, element.positive_node, element.negative_node,
+                                           element.branch_index, element.value);
+                    }
                     break;
                 case CircuitComponentType::Diode:
                     StampDiode(matrix_, rhs_, matrix_size_, element, newton_previous_, conductance_scale,
@@ -1217,6 +1426,29 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                 if (!state.Succeeded()) return {.error = MnaSolveError::NonFinite};
                 opamp_dynamic_history_[element.opamp_dynamic_history_index] = state.state_voltage;
             }
+            if (element.dynamic_power_supply_state_index != kNoIndex) {
+                const auto state = EvaluateDynamicPowerSupply(
+                    element.dynamic_power_supply_model, solution_[element.branch_index],
+                    dynamic_power_supply_states_[element.dynamic_power_supply_state_index],
+                    1.0 / conductance_scale);
+                if (!state.Succeeded()) return {.error = MnaSolveError::NonFinite};
+                dynamic_power_supply_states_[element.dynamic_power_supply_state_index] = state.next_state;
+            }
+            if (element.dynamic_speaker_load_state_index != kNoIndex) {
+                const auto state = EvaluateDynamicSpeakerLoad(
+                    element.dynamic_speaker_load_model, solution_[element.branch_index],
+                    dynamic_speaker_load_states_[element.dynamic_speaker_load_state_index],
+                    1.0 / conductance_scale);
+                if (!state.Succeeded()) return {.error = MnaSolveError::NonFinite};
+                dynamic_speaker_load_states_[element.dynamic_speaker_load_state_index] = state.next_state;
+            }
+            if (element.dynamic_relay_state_index != kNoIndex) {
+                const auto state = EvaluateDynamicRelay(element.dynamic_relay_model,
+                    solution_[element.branch_index], dynamic_relay_states_[element.dynamic_relay_state_index],
+                    1.0 / conductance_scale);
+                if (!state.Succeeded()) return {.error = MnaSolveError::NonFinite};
+                dynamic_relay_states_[element.dynamic_relay_state_index] = state.next_state;
+            }
         }
         result.output_voltage = output_node_ >= 0 ? solution_[output_node_] : 0.0;
     }
@@ -1283,6 +1515,9 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             (component.vari_mu_model.has_value() && component.type != CircuitComponentType::VariMu) ||
             (component.coupled_inductor_model.has_value() &&
              component.type != CircuitComponentType::CoupledInductor) ||
+            (component.speaker_load_model.has_value() &&
+             component.type != CircuitComponentType::SpeakerLoad) ||
+            (component.relay_model.has_value() && component.type != CircuitComponentType::Relay) ||
             ((component.primary_initial_current.has_value() || component.secondary_initial_current.has_value()) &&
              component.type != CircuitComponentType::CoupledInductor)) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
@@ -1296,8 +1531,71 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet &&
             component.type != CircuitComponentType::Triode && component.type != CircuitComponentType::Pentode &&
             component.type != CircuitComponentType::BeamTetrode && component.type != CircuitComponentType::VariMu &&
-            component.type != CircuitComponentType::CoupledInductor) {
+            component.type != CircuitComponentType::CoupledInductor &&
+            component.type != CircuitComponentType::SpeakerLoad && component.type != CircuitComponentType::Switch &&
+            component.type != CircuitComponentType::Relay) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
+        }
+        if (component.type == CircuitComponentType::Switch) {
+            if (component.pins.size() != 2U || !component.switch_spec.has_value() || component.value.has_value() ||
+                component.model.has_value() || component.potentiometer.has_value() ||
+                component.switch_spec->states != std::vector<std::string>{"open", "closed"} ||
+                component.switch_spec->initial_state > 1U ||
+                !std::isfinite(component.switch_spec->open_resistance) ||
+                !std::isfinite(component.switch_spec->closed_resistance) ||
+                component.switch_spec->open_resistance <= 0.0 ||
+                component.switch_spec->closed_resistance <= 0.0 ||
+                component.switch_spec->open_resistance > 1.0e15 ||
+                component.switch_spec->closed_resistance > 1.0e15) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+        }
+        if (component.type == CircuitComponentType::SpeakerLoad) {
+            if (component.pins.size() != 2U ||
+                (!component.speaker_load_model.has_value() && !component.model.has_value()) ||
+                component.value.has_value() || component.tolerance.has_value() ||
+                component.initial.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            if (component.model.has_value() && !component.speaker_load_model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& item = *component.speaker_load_model;
+            const DynamicSpeakerLoadModel model{
+                item.voice_coil_resistance, item.voice_coil_inductance, item.force_factor,
+                item.moving_mass, item.mechanical_resistance, item.compliance,
+                item.nonlinear_stiffness, item.nonlinear_displacement_scale,
+                item.maximum_current, item.maximum_velocity, item.maximum_displacement};
+            if (item.kind != "electrodynamic" || item.model_version != 1U ||
+                !ValidateDynamicSpeakerLoadModel(model) ||
+                std::fabs(item.initial_current) > item.maximum_current ||
+                std::fabs(item.initial_velocity) > item.maximum_velocity ||
+                std::fabs(item.initial_displacement) > item.maximum_displacement) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+        }
+        if (component.type == CircuitComponentType::Relay) {
+            if (!component.relay_model.has_value() ||
+                component.value.has_value() || component.tolerance.has_value() || component.initial.has_value() ||
+                component.model.has_value() || component.diode_model.has_value() ||
+                component.potentiometer.has_value() || component.switch_spec.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            const auto& item = *component.relay_model;
+            const DynamicRelayModel model{item.coil_resistance, item.coil_inductance,
+                item.open_resistance, item.closed_resistance, item.pull_in_current,
+                item.drop_out_current, item.operate_time_seconds, item.release_time_seconds,
+                item.bounce_duration_seconds, item.bounce_frequency_hz, item.bounce_amplitude,
+                item.maximum_coil_current};
+            const bool legacy = item.kind == "generic-dynamic" && item.model_version == 1U &&
+                                component.pins.size() == 4U;
+            const bool routed = item.kind == "generic-multi-contact" && item.model_version == 2U &&
+                                component.pins.size() == 2U + 3U * item.pole_count &&
+                                ValidateDynamicRelayRoutingModel(
+                                    {.pole_count = item.pole_count, .contact_gap = item.contact_gap});
+            if ((!legacy && !routed) || !ValidateDynamicRelayModel(model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
         }
         if (component.type == CircuitComponentType::Bjt) {
             if (component.pins.size() != 3U || (!component.bjt_model.has_value() && !component.model.has_value()) || component.value.has_value() ||
@@ -1616,6 +1914,57 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         }
     }
 
+    for (const auto& supply : circuit.supplies) {
+        if (!std::isfinite(supply.voltage) || std::fabs(supply.voltage) > 1.0e6 ||
+            (supply.kind != "ideal" && supply.kind != "rectified-reservoir") ||
+            supply.model_version != 1U) {
+            return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+        }
+        if (supply.kind == "rectified-reservoir" &&
+            (!ValidateDynamicPowerSupplyModel({
+                .voltage = supply.voltage, .source_resistance = supply.source_resistance,
+                .sag_resistance = supply.sag_resistance,
+                .recovery_time_seconds = supply.recovery_time_seconds,
+                .ripple_amplitude = supply.ripple_amplitude,
+                .ripple_frequency_hz = supply.ripple_frequency_hz,
+                .maximum_sag = supply.maximum_sag,
+                .maximum_load_current = supply.maximum_load_current}) ||
+             !std::isfinite(supply.initial_sag) || supply.initial_sag < 0.0 ||
+             supply.initial_sag > supply.maximum_sag)) {
+            return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+        }
+    }
+
+    for (std::size_t index = 0; index < circuit.parameter_bindings.size(); ++index) {
+        const auto& binding = circuit.parameter_bindings[index];
+        if (binding.model_version != 1U || binding.parameter_id.empty() || binding.target_id.empty() ||
+            !std::isfinite(binding.smoothing_seconds) || binding.smoothing_seconds < 0.0 ||
+            binding.smoothing_seconds > 1.0e6 ||
+            std::count_if(circuit.parameter_bindings.begin(), circuit.parameter_bindings.end(),
+                [&binding](const CircuitParameterBinding& item) {
+                    return item.parameter_id == binding.parameter_id;
+                }) != 1 ||
+            std::count_if(circuit.parameter_bindings.begin(), circuit.parameter_bindings.end(),
+                [&binding](const CircuitParameterBinding& item) {
+                    return item.target_id == binding.target_id && item.property == binding.property;
+                }) != 1) {
+            return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+        }
+        const auto component = std::find_if(circuit.components.begin(), circuit.components.end(),
+            [&binding](const CircuitComponent& item) { return item.id == binding.target_id; });
+        const auto supply = std::find_if(circuit.supplies.begin(), circuit.supplies.end(),
+            [&binding](const CircuitSupply& item) { return item.id == binding.target_id; });
+        const bool matches =
+            (binding.property == CircuitParameterBindingProperty::PotentiometerPosition &&
+             component != circuit.components.end() && component->type == CircuitComponentType::Potentiometer) ||
+            (binding.property == CircuitParameterBindingProperty::SwitchState &&
+             component != circuit.components.end() && component->type == CircuitComponentType::Switch) ||
+            (binding.property == CircuitParameterBindingProperty::SupplyVoltage && supply != circuit.supplies.end());
+        if (!matches) {
+            return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+        }
+    }
+
     std::uint32_t non_ground_nodes{};
     for (const auto& node : circuit.nodes) {
         if (node != circuit.reference_ground) {
@@ -1634,6 +1983,14 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
             return component.type == CircuitComponentType::CoupledInductor;
         }));
+    const auto speaker_branch_count = static_cast<std::uint32_t>(std::count_if(
+        circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
+            return component.type == CircuitComponentType::SpeakerLoad;
+        }));
+    const auto relay_branch_count = static_cast<std::uint32_t>(std::count_if(
+        circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
+            return component.type == CircuitComponentType::Relay;
+        }));
     const auto controlled_voltage_source_count = static_cast<std::uint32_t>(std::count_if(
         circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
             return component.type == CircuitComponentType::IdealOpAmp ||
@@ -1641,7 +1998,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                     component.amplifier_model->kind != "generic-dynamic");
         }));
     const auto branch_count = voltage_source_count + inductor_count + coupled_inductor_branch_count +
-                              controlled_voltage_source_count;
+                              speaker_branch_count + relay_branch_count + controlled_voltage_source_count;
     if (non_ground_nodes + branch_count == 0U) {
         return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
     }
@@ -1737,6 +2094,55 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             prepared.elements_.push_back(element);
             continue;
         }
+        if (component.type == CircuitComponentType::Relay) {
+            const auto& item = *component.relay_model;
+            MnaPreparedCircuit::Element element{};
+            element.type = CircuitComponentType::Relay;
+            element.positive_node = positive;
+            element.negative_node = negative;
+            element.branch_index = non_ground_nodes + branch++;
+            element.dynamic_relay_model = {item.coil_resistance, item.coil_inductance,
+                item.open_resistance, item.closed_resistance, item.pull_in_current,
+                item.drop_out_current, item.operate_time_seconds, item.release_time_seconds,
+                item.bounce_duration_seconds, item.bounce_frequency_hz, item.bounce_amplitude,
+                item.maximum_coil_current};
+            element.dynamic_relay_model_version = item.model_version;
+            element.dynamic_relay_routing_model = {
+                .pole_count = item.pole_count, .contact_gap = item.contact_gap};
+            if (item.model_version == 1U) {
+                const auto contact_positive = FindNode(circuit, component.pins[2]);
+                const auto contact_negative = FindNode(circuit, component.pins[3]);
+                if (contact_positive == -2 || contact_negative == -2 ||
+                    contact_positive == contact_negative) {
+                    return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+                }
+                element.secondary_positive_node = contact_positive;
+                element.secondary_negative_node = contact_negative;
+            } else {
+                for (std::uint32_t pole = 0; pole < item.pole_count; ++pole) {
+                    const auto pin = 2U + 3U * pole;
+                    const auto common = FindNode(circuit, component.pins[pin]);
+                    const auto normally_closed = FindNode(circuit, component.pins[pin + 1U]);
+                    const auto normally_open = FindNode(circuit, component.pins[pin + 2U]);
+                    if (common == -2 || normally_closed == -2 || normally_open == -2 ||
+                        common == normally_closed || common == normally_open ||
+                        normally_closed == normally_open) {
+                        return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+                    }
+                    element.relay_common_nodes[pole] = common;
+                    element.relay_normally_closed_nodes[pole] = normally_closed;
+                    element.relay_normally_open_nodes[pole] = normally_open;
+                }
+            }
+            element.dynamic_relay_initial_state = {.coil_current = 0.0,
+                .position = item.initial_energized ? 1.0 : 0.0,
+                .energized = item.initial_energized};
+            element.dynamic_relay_state_index =
+                static_cast<std::uint32_t>(prepared.dynamic_relay_states_.size());
+            prepared.dynamic_relay_states_.push_back(element.dynamic_relay_initial_state);
+            prepared.elements_.push_back(element);
+            continue;
+        }
         if (component.type == CircuitComponentType::CoupledInductor) {
             const auto secondary_positive = FindNode(circuit, component.pins[2]);
             const auto secondary_negative = FindNode(circuit, component.pins[3]);
@@ -1784,6 +2190,27 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 prepared.transformer_core_history_.push_back({
                     .flux = item.remanent_flux, .hysteresis = item.remanent_flux});
             }
+            prepared.elements_.push_back(element);
+            continue;
+        }
+        if (component.type == CircuitComponentType::SpeakerLoad) {
+            const auto& item = *component.speaker_load_model;
+            MnaPreparedCircuit::Element element{};
+            element.type = CircuitComponentType::SpeakerLoad;
+            element.positive_node = positive;
+            element.negative_node = negative;
+            element.branch_index = non_ground_nodes + branch++;
+            element.dynamic_speaker_load_model = {
+                item.voice_coil_resistance, item.voice_coil_inductance, item.force_factor,
+                item.moving_mass, item.mechanical_resistance, item.compliance,
+                item.nonlinear_stiffness, item.nonlinear_displacement_scale,
+                item.maximum_current, item.maximum_velocity, item.maximum_displacement};
+            element.dynamic_speaker_load_initial_state = {
+                item.initial_current, item.initial_velocity, item.initial_displacement};
+            element.dynamic_speaker_load_state_index =
+                static_cast<std::uint32_t>(prepared.dynamic_speaker_load_states_.size());
+            prepared.dynamic_speaker_load_states_.push_back(
+                element.dynamic_speaker_load_initial_state);
             prepared.elements_.push_back(element);
             continue;
         }
@@ -2008,6 +2435,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             if (!std::isfinite(first_value) || !std::isfinite(second_value)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
             }
+            const auto first_index = static_cast<std::uint32_t>(prepared.elements_.size());
             prepared.elements_.push_back({.type = CircuitComponentType::Resistor,
                                           .positive_node = positive,
                                           .negative_node = wiper,
@@ -2024,6 +2452,44 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                           .inductor_history_index = kNoIndex,
                                           .value = second_value,
                                           .initial = 0.0});
+            const auto binding = std::find_if(circuit.parameter_bindings.begin(), circuit.parameter_bindings.end(),
+                [&component](const CircuitParameterBinding& item) {
+                    return item.target_id == component.id &&
+                           item.property == CircuitParameterBindingProperty::PotentiometerPosition;
+                });
+            if (binding != circuit.parameter_bindings.end()) {
+                prepared.controls_.push_back({.kind = MnaPreparedCircuit::ControlKind::PotentiometerPosition,
+                    .parameter_id = binding->parameter_id, .primary_element_index = first_index,
+                    .secondary_element_index = first_index + 1U, .minimum = spec.minimum,
+                    .maximum = spec.maximum, .initial = spec.position, .current = spec.position,
+                    .target = spec.position, .smoothing_seconds = binding->smoothing_seconds,
+                    .scale_a = total});
+            }
+            continue;
+        }
+        if (component.type == CircuitComponentType::Switch) {
+            const auto& spec = *component.switch_spec;
+            const auto element_index = static_cast<std::uint32_t>(prepared.elements_.size());
+            const double initial_state = static_cast<double>(spec.initial_state);
+            const double resistance = spec.open_resistance +
+                initial_state * (spec.closed_resistance - spec.open_resistance);
+            prepared.elements_.push_back({.type = CircuitComponentType::Resistor,
+                .positive_node = positive, .negative_node = negative, .branch_index = kNoIndex,
+                .history_index = kNoIndex, .inductor_history_index = kNoIndex,
+                .value = resistance, .initial = 0.0});
+            const auto binding = std::find_if(circuit.parameter_bindings.begin(), circuit.parameter_bindings.end(),
+                [&component](const CircuitParameterBinding& item) {
+                    return item.target_id == component.id &&
+                           item.property == CircuitParameterBindingProperty::SwitchState;
+                });
+            if (binding != circuit.parameter_bindings.end()) {
+                prepared.controls_.push_back({.kind = MnaPreparedCircuit::ControlKind::SwitchState,
+                    .parameter_id = binding->parameter_id, .primary_element_index = element_index,
+                    .minimum = 0.0, .maximum = 1.0, .initial = initial_state,
+                    .current = initial_state, .target = initial_state,
+                    .smoothing_seconds = binding->smoothing_seconds,
+                    .scale_a = spec.open_resistance, .scale_b = spec.closed_resistance});
+            }
             continue;
         }
         if (component.type == CircuitComponentType::OpAmp || component.type == CircuitComponentType::Ota) {
@@ -2157,16 +2623,44 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         if (positive == -2 || negative == -2 || positive == negative) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
         }
-        prepared.elements_.push_back({.type = CircuitComponentType::VoltageSource,
-                                      .positive_node = positive,
-                                      .negative_node = negative,
-                                      .control_positive_node = -1,
-                                      .control_negative_node = -1,
-                                      .branch_index = non_ground_nodes + branch++,
-                                      .history_index = kNoIndex,
-                                      .inductor_history_index = kNoIndex,
-                                      .value = supply.voltage,
-                                      .initial = 0.0});
+        MnaPreparedCircuit::Element element{};
+        element.type = CircuitComponentType::VoltageSource;
+        element.positive_node = positive;
+        element.negative_node = negative;
+        element.control_positive_node = -1;
+        element.control_negative_node = -1;
+        element.branch_index = non_ground_nodes + branch++;
+        element.history_index = kNoIndex;
+        element.inductor_history_index = kNoIndex;
+        element.value = supply.voltage;
+        if (supply.kind == "rectified-reservoir") {
+            element.initial = supply.initial_sag;
+            element.dynamic_power_supply_model = {
+                .voltage = supply.voltage, .source_resistance = supply.source_resistance,
+                .sag_resistance = supply.sag_resistance,
+                .recovery_time_seconds = supply.recovery_time_seconds,
+                .ripple_amplitude = supply.ripple_amplitude,
+                .ripple_frequency_hz = supply.ripple_frequency_hz,
+                .maximum_sag = supply.maximum_sag,
+                .maximum_load_current = supply.maximum_load_current};
+            element.dynamic_power_supply_state_index =
+                static_cast<std::uint32_t>(prepared.dynamic_power_supply_states_.size());
+            prepared.dynamic_power_supply_states_.push_back({.sag = supply.initial_sag});
+        }
+        const auto element_index = static_cast<std::uint32_t>(prepared.elements_.size());
+        prepared.elements_.push_back(element);
+        const auto binding = std::find_if(circuit.parameter_bindings.begin(), circuit.parameter_bindings.end(),
+            [&supply](const CircuitParameterBinding& item) {
+                return item.target_id == supply.id &&
+                       item.property == CircuitParameterBindingProperty::SupplyVoltage;
+            });
+        if (binding != circuit.parameter_bindings.end()) {
+            prepared.controls_.push_back({.kind = MnaPreparedCircuit::ControlKind::SupplyVoltage,
+                .parameter_id = binding->parameter_id, .primary_element_index = element_index,
+                .minimum = -1.0e6, .maximum = 1.0e6, .initial = supply.voltage,
+                .current = supply.voltage, .target = supply.voltage,
+                .smoothing_seconds = binding->smoothing_seconds});
+        }
     }
     if (input_port != circuit.ports.end()) {
         prepared.input_branch_ = non_ground_nodes + branch++;
@@ -2186,7 +2680,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
             component.type != CircuitComponentType::OpAmp && component.type != CircuitComponentType::Ota &&
             component.type != CircuitComponentType::Triode && component.type != CircuitComponentType::Pentode &&
             component.type != CircuitComponentType::BeamTetrode && component.type != CircuitComponentType::VariMu &&
-            component.type != CircuitComponentType::CoupledInductor) {
+            component.type != CircuitComponentType::CoupledInductor &&
+            component.type != CircuitComponentType::SpeakerLoad) {
             continue;
         }
         if (!component.model.has_value()) {
@@ -2211,7 +2706,21 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
             if (component.type == CircuitComponentType::VariMu && component.vari_mu_model.has_value()) continue;
             if (component.type == CircuitComponentType::CoupledInductor &&
                 component.coupled_inductor_model.has_value()) continue;
+            if (component.type == CircuitComponentType::SpeakerLoad &&
+                component.speaker_load_model.has_value()) continue;
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+        }
+        if (component.type == CircuitComponentType::SpeakerLoad) {
+            const auto result = model_database.Bind({*component.model, ModelKind::SpeakerLoad});
+            if (!result.model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            CircuitSpeakerLoadModel speaker_bound{};
+            if (!BindAuditedSpeakerLoadModel(*result.model, speaker_bound)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            component.speaker_load_model = speaker_bound;
+            continue;
         }
         if (component.type == CircuitComponentType::CoupledInductor) {
             const auto result = model_database.Bind({*component.model, ModelKind::TransformerCore});

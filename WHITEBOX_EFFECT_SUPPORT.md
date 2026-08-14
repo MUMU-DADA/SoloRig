@@ -4,7 +4,7 @@
 
 ## 结论
 
-当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 diode/Zener、BJT、JFET、MOSFET、bounded opamp/OTA、triode、generic pentode、generic beam tetrode、generic vari-mu、受限 lossy-linear coupled-inductor 和 generic saturating-hysteretic transformer/core 模型。M18-C9a 当前在工作树增加 self-authored clean-room generic diode/Zener 结电容、静态温度和漏电修正，仍在本地验收，不构成商业器件或 1:1 证据。
+当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 generic dynamic diode/Zener、BJT、JFET、MOSFET、dynamic opamp、bounded OTA、triode、pentode、beam tetrode、vari-mu、lossy-linear coupled-inductor 和 saturating-hysteretic transformer/core 模型。C8b-C9e 已由 `9b06c70` 提交；C10a rectified-reservoir supply、C10b electrodynamic speaker/feedback、D1a 实时参数邮箱/基础控制、D1b1/D1b3 relay 和 D1b2 inline passive subcircuit 已形成同一工作树本地候选，D2a generic clocked BBD/delay 正在实施。这些仍只构成 self-authored clean-room generic 能力，不构成商业器件或 1:1 证据。
 
 当前仍不能宣称覆盖“绝大多数单块效果器和箱头”。主要阻塞不只是元件数量，还包括实时旋钮/开关、行为模块、复杂拓扑编译、器件高阶物理、功放与电源/负载交互，以及 SPICE/golden/实机误差验证。
 
@@ -36,9 +36,14 @@
 | 电阻 | 已交付 | 正值线性电阻。 |
 | 电容 | 已交付 | backward-Euler 电压历史和初态。 |
 | 电感 | 已交付 | backward-Euler 分支电流历史和初态。 |
-| 独立电压源/供电 | 已交付 | MNA branch unknown；供电可进入网表，但尚无完整电源 Sag/纹波模型。 |
-| 静态电位器 | 受限 | Compile 时展开为两个电阻；位置变化需要重新 Compile/Prepare，不能在音频处理中实时扫动。 |
-| 开关 | 受限 | `circuit.json v2` 可以解析和校验，MNA 运行时返回 `UnsupportedComponent`。 |
+| 独立电压源/供电 | 已交付；C10a 本地候选 | ideal supply 使用 MNA branch unknown；C10a 增加 generic rectified-reservoir 的源阻抗、Sag、纹波与恢复状态，不代表商业电源或逐二极管整流波形。 |
+| electrodynamic speaker load | C10b 本地候选 | 两端 voice-coil/electromechanical BE 状态与有界 suspension；可与既有反馈输出级联合 MNA，不是箱体 IR、商业扬声器或完整声辐射模型。 |
+| 电位器 | D1a 本地候选 | Compile 时展开为两个正电阻；版本化 binding、原子邮箱和子步 BE 平滑可实时扫动，旧静态结果兼容。 |
+| 两端开关 | D1a 本地候选 | `open/closed` 映射为声明的有限正电阻，支持原子 state 自动化与平滑。 |
+| dynamic relay | D1b1 本地候选 | 单线圈/单常开触点，含线圈 BE、pull-in/drop-out hysteresis、operate/release 和确定性有界 bounce；不含多刀/转换触点或商业 relay。 |
+| multi-contact relay routing | D1b3 实施中 | 1..4 pole、共享线圈/机械状态、固定 `[common,NC,NO]` routing、有限 gap break-before-make；不含任意开关矩阵或商业 relay。 |
+| inline passive subcircuit | D1b2 本地候选 | 显式局部端口到父节点映射，编译期确定性扁平化 R/C/L 并保留动态初态；外部、递归、主动、非线性和多端 macro-model 仍拒绝。 |
+| 供电参数自动化 | D1a 本地候选 | nominal voltage 可实时有界更新；C10a Sag/ripple 状态不因参数更新重置。 |
 | VCCS | 已交付 | 四端线性跨导原语。 |
 | 基础理想运放/VCVS | 已交付 | 有限增益及可选限幅；不代表真实芯片。 |
 | WDF one-port、Series/Parallel/R-type adaptor | 受限 | 已有可执行子集和理想数学变压器散射；尚非任意 WDF 树或真实磁性变压器。 |
@@ -47,12 +52,12 @@
 
 | 元件/能力 | 状态 | 当前边界 |
 | --- | --- | --- |
-| Shockley diode | 本地候选 | 保持通用静态 IV/Jacobian，C9a 新增 generic 电压相关结电容、BE 历史、静态温度/漏电修正和解析 Jacobian；没有反向恢复、噪声或商业型号校准。 |
-| Zener | 本地候选 | 在双指数静态模型上复用 C9a 动态结状态和温度/漏电修正；没有商业型号校准或 reverse-recovery/载流子存储。 |
-| NPN/PNP BJT | 本地候选（M18-C9b 实施中） | clean-room Ebers-Moll v1 兼容，并增加 generic Early 有限输出、BE/BC depletion companion 与静态温度修正；不含 charge-storage/reverse-recovery、击穿、自热、噪声或商业器件语义。 |
-| N/P channel JFET | 本地候选（M18-C9c 实施中） | clean-room square-law v1 兼容，并增加有限 channel-length modulation、静态温度、GS/GD PN leakage 与 depletion companion；不含 avalanche、charge storage、reverse recovery、自热、噪声或商业器件语义。 |
-| N/P channel MOSFET | 本地候选（M18-C9d 实施中） | enhancement square-law v1 兼容，并增加沟道 CLM/subthreshold、静态温度、source-tied body-to-drain PN 支路和 GS/GD depletion companion；沟道保持 drain/source 对称，body diode 固定方向并有意打破整体对称；不含 bulk 第四端、body-effect、复杂电荷、avalanche、自热、SOA、噪声或商业器件语义。 |
-| bounded opamp | 已交付；C9e dynamic opamp 本地候选（实施中） | v1 为无频率状态的有界电压放大器；C9e 沿用四端拓扑增加有限 GBW/主极点、slew、输入偏置/失调、输入/输出阻抗、输出限流、内部供电轨边界和 Reset 状态，不含显式供电脚或商业芯片语义。 |
+| Shockley diode | 已交付 | 保持通用静态 IV/Jacobian，C9a 增加 generic 电压相关结电容、BE 历史、静态温度/漏电修正和解析 Jacobian；没有反向恢复、噪声或商业型号校准。 |
+| Zener | 已交付 | 在双指数静态模型上复用 C9a 动态结状态和温度/漏电修正；没有商业型号校准或 reverse-recovery/载流子存储。 |
+| NPN/PNP BJT | 已交付 | clean-room Ebers-Moll v1 兼容，并增加 generic Early 有限输出、BE/BC depletion companion 与静态温度修正；不含 charge-storage/reverse-recovery、击穿、自热、噪声或商业器件语义。 |
+| N/P channel JFET | 已交付 | clean-room square-law v1 兼容，并增加有限 channel-length modulation、静态温度、GS/GD PN leakage 与 depletion companion；不含 avalanche、charge storage、reverse recovery、自热、噪声或商业器件语义。 |
+| N/P channel MOSFET | 已交付 | enhancement square-law v1 兼容，并增加沟道 CLM/subthreshold、静态温度、source-tied body-to-drain PN 支路和 GS/GD depletion companion；沟道保持 drain/source 对称，body diode 固定方向并有意打破整体对称。 |
+| bounded/dynamic opamp | 已交付 | v1 为无频率状态的有界电压放大器；C9e 沿用四端拓扑增加有限 GBW/主极点、slew、输入偏置/失调、输入/输出阻抗、输出限流、内部供电轨边界和 Reset 状态，不含显式供电脚或商业芯片语义。 |
 | bounded OTA | 已交付 | 无频率状态的有界跨导放大器；没有真实芯片控制、电源、频率和噪声特性。 |
 | triode | 已交付 | M18-C6 generic space-charge v1 已由 `667d1f2` 提交；没有栅极导通/漏电、极间电容、加热器、温度、自热、老化、microphonics 和商业管参数。 |
 | pentode | 已交付 | M18-C7a generic space-charge/screen-share v1 已由 `cd5f1bc` 提交；没有商业管型、真实 suppressor-grid/beam-forming、secondary emission、反向/栅极导通、动态电容和热行为。 |
@@ -64,14 +69,14 @@
 
 | 效果器类别 | 当前判断 | 主要依据或缺口 |
 | --- | --- | --- |
-| 被动滤波、基础 EQ、音调网络 | 基础可表达 | R/C/L 和静态电位器已具备；实时旋钮和任意复杂拓扑仍受限。 |
+| 被动滤波、基础 EQ、音调网络 | 基础可表达 | R/C/L 与 D1a 实时电位器已具备；任意复杂拓扑仍受限。 |
 | 二极管削波、限幅、简单整流 | 通用模型可实现 | diode/Zener 静态路径已交付，C9a generic 动态结为本地候选；reverse-recovery、高精度电荷模型和具体型号校准未完成。 |
 | 晶体管 Fuzz、Boost、简单失真级 | 通用模型可实现 | BJT/JFET/MOSFET 已交付；高阶寄生、温度、容差和实机校准未完成。 |
 | 运放 Overdrive/Distortion、基础有源滤波 | 结构上可实现 | bounded opamp 已交付；真实运放频率、电源和瞬态限制未完成。 |
 | OTA 压缩、滤波和调制 | 部分可表达 | OTA 核心存在；包络、控制电流、实时参数和具体芯片行为不完整。 |
-| Wah、Phaser、Tremolo | 部分可表达 | 基础滤波和有源器件存在；实时电位器、LFO、开关及器件动态特性仍缺失。 |
+| Wah、Phaser、Tremolo | 部分可表达 | 基础滤波、D1a 实时电位器/两端开关存在；LFO、光学耦合及更完整动态特性仍缺失。 |
 | 光学压缩、光学 Tremolo、Uni-Vibe | 未完整覆盖 | 缺少 LED/LDR/灯泡耦合、记忆和时间常数模型。 |
-| Chorus、Flanger、Analog Delay | 未完整覆盖 | 缺少 BBD、clock、VCO/LFO、插值/抗混叠和行为岛真实绑定。 |
+| Chorus、Flanger、Analog Delay | 部分可表达 | D2a 有 generic clocked BBD/delay 行为 runtime；仍缺少 clock feedthrough、VCO/LFO、插值/抗混叠和完整行为岛绑定。 |
 | Spring Reverb | 未完整覆盖 | 只有行为 lowering/契约基础，没有可运行弹簧与换能器模型。 |
 | 真空管前级单块/前级通道 | 通用模型初步能力 | generic triode/pentode/beam tetrode/vari-mu 已交付；真实栅流、极间电容、供电和具体管型尚未完成。 |
 
@@ -98,9 +103,9 @@
 
 - canonical SPQR/rigid decomposition、任意嵌套 WDF tree、多端口 R scattering 和 WDF/MNA 混合树；
 - WDF 非线性联合求解、DC 工作点和 K-method 增量优化；
-- subcircuit 跨网络行为绑定、完整端口语义和运行时状态管理；
+- 外部/递归/主动/多端 subcircuit macro-model、跨实例状态共享和完整运行时行为绑定；D1b2 仅覆盖显式端口映射的 inline R/C/L 编译期扁平化；
 - 无锁、无分配的实时参数邮箱，以及电位器、开关、继电器和供电变化；
-- BBD、delay、VCO、VCA、envelope、LFO、spring、optocoupler 等行为模块；
+- VCO、VCA、envelope、LFO、spring、optocoupler 等行为模块；D2a 仅覆盖受限 generic clocked BBD/delay，不代表完整模拟行为；
 - 完整且授权可审计的型号数据库；
 - 每个模块的 DC、频响、静态曲线、谐波/互调、动态响应、参数扫动、采样率、收敛及误差阈值证据。
 
@@ -119,8 +124,8 @@
 | M18-C9a | diode/Zener 动态结 | 本地候选：generic depletion 结电容、静态温度/漏电修正、BE/Reset/过采样/外部 runtime；不含 reverse-recovery、商业型号或 SPICE 等价。 |
 | M18-C9b+ | 其余半导体与运放高阶物理 | BJT/JFET/MOSFET 寄生与温度、真实运放电源/频率/瞬态行为仍待后续逐项授权与验证。 |
 | M18-C10 | 电源与负载交互 | 整流、纹波、Sag、供电恢复、扬声器动态阻抗及功放反馈联调。 |
-| M18-D1 | 实时控制和跨网络语义 | 电位器、开关、继电器、供电和子电路参数经有界实时邮箱更新，具备平滑、状态、自动化和 Reset 测试。 |
-| M18-D2 | 行为模块 | BBD/delay、VCO/VCA、envelope/LFO、光耦/LDR/灯泡、spring 可运行绑定和跨网络测试。 |
+| M18-D1 | 实时控制和跨网络语义 | D1a 参数邮箱、D1b1/D1b3 relay、D1b2 inline passive flattening 为本地候选；外部/递归 macro-model 仍待后续。 |
+| M18-D2 | 行为模块 | D2a generic clocked BBD/delay 正在实施；VCO/VCA、envelope/LFO、光耦/LDR/灯泡、spring 及完整跨网络行为仍待逐项授权。 |
 | M18-B 后续收口 | 通用拓扑编译与混合求解 | canonical SPQR/rigid、多端口 R、WDF/MNA 混合树、非线性联合求解和 DC/K-method 闭环。 |
 | M19 | 代表性单块与箱头验证 | 先以 generic 模块验证覆盖面，再对资料完整的目标做 SPICE/golden/实机校准；资料不足保持 `blocked`。 |
 | M20 | 性能与产品全量回归 | 192 kHz/过采样、CPU、延迟、无分配、稳定性、C ABI、VST3、UI 和 Validator 全量通过。 |

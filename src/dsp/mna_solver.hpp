@@ -4,6 +4,10 @@
 #include "content/model_database.hpp"
 #include "core/realtime_contract.hpp"
 #include "dsp/coupled_inductor.hpp"
+#include "dsp/dynamic_power_supply.hpp"
+#include "dsp/dynamic_speaker_load.hpp"
+#include "dsp/dynamic_relay.hpp"
+#include "dsp/dynamic_relay_routing.hpp"
 #include "dsp/nonlinear_device.hpp"
 #include "dsp/nonlinear_diode_dynamic.hpp"
 #include "dsp/nonlinear_bjt_dynamic.hpp"
@@ -12,7 +16,10 @@
 #include "dsp/nonlinear_opamp_dynamic.hpp"
 
 #include <cstdint>
+#include <array>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace solo_rig {
@@ -54,6 +61,10 @@ public:
     // Compile/Prepare owns all storage; Solve is the real-time-safe sample step
     // and only mutates preallocated matrices, RHS, solution and dynamic histories.
     [[nodiscard]] MnaSolveResult Solve(double input_voltage) noexcept;
+    [[nodiscard]] std::size_t ControlCount() const noexcept;
+    [[nodiscard]] std::optional<std::size_t> FindControl(std::string_view parameter_id) const noexcept;
+    [[nodiscard]] bool SetControlTarget(std::size_t control_index, double value) noexcept;
+    [[nodiscard]] std::optional<double> ControlValue(std::size_t control_index) const noexcept;
     [[nodiscard]] static constexpr RealtimeContract ProcessContract() noexcept {
         return DefaultRealtimeContract();
     }
@@ -114,10 +125,47 @@ public:
         CoupledInductorModel coupled_inductor_model{};
         CoupledInductorCoefficients coupled_inductor_coefficients{};
         NonlinearTransformerCoreModel nonlinear_transformer_core_model{};
+        DynamicPowerSupplyModel dynamic_power_supply_model{};
+        std::uint32_t dynamic_power_supply_state_index{UINT32_MAX};
+        DynamicSpeakerLoadModel dynamic_speaker_load_model{};
+        DynamicSpeakerLoadState dynamic_speaker_load_initial_state{};
+        std::uint32_t dynamic_speaker_load_state_index{UINT32_MAX};
+        DynamicRelayModel dynamic_relay_model{};
+        DynamicRelayRoutingModel dynamic_relay_routing_model{};
+        DynamicRelayState dynamic_relay_initial_state{};
+        std::uint32_t dynamic_relay_state_index{UINT32_MAX};
+        std::uint32_t dynamic_relay_model_version{1U};
+        std::array<std::int32_t, 4> relay_common_nodes{-1, -1, -1, -1};
+        std::array<std::int32_t, 4> relay_normally_closed_nodes{-1, -1, -1, -1};
+        std::array<std::int32_t, 4> relay_normally_open_nodes{-1, -1, -1, -1};
     };
 
 private:
     friend struct MnaCompileResult;
+
+    enum class ControlKind {
+        PotentiometerPosition,
+        SwitchState,
+        SupplyVoltage,
+    };
+
+    struct Control {
+        ControlKind kind{ControlKind::PotentiometerPosition};
+        std::string parameter_id;
+        std::uint32_t primary_element_index{UINT32_MAX};
+        std::uint32_t secondary_element_index{UINT32_MAX};
+        double minimum{};
+        double maximum{};
+        double initial{};
+        double current{};
+        double target{};
+        double smoothing_seconds{};
+        double scale_a{};
+        double scale_b{};
+    };
+
+    [[nodiscard]] bool ApplyControl(Control& control) noexcept;
+    [[nodiscard]] bool AdvanceControls(double timestep_seconds) noexcept;
 
     std::vector<Element> elements_;
     std::vector<double> capacitor_history_;
@@ -130,6 +178,10 @@ private:
     std::vector<double> mosfet_gs_history_;
     std::vector<double> mosfet_gd_history_;
     std::vector<double> opamp_dynamic_history_;
+    std::vector<DynamicPowerSupplyState> dynamic_power_supply_states_;
+    std::vector<DynamicSpeakerLoadState> dynamic_speaker_load_states_;
+    std::vector<DynamicRelayState> dynamic_relay_states_;
+    std::vector<Control> controls_;
     std::vector<double> matrix_;
     std::vector<double> rhs_;
     std::vector<double> solution_;

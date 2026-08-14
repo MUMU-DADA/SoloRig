@@ -40,6 +40,7 @@ enum class ModelKind {
     BeamTetrode,
     VariMu,
     TransformerCore,
+    SpeakerLoad,
     TestMathematical,
 };
 

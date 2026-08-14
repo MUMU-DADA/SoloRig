@@ -5,6 +5,8 @@
 #include "dsp/mna_solver.hpp"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -295,8 +297,29 @@ private:
 
 class MnaCircuitRuntime final : public ModuleRuntimeProcessor {
 public:
-    MnaCircuitRuntime(std::uint32_t declared_latency_samples, MnaPreparedCircuit blueprint)
-        : declared_latency_samples_(declared_latency_samples), blueprint_(std::move(blueprint)) {}
+    struct Binding {
+        std::string parameter_id;
+        float minimum{};
+        float maximum{};
+        std::size_t control_index{};
+    };
+
+    static constexpr std::size_t kMaximumBindings = 64U;
+
+    MnaCircuitRuntime(std::uint32_t declared_latency_samples,
+                      MnaPreparedCircuit blueprint,
+                      std::vector<Binding> bindings,
+                      const std::vector<EffectParameter>& parameters)
+        : declared_latency_samples_(declared_latency_samples), blueprint_(std::move(blueprint)),
+          bindings_(std::move(bindings)) {
+        for (std::size_t index = 0; index < bindings_.size(); ++index) {
+            const auto parameter = std::find_if(parameters.begin(), parameters.end(),
+                [this, index](const EffectParameter& item) {
+                    return item.id == bindings_[index].parameter_id;
+                });
+            targets_[index].store(parameter->default_value, std::memory_order_relaxed);
+        }
+    }
 
     bool Prepare(const AudioFormat& format) override {
         if (!format.Validate().empty()) {
@@ -321,10 +344,21 @@ public:
             input.ChannelCount() != channel_circuits_.size() || output.ChannelCount() != channel_circuits_.size()) {
             return;
         }
-        for (std::uint32_t channel = 0; channel < channel_circuits_.size(); ++channel) {
-            const auto* source = input.ChannelData(channel);
-            auto* destination = output.ChannelData(channel);
-            for (std::uint32_t sample = 0; sample < sample_count; ++sample) {
+        std::array<float, kMaximumBindings> targets{};
+        for (std::uint32_t sample = 0; sample < sample_count; ++sample) {
+            for (std::size_t binding = 0; binding < bindings_.size(); ++binding) {
+                targets[binding] = targets_[binding].load(std::memory_order_acquire);
+            }
+            for (std::uint32_t channel = 0; channel < channel_circuits_.size(); ++channel) {
+                for (std::size_t binding = 0; binding < bindings_.size(); ++binding) {
+                    if (!channel_circuits_[channel].SetControlTarget(
+                            bindings_[binding].control_index, targets[binding])) {
+                        output.ChannelData(channel)[sample] = 0.0F;
+                        continue;
+                    }
+                }
+                const auto* source = input.ChannelData(channel);
+                auto* destination = output.ChannelData(channel);
                 const auto solved = channel_circuits_[channel].Solve(source[sample]);
                 destination[sample] = solved.Succeeded() ? static_cast<float>(solved.output_voltage) : 0.0F;
             }
@@ -335,11 +369,28 @@ public:
         return declared_latency_samples_;
     }
 
-    [[nodiscard]] bool SetParameter(std::string_view, float) noexcept override {
+    [[nodiscard]] bool SetParameter(std::string_view parameter_id, float value) noexcept override {
+        if (!std::isfinite(value)) {
+            return false;
+        }
+        for (std::size_t index = 0; index < bindings_.size(); ++index) {
+            if (bindings_[index].parameter_id == parameter_id) {
+                if (value < bindings_[index].minimum || value > bindings_[index].maximum) {
+                    return false;
+                }
+                targets_[index].store(value, std::memory_order_release);
+                return true;
+            }
+        }
         return false;
     }
 
-    [[nodiscard]] std::optional<float> ParameterValue(std::string_view) const noexcept override {
+    [[nodiscard]] std::optional<float> ParameterValue(std::string_view parameter_id) const noexcept override {
+        for (std::size_t index = 0; index < bindings_.size(); ++index) {
+            if (bindings_[index].parameter_id == parameter_id) {
+                return targets_[index].load(std::memory_order_acquire);
+            }
+        }
         return std::nullopt;
     }
 
@@ -347,6 +398,8 @@ private:
     std::uint32_t declared_latency_samples_{};
     MnaPreparedCircuit blueprint_;
     std::vector<MnaPreparedCircuit> channel_circuits_;
+    std::vector<Binding> bindings_;
+    std::array<std::atomic<float>, kMaximumBindings> targets_{};
     bool prepared_{};
 };
 
@@ -459,8 +512,47 @@ std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> Create
         return compiled.error == MnaCompileError::UnsupportedComponent ? ModuleRuntimeError::UnsupportedCircuit
                                                                         : ModuleRuntimeError::UnsupportedAnalogTopology;
     }
+    if (circuit.parameter_bindings.size() > MnaCircuitRuntime::kMaximumBindings) {
+        return ModuleRuntimeError::InvalidInitialParameterValue;
+    }
+    std::vector<MnaCircuitRuntime::Binding> bindings;
+    bindings.reserve(circuit.parameter_bindings.size());
+    for (const auto& binding : circuit.parameter_bindings) {
+        const auto parameter = std::find_if(package.descriptor.parameters.begin(), package.descriptor.parameters.end(),
+            [&binding](const EffectParameter& item) { return item.id == binding.parameter_id; });
+        const auto control_index = compiled.circuit->FindControl(binding.parameter_id);
+        if (parameter == package.descriptor.parameters.end() || !control_index.has_value()) {
+            return ModuleRuntimeError::InvalidInitialParameterValue;
+        }
+        double target_minimum{};
+        double target_maximum{};
+        if (binding.property == CircuitParameterBindingProperty::PotentiometerPosition) {
+            const auto component = std::find_if(circuit.components.begin(), circuit.components.end(),
+                [&binding](const CircuitComponent& item) { return item.id == binding.target_id; });
+            if (component == circuit.components.end() || !component->potentiometer.has_value()) {
+                return ModuleRuntimeError::InvalidInitialParameterValue;
+            }
+            target_minimum = component->potentiometer->minimum;
+            target_maximum = component->potentiometer->maximum;
+        } else if (binding.property == CircuitParameterBindingProperty::SwitchState) {
+            target_minimum = 0.0;
+            target_maximum = 1.0;
+        } else {
+            target_minimum = -1.0e6;
+            target_maximum = 1.0e6;
+        }
+        if (!std::isfinite(parameter->minimum) || !std::isfinite(parameter->maximum) ||
+            !std::isfinite(parameter->default_value) || parameter->minimum < target_minimum ||
+            parameter->maximum > target_maximum || parameter->default_value < parameter->minimum ||
+            parameter->default_value > parameter->maximum) {
+            return ModuleRuntimeError::InvalidInitialParameterValue;
+        }
+        bindings.push_back({.parameter_id = binding.parameter_id, .minimum = parameter->minimum,
+            .maximum = parameter->maximum, .control_index = *control_index});
+    }
     return std::unique_ptr<ModuleRuntimeProcessor>(std::make_unique<MnaCircuitRuntime>(
-        package.descriptor.declared_latency_samples, *compiled.circuit));
+        package.descriptor.declared_latency_samples, *compiled.circuit, std::move(bindings),
+        package.descriptor.parameters));
 }
 
 } // namespace

@@ -2,6 +2,7 @@
 
 #include "content/json.hpp"
 #include "dsp/coupled_inductor.hpp"
+#include "dsp/dynamic_speaker_load.hpp"
 #include "dsp/nonlinear_diode_dynamic.hpp"
 #include "dsp/nonlinear_transformer_core.hpp"
 
@@ -47,6 +48,7 @@ std::optional<ModelKind> ParseKind(std::string_view value) {
     if (value == "beam-tetrode") return ModelKind::BeamTetrode;
     if (value == "vari-mu") return ModelKind::VariMu;
     if (value == "transformer-core") return ModelKind::TransformerCore;
+    if (value == "speaker-load") return ModelKind::SpeakerLoad;
     if (value == "test-mathematical") return ModelKind::TestMathematical;
     return std::nullopt;
 }
@@ -72,6 +74,7 @@ bool IsApprovedKind(ModelKind kind) {
            kind == ModelKind::Opamp || kind == ModelKind::Ota ||
            kind == ModelKind::Triode || kind == ModelKind::Pentode || kind == ModelKind::BeamTetrode ||
            kind == ModelKind::VariMu || kind == ModelKind::TransformerCore ||
+           kind == ModelKind::SpeakerLoad ||
            kind == ModelKind::TestMathematical;
 }
 
@@ -510,13 +513,58 @@ bool HasTransformerCoreParameterContract(const ModelAuditRecord& model) {
         .max_step = value("max-step")});
 }
 
+bool HasSpeakerLoadParameterContract(const ModelAuditRecord& model) {
+    if (model.kind != ModelKind::SpeakerLoad) return true;
+    struct Required { std::string_view id; std::string_view unit; double minimum; double maximum; };
+    constexpr Required required[] = {
+        {"voice-coil-resistance", "ohm", 1.0e-6, 1.0e9},
+        {"voice-coil-inductance", "H", 0.0, 1.0e3},
+        {"force-factor", "N/A", 0.0, 1.0e6},
+        {"moving-mass", "kg", 1.0e-9, 1.0e6},
+        {"mechanical-resistance", "N*s/m", 0.0, 1.0e9},
+        {"compliance", "m/N", 1.0e-12, 1.0e6},
+        {"nonlinear-stiffness", "N/m", 0.0, 1.0e12},
+        {"nonlinear-displacement-scale", "m", 1.0e-9, 1.0e3},
+        {"maximum-current", "A", 1.0e-12, 1.0e6},
+        {"maximum-velocity", "m/s", 1.0e-9, 1.0e6},
+        {"maximum-displacement", "m", 1.0e-9, 1.0e6},
+        {"initial-current", "A", -1.0e6, 1.0e6},
+        {"initial-velocity", "m/s", -1.0e6, 1.0e6},
+        {"initial-displacement", "m", -1.0e6, 1.0e6}};
+    if (model.parameters.size() != std::size(required)) return false;
+    const auto matches = [&model](const Required& expected) {
+        return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
+            return parameter.id == expected.id && parameter.unit == expected.unit &&
+                   std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
+                   parameter.default_value <= expected.maximum && std::isfinite(parameter.minimum) &&
+                   std::isfinite(parameter.maximum) && parameter.minimum >= expected.minimum &&
+                   parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
+                   parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
+        }) == 1;
+    };
+    if (!std::all_of(std::begin(required), std::end(required), matches)) return false;
+    const auto value = [&model](std::string_view id) {
+        return std::find_if(model.parameters.begin(), model.parameters.end(),
+                            [id](const auto& parameter) { return parameter.id == id; })->default_value;
+    };
+    const DynamicSpeakerLoadModel runtime_model{
+        value("voice-coil-resistance"), value("voice-coil-inductance"), value("force-factor"),
+        value("moving-mass"), value("mechanical-resistance"), value("compliance"),
+        value("nonlinear-stiffness"), value("nonlinear-displacement-scale"),
+        value("maximum-current"), value("maximum-velocity"), value("maximum-displacement")};
+    return ValidateDynamicSpeakerLoadModel(runtime_model) &&
+           std::fabs(value("initial-current")) <= runtime_model.maximum_current &&
+           std::fabs(value("initial-velocity")) <= runtime_model.maximum_velocity &&
+           std::fabs(value("initial-displacement")) <= runtime_model.maximum_displacement;
+}
+
 bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
     if (model.kind != ModelKind::Diode && model.kind != ModelKind::Zener && model.kind != ModelKind::Bjt &&
         model.kind != ModelKind::Jfet && model.kind != ModelKind::Mosfet &&
         model.kind != ModelKind::Opamp && model.kind != ModelKind::Ota &&
         model.kind != ModelKind::Triode && model.kind != ModelKind::Pentode &&
         model.kind != ModelKind::BeamTetrode && model.kind != ModelKind::VariMu &&
-        model.kind != ModelKind::TransformerCore) {
+        model.kind != ModelKind::TransformerCore && model.kind != ModelKind::SpeakerLoad) {
         return true;
     }
     if (model.kind == ModelKind::Opamp || model.kind == ModelKind::Ota) {
@@ -558,6 +606,11 @@ bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
                 (model.part_number == "self-authored-saturating-hysteretic-transformer-core-no-commercial-part" &&
                  model.model_id == "solorig.cleanroom.transformer-core.saturating-hysteretic.v1"));
     }
+    if (model.kind == ModelKind::SpeakerLoad) {
+        return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
+               model.license.permission_evidence == "self-authored-clean-room" &&
+               model.part_number == "self-authored-electrodynamic-speaker-load-no-commercial-part";
+    }
     if (model.kind == ModelKind::Bjt || model.kind == ModelKind::Jfet || model.kind == ModelKind::Mosfet) {
         const bool polarity_allowed = model.kind == ModelKind::Bjt
             ? model.polarity.has_value() && (*model.polarity == "npn" || *model.polarity == "pnp")
@@ -590,6 +643,7 @@ const char* ModelKindName(ModelKind kind) noexcept {
     case ModelKind::BeamTetrode: return "beam-tetrode";
     case ModelKind::VariMu: return "vari-mu";
     case ModelKind::TransformerCore: return "transformer-core";
+    case ModelKind::SpeakerLoad: return "speaker-load";
     case ModelKind::TestMathematical: return "test-mathematical";
     }
     return "unknown";
@@ -609,6 +663,7 @@ std::vector<ModelKindContract> ModelKindContracts() {
         {ModelKind::BeamTetrode, ModelAvailability::Approved},
         {ModelKind::VariMu, ModelAvailability::Approved},
         {ModelKind::TransformerCore, ModelAvailability::Approved},
+        {ModelKind::SpeakerLoad, ModelAvailability::Approved},
         {ModelKind::TestMathematical, ModelAvailability::Approved},
     };
 }
@@ -786,6 +841,9 @@ std::optional<ModelAuditError> ModelDatabase::Register(ModelAuditRecord model) {
         (model.kind == ModelKind::BeamTetrode && !HasBeamTetrodeParameterContract(model)) ||
         (model.kind == ModelKind::VariMu && !HasVariMuParameterContract(model)) ||
         (model.kind == ModelKind::TransformerCore && !HasTransformerCoreParameterContract(model))) {
+        return ModelAuditError::MissingModelAuthorization;
+    }
+    if (model.kind == ModelKind::SpeakerLoad && !HasSpeakerLoadParameterContract(model)) {
         return ModelAuditError::MissingModelAuthorization;
     }
     if (model.availability != ModelAvailability::Approved || !IsApprovedKind(model.kind)) {

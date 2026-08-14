@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "schema": "circuit",
+  "referenceGround": "0",
+  "nodes": ["in", "out", "0"],
+  "ports": [
+    {"id": "input", "direction": "input", "node": "in"},
+    {"id": "output", "direction": "output", "node": "out"}
+  ],
+  "supplies": [],
+  "components": [
+    {"id": "load", "kind": "resistor", "pins": ["out", "0"], "value": 1000.0}
+  ],
+  "subcircuits": [
+    {
+      "id": "passive-stage",
+      "ports": ["input", "output", "ground"],
+      "portMap": {"input": "in", "output": "out", "ground": "0"},
+      "inline": {
+        "nodes": ["input", "mid", "output", "ground"],
+        "components": [
+          {"id": "series-r", "kind": "resistor", "pins": ["input", "mid"], "value": 470.0},
+          {"id": "shunt-c", "kind": "capacitor", "pins": ["mid", "ground"], "value": 0.000001, "initial": 0.25},
+          {"id": "series-l", "kind": "inductor", "pins": ["mid", "output"], "value": 0.01, "initial": 0.005}
+        ]
+      }
+    }
+  ],
+  "modelReferences": [],
+  "backend": {"preferred": "mna"}
+}

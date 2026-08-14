@@ -766,7 +766,7 @@ TEST_CASE("MNA diode Newton reports deterministic non-convergence, non-finite in
     REQUIRE(compiled.circuit->Solve(10.0).error == solo_rig::MnaSolveError::NonConvergent);
 }
 
-TEST_CASE("MNA explicitly rejects unimplemented dynamic controls instead of silently degrading") {
+TEST_CASE("M18-D1a MNA compiles a two-terminal switch as a finite declared resistance") {
     const auto parsed = solo_rig::ParseCircuitV2Json(R"({
       "version":2,"schema":"circuit","referenceGround":"0","nodes":["out","0"],
       "ports":[{"id":"output","direction":"output","node":"out"}],
@@ -776,8 +776,9 @@ TEST_CASE("MNA explicitly rejects unimplemented dynamic controls instead of sile
     })");
     REQUIRE(parsed.circuit.has_value());
     auto compiled = solo_rig::CompileMnaCircuit(*parsed.circuit);
-    REQUIRE(!compiled.circuit.has_value());
-    REQUIRE(compiled.error == solo_rig::MnaCompileError::UnsupportedComponent);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(48000.0));
+    REQUIRE(compiled.circuit->Solve(0.0).Succeeded());
 }
 
 TEST_CASE("MNA rejects non-finite prepared diode model values before Prepare") {
