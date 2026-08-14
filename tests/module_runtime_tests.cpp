@@ -442,6 +442,40 @@ TEST_CASE("M18-C4 external analog v2 runtime binds an audited MOSFET reference b
     }
 }
 
+TEST_CASE("M18-C5 external analog v2 runtime binds an audited OTA reference before Process") {
+    const auto directory = CreateRuntimePackage(R"({
+        "schemaVersion":1,"moduleId":"org.mumu-dada.solorig.external-audited-ota-v2",
+        "displayName":"External audited OTA v2","category":"analog-circuit","logicFile":"logic/main.json",
+        "ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}]
+    })", R"({
+        "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","0"],
+        "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],
+        "components":[{"id":"g","type":"ota","pins":["out","0","in","0"],"model":"solorig.cleanroom.ota.bounded.v1"},{"id":"load","type":"resistor","pins":["out","0"],"value":1000}],
+        "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":4,
+          "convergence":{"maxIterations":64,"absoluteTolerance":1e-9,"relativeTolerance":1e-6}}
+    })");
+    const auto package = solo_rig::LoadModulePackage(directory);
+    RemoveRuntimePackage(directory);
+    const auto database = solo_rig::BuildModelDatabase(ReadWhiteboxFixture("m18c5_cleanroom_ota_model.json"));
+    REQUIRE(package.package.has_value());
+    REQUIRE(database.database.has_value());
+    REQUIRE(std::holds_alternative<solo_rig::ModuleRuntimeError>(solo_rig::CreateModuleRuntime(*package.package)));
+    auto runtime = solo_rig::CreateModuleRuntime(*package.package, *database.database);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    solo_rig::AudioBuffer input(1, 8);
+    solo_rig::AudioBuffer output(1, 8);
+    for (std::uint32_t sample = 0; sample < 8U; ++sample) {
+        input.ChannelData(0)[sample] = sample % 2U == 0U ? -3.0F : 3.0F;
+    }
+    REQUIRE(processor->Prepare({.sample_rate_hz = 192000.0, .max_block_size = 8, .channel_count = 1}));
+    processor->Process(input, output, 8);
+    for (std::uint32_t sample = 0; sample < 8U; ++sample) {
+        REQUIRE(std::isfinite(output.ChannelData(0)[sample]));
+        REQUIRE(std::fabs(output.ChannelData(0)[sample]) <= 2.0F);
+    }
+}
+
 TEST_CASE("External digital delay package executes declared delay feedback and mix operations") {
     const auto directory = CreateRuntimePackage(R"({
         "schemaVersion":1,

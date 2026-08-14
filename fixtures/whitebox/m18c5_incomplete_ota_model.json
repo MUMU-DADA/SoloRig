@@ -1,0 +1,5 @@
+{
+  "version":1,"schema":"solorig-model-audit","modelId":"solorig.cleanroom.ota.incomplete","deviceFamily":"clean-room-ota","partNumber":"self-authored-bounded-ota-no-commercial-part","modelKind":"ota","runtimeStatus":"approved",
+  "parameters":[{"id":"transconductance","default":0.001,"min":1.0e-12,"max":1.0e6,"unit":"A/V"},{"id":"minimum-output","default":-0.002,"min":-1.0e6,"max":1.0e6,"unit":"A"},{"id":"maximum-output","default":0.002,"min":-1.0e6,"max":1.0e6,"unit":"A"}],
+  "source":{"origin":"SoloRig self-authored clean-room bounded operational transconductance amplifier contract","version":"m18c5-clean-room-v1","integrity":"self:m18c5-incomplete"},"license":{"spdx":"MIT","permissionEvidence":"self-authored-clean-room","reviewStatus":"approved"},"applicability":[{"quantity":"terminal-voltage","min":-20.0,"max":20.0,"unit":"V"}],"evidenceRefs":["test:m18c5-reject-incomplete"]
+}

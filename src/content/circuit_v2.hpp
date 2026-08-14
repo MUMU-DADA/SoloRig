@@ -22,6 +22,8 @@ enum class CircuitComponentType {
     Potentiometer,
     Vccs,
     IdealOpAmp,
+    OpAmp,
+    Ota,
     Bjt,
     Jfet,
     Mosfet,
@@ -75,6 +77,15 @@ struct CircuitMosfetModel {
     double max_step{1.0};
 };
 
+struct CircuitAmplifierModel {
+    std::string kind;
+    std::uint32_t model_version{1};
+    double gain{};
+    double minimum_output{};
+    double maximum_output{};
+    double max_step{1.0};
+};
+
 struct CircuitSwitchSpec {
     std::vector<std::string> states;
     std::uint32_t initial_state{};
@@ -118,6 +129,7 @@ struct CircuitComponent {
     std::optional<CircuitBjtModel> bjt_model;
     std::optional<CircuitJfetModel> jfet_model;
     std::optional<CircuitMosfetModel> mosfet_model;
+    std::optional<CircuitAmplifierModel> amplifier_model;
     std::optional<CircuitSwitchSpec> switch_spec;
 };
 

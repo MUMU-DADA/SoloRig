@@ -78,6 +78,12 @@ std::optional<CircuitComponentType> ComponentType(std::string_view text) {
     if (text == "ideal-op-amp") {
         return CircuitComponentType::IdealOpAmp;
     }
+    if (text == "opamp") {
+        return CircuitComponentType::OpAmp;
+    }
+    if (text == "ota") {
+        return CircuitComponentType::Ota;
+    }
     if (text == "bjt") {
         return CircuitComponentType::Bjt;
     }
@@ -256,16 +262,19 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         }
         const bool is_potentiometer = *type == CircuitComponentType::Potentiometer;
         const bool is_controlled_source = *type == CircuitComponentType::Vccs || *type == CircuitComponentType::IdealOpAmp;
+        const bool is_amplifier = *type == CircuitComponentType::OpAmp || *type == CircuitComponentType::Ota;
         const bool is_bjt = *type == CircuitComponentType::Bjt;
         const bool is_jfet = *type == CircuitComponentType::Jfet;
         const bool is_mosfet = *type == CircuitComponentType::Mosfet;
         if ((Find(*component, "bjtModel") != nullptr && !is_bjt) ||
             (Find(*component, "jfetModel") != nullptr && !is_jfet) ||
-            (Find(*component, "mosfetModel") != nullptr && !is_mosfet)) {
+            (Find(*component, "mosfetModel") != nullptr && !is_mosfet) ||
+            (Find(*component, "amplifierModel") != nullptr && !is_amplifier) ||
+            (Find(*component, "controlledSource") != nullptr && !is_controlled_source)) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         if (pins->size() != 2U && !(is_potentiometer && pins->size() == 3U) &&
-            !(is_controlled_source && pins->size() == 4U) &&
+            !((is_controlled_source || is_amplifier) && pins->size() == 4U) &&
             !((is_bjt || is_jfet || is_mosfet) && pins->size() == 3U)) {
             return Failure(CircuitLoadError::InvalidPin);
         }
@@ -448,6 +457,50 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         if (is_controlled_source && !parsed_component.controlled_source.has_value()) {
+            return Failure(CircuitLoadError::InvalidValue);
+        }
+        if (is_amplifier) {
+            const auto* amplifier_value = Find(*component, "amplifierModel");
+            const auto* amplifier = amplifier_value == nullptr ? nullptr : amplifier_value->AsObject();
+            const auto kind = amplifier == nullptr ? std::nullopt : StringValue(Find(*amplifier, "kind"));
+            const auto model_version = amplifier == nullptr
+                ? std::nullopt : UnsignedValue(Find(*amplifier, "modelVersion"));
+            const auto gain = amplifier == nullptr ? std::nullopt : NumberValue(Find(*amplifier, "gain"));
+            const auto minimum = amplifier == nullptr
+                ? std::nullopt : NumberValue(Find(*amplifier, "minimumOutput"));
+            const auto maximum = amplifier == nullptr
+                ? std::nullopt : NumberValue(Find(*amplifier, "maximumOutput"));
+            const auto max_step = amplifier == nullptr
+                ? std::nullopt : NumberValue(Find(*amplifier, "maxStep"));
+            const auto expected_kind = *type == CircuitComponentType::OpAmp ? "bounded-opamp" : "bounded-ota";
+            const double minimum_gain = *type == CircuitComponentType::OpAmp ? 1.0 : 1.0e-12;
+            const double maximum_gain = *type == CircuitComponentType::OpAmp ? 1.0e12 : 1.0e6;
+            if (amplifier == nullptr && !parsed_component.model.has_value()) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            if (amplifier != nullptr && (!kind.has_value() || *kind != expected_kind ||
+                !model_version.has_value() || *model_version != 1U || !gain.has_value() ||
+                *gain < minimum_gain || *gain > maximum_gain || !minimum.has_value() ||
+                !maximum.has_value() || *minimum < -1.0e6 || *maximum > 1.0e6 ||
+                *minimum >= *maximum || !max_step.has_value() || *max_step < 1.0e-20 ||
+                *max_step > 10.0 || parsed_component.value.has_value() ||
+                parsed_component.tolerance.has_value() || parsed_component.model.has_value() ||
+                parsed_component.diode_model.has_value() || parsed_component.potentiometer.has_value() ||
+                parsed_component.controlled_source.has_value() || parsed_component.bjt_model.has_value() ||
+                parsed_component.jfet_model.has_value() || parsed_component.mosfet_model.has_value() ||
+                parsed_component.switch_spec.has_value())) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            if (amplifier != nullptr) {
+                parsed_component.amplifier_model = CircuitAmplifierModel{.kind = *kind,
+                                                                          .model_version = *model_version,
+                                                                          .gain = *gain,
+                                                                          .minimum_output = *minimum,
+                                                                          .maximum_output = *maximum,
+                                                                          .max_step = *max_step};
+            }
+        }
+        if (is_amplifier && !parsed_component.amplifier_model.has_value() && !parsed_component.model.has_value()) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         if (is_bjt) {

@@ -76,6 +76,7 @@ public:
         NonlinearBjtModel nonlinear_bjt_model{};
         NonlinearJfetModel nonlinear_jfet_model{};
         NonlinearMosfetModel nonlinear_mosfet_model{};
+        NonlinearAmplifierModel nonlinear_amplifier_model{};
     };
 
 private:

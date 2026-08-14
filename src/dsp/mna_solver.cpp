@@ -167,6 +167,69 @@ void StampIdealOpAmp(std::vector<double>& matrix,
     }
 }
 
+void StampOta(std::vector<double>& matrix,
+              std::vector<double>& rhs,
+              std::uint32_t size,
+              const MnaPreparedCircuit::Element& element,
+              const std::vector<double>& guess) noexcept {
+    const auto control_positive = element.control_positive_node >= 0
+        ? guess[static_cast<std::size_t>(element.control_positive_node)] : 0.0;
+    const auto control_negative = element.control_negative_node >= 0
+        ? guess[static_cast<std::size_t>(element.control_negative_node)] : 0.0;
+    const auto evaluation = EvaluateNonlinearAmplifier(
+        element.nonlinear_amplifier_model, control_positive, control_negative);
+    if (!evaluation.Succeeded()) {
+        StampCurrent(rhs, element.positive_node, element.negative_node,
+                     std::numeric_limits<double>::quiet_NaN());
+        return;
+    }
+    const double controls[2] = {control_positive, control_negative};
+    const std::int32_t nodes[2] = {element.control_positive_node, element.control_negative_node};
+    double equivalent_current = evaluation.output;
+    for (std::size_t column = 0; column < 2U; ++column) {
+        equivalent_current -= evaluation.jacobian[column] * controls[column];
+        if (element.positive_node >= 0 && nodes[column] >= 0) {
+            matrix[static_cast<std::size_t>(element.positive_node) * size +
+                   static_cast<std::size_t>(nodes[column])] -= evaluation.jacobian[column];
+        }
+        if (element.negative_node >= 0 && nodes[column] >= 0) {
+            matrix[static_cast<std::size_t>(element.negative_node) * size +
+                   static_cast<std::size_t>(nodes[column])] += evaluation.jacobian[column];
+        }
+    }
+    StampCurrent(rhs, element.positive_node, element.negative_node, equivalent_current);
+}
+
+void StampOpAmp(std::vector<double>& matrix,
+                std::vector<double>& rhs,
+                std::uint32_t size,
+                const MnaPreparedCircuit::Element& element,
+                const std::vector<double>& guess) noexcept {
+    StampVoltageSource(matrix, rhs, size, element.positive_node, element.negative_node,
+                       element.branch_index, 0.0);
+    const auto control_positive = element.control_positive_node >= 0
+        ? guess[static_cast<std::size_t>(element.control_positive_node)] : 0.0;
+    const auto control_negative = element.control_negative_node >= 0
+        ? guess[static_cast<std::size_t>(element.control_negative_node)] : 0.0;
+    const auto evaluation = EvaluateNonlinearAmplifier(
+        element.nonlinear_amplifier_model, control_positive, control_negative);
+    if (!evaluation.Succeeded()) {
+        rhs[element.branch_index] = std::numeric_limits<double>::quiet_NaN();
+        return;
+    }
+    const double controls[2] = {control_positive, control_negative};
+    const std::int32_t nodes[2] = {element.control_positive_node, element.control_negative_node};
+    double equivalent_voltage = evaluation.output;
+    for (std::size_t column = 0; column < 2U; ++column) {
+        equivalent_voltage -= evaluation.jacobian[column] * controls[column];
+        if (nodes[column] >= 0) {
+            matrix[static_cast<std::size_t>(element.branch_index) * size +
+                   static_cast<std::size_t>(nodes[column])] -= evaluation.jacobian[column];
+        }
+    }
+    rhs[element.branch_index] += equivalent_voltage;
+}
+
 void StampBjt(std::vector<double>& matrix,
               std::vector<double>& rhs,
               std::uint32_t size,
@@ -384,6 +447,10 @@ void MnaPreparedCircuit::Reset() noexcept {
         if (element.type == CircuitComponentType::Mosfet && element.mosfet_gate_node >= 0) {
             solution_[element.mosfet_gate_node] = element.initial;
         }
+        if ((element.type == CircuitComponentType::OpAmp || element.type == CircuitComponentType::Ota) &&
+            element.positive_node >= 0) {
+            solution_[element.positive_node] = element.initial;
+        }
     }
 }
 
@@ -400,6 +467,7 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
         const auto has_nonlinearity = std::any_of(elements_.begin(), elements_.end(), [](const auto& element) {
             return element.type == CircuitComponentType::Diode || element.type == CircuitComponentType::Bjt ||
                    element.type == CircuitComponentType::Jfet || element.type == CircuitComponentType::Mosfet ||
+                   element.type == CircuitComponentType::OpAmp || element.type == CircuitComponentType::Ota ||
                    element.controlled_has_limits;
         });
         bool converged = !has_nonlinearity;
@@ -447,6 +515,12 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     break;
                 case CircuitComponentType::IdealOpAmp:
                     StampIdealOpAmp(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    break;
+                case CircuitComponentType::OpAmp:
+                    StampOpAmp(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    break;
+                case CircuitComponentType::Ota:
+                    StampOta(matrix_, rhs_, matrix_size_, element, newton_previous_);
                     break;
                 case CircuitComponentType::Potentiometer:
                 case CircuitComponentType::Switch:
@@ -537,6 +611,23 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                             nonlinear_step_scale, element.nonlinear_mosfet_model.max_step / largest_step);
                     }
                 }
+                if (element.type == CircuitComponentType::OpAmp || element.type == CircuitComponentType::Ota) {
+                    const auto old_positive = element.control_positive_node >= 0
+                        ? newton_previous_[element.control_positive_node] : 0.0;
+                    const auto old_negative = element.control_negative_node >= 0
+                        ? newton_previous_[element.control_negative_node] : 0.0;
+                    const auto new_positive = element.control_positive_node >= 0
+                        ? solution_[element.control_positive_node] : 0.0;
+                    const auto new_negative = element.control_negative_node >= 0
+                        ? solution_[element.control_negative_node] : 0.0;
+                    const auto control_step = std::fabs(
+                        (new_positive - new_negative) - (old_positive - old_negative));
+                    if (control_step > element.nonlinear_amplifier_model.max_step &&
+                        std::isfinite(control_step)) {
+                        nonlinear_step_scale = std::min(
+                            nonlinear_step_scale, element.nonlinear_amplifier_model.max_step / control_step);
+                    }
+                }
             }
             // Nonlinear junction steps are damped, rather than allocating a second
             // trial vector. If the bounded iteration budget is exhausted the
@@ -625,14 +716,17 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         }
         if ((component.bjt_model.has_value() && component.type != CircuitComponentType::Bjt) ||
             (component.jfet_model.has_value() && component.type != CircuitComponentType::Jfet) ||
-            (component.mosfet_model.has_value() && component.type != CircuitComponentType::Mosfet)) {
+            (component.mosfet_model.has_value() && component.type != CircuitComponentType::Mosfet) ||
+            (component.amplifier_model.has_value() && component.type != CircuitComponentType::OpAmp &&
+             component.type != CircuitComponentType::Ota)) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
         }
         if (component.type != CircuitComponentType::Resistor && component.type != CircuitComponentType::Capacitor &&
             component.type != CircuitComponentType::Inductor &&
             component.type != CircuitComponentType::VoltageSource && component.type != CircuitComponentType::Diode &&
             component.type != CircuitComponentType::Potentiometer && component.type != CircuitComponentType::Vccs &&
-            component.type != CircuitComponentType::IdealOpAmp && component.type != CircuitComponentType::Bjt &&
+            component.type != CircuitComponentType::IdealOpAmp && component.type != CircuitComponentType::OpAmp &&
+            component.type != CircuitComponentType::Ota && component.type != CircuitComponentType::Bjt &&
             component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
         }
@@ -714,6 +808,36 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
             }
         }
+        if (component.type == CircuitComponentType::OpAmp || component.type == CircuitComponentType::Ota) {
+            if (component.pins.size() != 4U ||
+                (!component.amplifier_model.has_value() && !component.model.has_value()) ||
+                component.value.has_value() || component.tolerance.has_value() ||
+                component.diode_model.has_value() || component.potentiometer.has_value() ||
+                component.controlled_source.has_value() || component.bjt_model.has_value() ||
+                component.jfet_model.has_value() || component.mosfet_model.has_value() ||
+                component.switch_spec.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            if (component.model.has_value() && !component.amplifier_model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& amplifier = *component.amplifier_model;
+            const auto expected_kind = component.type == CircuitComponentType::OpAmp
+                ? "bounded-opamp" : "bounded-ota";
+            if (amplifier.kind != expected_kind || amplifier.model_version != 1U) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            const NonlinearAmplifierModel model{
+                .kind = component.type == CircuitComponentType::OpAmp
+                    ? AmplifierKind::OpAmp : AmplifierKind::Ota,
+                .gain = amplifier.gain,
+                .minimum_output = amplifier.minimum_output,
+                .maximum_output = amplifier.maximum_output,
+                .max_step = amplifier.max_step};
+            if (!ValidateNonlinearAmplifierModel(model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+        }
         if ((component.type == CircuitComponentType::Resistor || component.type == CircuitComponentType::Capacitor ||
              component.type == CircuitComponentType::Inductor ||
              component.type == CircuitComponentType::VoltageSource || component.type == CircuitComponentType::Potentiometer) &&
@@ -768,7 +892,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         }));
     const auto controlled_voltage_source_count = static_cast<std::uint32_t>(std::count_if(
         circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
-            return component.type == CircuitComponentType::IdealOpAmp;
+            return component.type == CircuitComponentType::IdealOpAmp ||
+                   component.type == CircuitComponentType::OpAmp;
         }));
     const auto branch_count = voltage_source_count + inductor_count + controlled_voltage_source_count;
     if (non_ground_nodes + branch_count == 0U) {
@@ -955,6 +1080,35 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                           .initial = 0.0});
             continue;
         }
+        if (component.type == CircuitComponentType::OpAmp || component.type == CircuitComponentType::Ota) {
+            const auto control_positive = FindNode(circuit, component.pins[2]);
+            const auto control_negative = FindNode(circuit, component.pins[3]);
+            if (control_positive == -2 || control_negative == -2) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+            }
+            const auto& amplifier = *component.amplifier_model;
+            MnaPreparedCircuit::Element element{};
+            element.type = component.type;
+            element.positive_node = positive;
+            element.negative_node = negative;
+            element.control_positive_node = control_positive;
+            element.control_negative_node = control_negative;
+            element.branch_index = component.type == CircuitComponentType::OpAmp
+                ? non_ground_nodes + branch++ : kNoIndex;
+            element.initial = component.initial.value_or(0.0);
+            element.nonlinear_amplifier_model = {
+                .kind = component.type == CircuitComponentType::OpAmp
+                    ? AmplifierKind::OpAmp : AmplifierKind::Ota,
+                .gain = amplifier.gain,
+                .minimum_output = amplifier.minimum_output,
+                .maximum_output = amplifier.maximum_output,
+                .max_step = amplifier.max_step};
+            if (!ValidateNonlinearAmplifierModel(element.nonlinear_amplifier_model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            prepared.elements_.push_back(element);
+            continue;
+        }
         if (component.type == CircuitComponentType::Vccs || component.type == CircuitComponentType::IdealOpAmp) {
             const auto control_positive = FindNode(circuit, component.pins[2]);
             const auto control_negative = FindNode(circuit, component.pins[3]);
@@ -1058,7 +1212,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
     CircuitNetlist bound = circuit;
     for (auto& component : bound.components) {
         if (component.type != CircuitComponentType::Diode && component.type != CircuitComponentType::Bjt &&
-            component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet) {
+            component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet &&
+            component.type != CircuitComponentType::OpAmp && component.type != CircuitComponentType::Ota) {
             continue;
         }
         if (!component.model.has_value()) {
@@ -1069,6 +1224,10 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
                 continue;
             }
             if (component.type == CircuitComponentType::Mosfet && component.mosfet_model.has_value()) {
+                continue;
+            }
+            if ((component.type == CircuitComponentType::OpAmp || component.type == CircuitComponentType::Ota) &&
+                component.amplifier_model.has_value()) {
                 continue;
             }
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
@@ -1134,6 +1293,31 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
                 .kind = "enhancement-square-law", .model_version = 1U, .polarity = *record.polarity,
                 .threshold_voltage = *threshold, .transconductance_parameter = *transconductance,
                 .max_current = *max_current, .max_step = *max_step};
+            continue;
+        }
+        if (component.type == CircuitComponentType::OpAmp || component.type == CircuitComponentType::Ota) {
+            const auto expected_kind = component.type == CircuitComponentType::OpAmp
+                ? ModelKind::Opamp : ModelKind::Ota;
+            const auto result = model_database.Bind({*component.model, expected_kind});
+            if (!result.model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& record = *result.model;
+            const auto gain = ModelParameter(
+                record, component.type == CircuitComponentType::OpAmp ? "open-loop-gain" : "transconductance");
+            const auto minimum = ModelParameter(record, "minimum-output");
+            const auto maximum = ModelParameter(record, "maximum-output");
+            const auto max_step = ModelParameter(record, "max-step");
+            if (!gain.has_value() || !minimum.has_value() || !maximum.has_value() || !max_step.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            component.amplifier_model = CircuitAmplifierModel{
+                .kind = component.type == CircuitComponentType::OpAmp ? "bounded-opamp" : "bounded-ota",
+                .model_version = 1U,
+                .gain = *gain,
+                .minimum_output = *minimum,
+                .maximum_output = *maximum,
+                .max_step = *max_step};
             continue;
         }
         if (component.diode_model.has_value()) {

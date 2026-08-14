@@ -1,0 +1,6 @@
+{
+  "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","fb","0"],
+  "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],
+  "components":[{"id":"a","type":"opamp","pins":["out","0","in","fb"],"model":"solorig.cleanroom.opamp.bounded.v1"},{"id":"rf","type":"resistor","pins":["out","fb"],"value":10000.0},{"id":"rg","type":"resistor","pins":["fb","0"],"value":10000.0}],
+  "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,"convergence":{"maxIterations":64,"absoluteTolerance":1.0e-10,"relativeTolerance":1.0e-8}}
+}

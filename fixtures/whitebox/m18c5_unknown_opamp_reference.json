@@ -1,0 +1,6 @@
+{
+  "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","0"],
+  "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],
+  "components":[{"id":"a","type":"opamp","pins":["out","0","in","0"],"model":"unknown.opamp.reference"}],
+  "solver":{"method":"modified-nodal-analysis","integration":"backward-euler"}
+}

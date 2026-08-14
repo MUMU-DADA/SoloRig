@@ -1,0 +1,6 @@
+{
+  "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","0"],
+  "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],
+  "components":[{"id":"g","type":"ota","pins":["out","0","in","0"],"model":"solorig.cleanroom.ota.bounded.v1"},{"id":"load","type":"resistor","pins":["out","0"],"value":1000.0}],
+  "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,"convergence":{"maxIterations":64,"absoluteTolerance":1.0e-10,"relativeTolerance":1.0e-8}}
+}

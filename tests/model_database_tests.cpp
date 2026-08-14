@@ -4,9 +4,11 @@
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
+#include <array>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 namespace {
 
@@ -88,8 +90,7 @@ TEST_CASE("M14 rejects missing fields, nonfinite values, ranges, version and unk
 
 TEST_CASE("M14 protected device contracts remain explicit after later family approvals") {
     const auto contracts = solo_rig::ModelKindContracts();
-    for (const auto kind : {solo_rig::ModelKind::Opamp, solo_rig::ModelKind::Ota, solo_rig::ModelKind::Triode,
-                            solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
+    for (const auto kind : {solo_rig::ModelKind::Triode, solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
                             solo_rig::ModelKind::TransformerCore}) {
         const auto found = std::find_if(contracts.begin(), contracts.end(),
                                         [kind](const auto& contract) { return contract.kind == kind; });
@@ -130,8 +131,7 @@ TEST_CASE("M18-C1 registers only self-authored clean-room diode and Zener famili
         REQUIRE(found != contracts.end());
         REQUIRE(found->availability == solo_rig::ModelAvailability::Approved);
     }
-    for (const auto kind : {solo_rig::ModelKind::Opamp, solo_rig::ModelKind::Ota, solo_rig::ModelKind::Triode,
-                            solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
+    for (const auto kind : {solo_rig::ModelKind::Triode, solo_rig::ModelKind::Pentode, solo_rig::ModelKind::VariMu,
                             solo_rig::ModelKind::TransformerCore}) {
         const auto found = std::find_if(contracts.begin(), contracts.end(),
                                         [kind](const auto& contract) { return contract.kind == kind; });
@@ -306,4 +306,57 @@ TEST_CASE("M18-C4 audits and registers only complete authorized clean-room MOSFE
     });
     REQUIRE(mosfet != contracts.end());
     REQUIRE(mosfet->availability == solo_rig::ModelAvailability::Approved);
+}
+
+TEST_CASE("M18-C5 audits and registers only complete authorized clean-room opamp and OTA models") {
+    for (const auto& fixture : std::array{
+             std::pair{"m18c5_cleanroom_opamp_model.json", solo_rig::ModelKind::Opamp},
+             std::pair{"m18c5_cleanroom_ota_model.json", solo_rig::ModelKind::Ota}}) {
+        const auto built = solo_rig::BuildModelDatabase(ReadFixture(fixture.first));
+        REQUIRE(built.database.has_value());
+        REQUIRE(built.database->Bind({built.database->Records().front().model_id, fixture.second}).model.has_value());
+    }
+    REQUIRE(solo_rig::BuildModelDatabase(ReadFixture("m18c5_untrusted_opamp_model.json")).error ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+    REQUIRE(solo_rig::BuildModelDatabase(ReadFixture("m18c5_incomplete_ota_model.json")).error ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+
+    const auto parsed = solo_rig::ParseModelAuditJson(ReadFixture("m18c5_cleanroom_opamp_model.json"));
+    REQUIRE(parsed.model.has_value());
+    auto commercial_part = *parsed.model;
+    commercial_part.part_number = "commercial-opamp-no-commercial-part";
+    solo_rig::ModelDatabase rejected;
+    REQUIRE(rejected.Register(std::move(commercial_part)) ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+
+    auto reversed_limits = *parsed.model;
+    const auto minimum = std::find_if(reversed_limits.parameters.begin(), reversed_limits.parameters.end(),
+                                      [](const auto& item) { return item.id == "minimum-output"; });
+    const auto maximum = std::find_if(reversed_limits.parameters.begin(), reversed_limits.parameters.end(),
+                                      [](const auto& item) { return item.id == "maximum-output"; });
+    REQUIRE(minimum != reversed_limits.parameters.end());
+    REQUIRE(maximum != reversed_limits.parameters.end());
+    minimum->default_value = 3.0;
+    maximum->default_value = 2.0;
+    solo_rig::ModelDatabase reversed;
+    REQUIRE(reversed.Register(std::move(reversed_limits)) ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+
+    auto wrong_unit = *parsed.model;
+    const auto gain = std::find_if(wrong_unit.parameters.begin(), wrong_unit.parameters.end(),
+                                   [](const auto& item) { return item.id == "open-loop-gain"; });
+    REQUIRE(gain != wrong_unit.parameters.end());
+    gain->unit = "V/V?";
+    solo_rig::ModelDatabase wrong_unit_database;
+    REQUIRE(wrong_unit_database.Register(std::move(wrong_unit)) ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+
+    const auto contracts = solo_rig::ModelKindContracts();
+    for (const auto kind : {solo_rig::ModelKind::Opamp, solo_rig::ModelKind::Ota}) {
+        const auto found = std::find_if(contracts.begin(), contracts.end(), [kind](const auto& contract) {
+            return contract.kind == kind;
+        });
+        REQUIRE(found != contracts.end());
+        REQUIRE(found->availability == solo_rig::ModelAvailability::Approved);
+    }
 }

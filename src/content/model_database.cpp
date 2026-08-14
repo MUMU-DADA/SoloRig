@@ -65,6 +65,7 @@ std::optional<ModelLicenseReviewStatus> ParseReviewStatus(std::string_view value
 bool IsApprovedKind(ModelKind kind) {
     return kind == ModelKind::Diode || kind == ModelKind::Zener ||
            kind == ModelKind::Bjt || kind == ModelKind::Jfet || kind == ModelKind::Mosfet ||
+           kind == ModelKind::Opamp || kind == ModelKind::Ota ||
            kind == ModelKind::TestMathematical;
 }
 
@@ -160,10 +161,63 @@ bool HasMosfetParameterContract(const ModelAuditRecord& model) {
     });
 }
 
+bool HasAmplifierParameterContract(const ModelAuditRecord& model) {
+    if (model.kind != ModelKind::Opamp && model.kind != ModelKind::Ota) {
+        return true;
+    }
+    struct RequiredParameter {
+        std::string_view id;
+        std::string_view unit;
+        double minimum;
+        double maximum;
+    };
+    const bool is_opamp = model.kind == ModelKind::Opamp;
+    const RequiredParameter required[] = {
+        {is_opamp ? "open-loop-gain" : "transconductance", is_opamp ? "1" : "A/V",
+         is_opamp ? 1.0 : 1.0e-12, is_opamp ? 1.0e12 : 1.0e6},
+        {"minimum-output", is_opamp ? "V" : "A", -1.0e6, 1.0e6},
+        {"maximum-output", is_opamp ? "V" : "A", -1.0e6, 1.0e6},
+        {"max-step", "V", 1.0e-20, 10.0}};
+    if (model.parameters.size() != std::size(required)) {
+        return false;
+    }
+    const bool parameters_valid = std::all_of(
+        std::begin(required), std::end(required), [&model](const auto& expected) {
+            return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
+                return parameter.id == expected.id && parameter.unit == expected.unit &&
+                       std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
+                       parameter.default_value <= expected.maximum && std::isfinite(parameter.minimum) &&
+                       std::isfinite(parameter.maximum) && parameter.minimum >= expected.minimum &&
+                       parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
+                       parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
+            }) == 1;
+        });
+    if (!parameters_valid) {
+        return false;
+    }
+    const auto minimum = std::find_if(model.parameters.begin(), model.parameters.end(), [](const auto& parameter) {
+        return parameter.id == "minimum-output";
+    });
+    const auto maximum = std::find_if(model.parameters.begin(), model.parameters.end(), [](const auto& parameter) {
+        return parameter.id == "maximum-output";
+    });
+    return minimum != model.parameters.end() && maximum != model.parameters.end() &&
+           minimum->default_value < maximum->default_value;
+}
+
 bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
     if (model.kind != ModelKind::Diode && model.kind != ModelKind::Zener && model.kind != ModelKind::Bjt &&
-        model.kind != ModelKind::Jfet && model.kind != ModelKind::Mosfet) {
+        model.kind != ModelKind::Jfet && model.kind != ModelKind::Mosfet &&
+        model.kind != ModelKind::Opamp && model.kind != ModelKind::Ota) {
         return true;
+    }
+    if (model.kind == ModelKind::Opamp || model.kind == ModelKind::Ota) {
+        const auto expected_part = model.kind == ModelKind::Opamp
+            ? "self-authored-bounded-opamp-no-commercial-part"
+            : "self-authored-bounded-ota-no-commercial-part";
+        return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
+               model.license.permission_evidence == "self-authored-clean-room" &&
+               model.part_number == expected_part;
     }
     if (model.kind == ModelKind::Bjt || model.kind == ModelKind::Jfet || model.kind == ModelKind::Mosfet) {
         const bool polarity_allowed = model.kind == ModelKind::Bjt
@@ -208,8 +262,8 @@ std::vector<ModelKindContract> ModelKindContracts() {
         {ModelKind::Bjt, ModelAvailability::Approved},
         {ModelKind::Jfet, ModelAvailability::Approved},
         {ModelKind::Mosfet, ModelAvailability::Approved},
-        {ModelKind::Opamp, ModelAvailability::Blocked},
-        {ModelKind::Ota, ModelAvailability::Blocked},
+        {ModelKind::Opamp, ModelAvailability::Approved},
+        {ModelKind::Ota, ModelAvailability::Approved},
         {ModelKind::Triode, ModelAvailability::Blocked},
         {ModelKind::Pentode, ModelAvailability::Blocked},
         {ModelKind::VariMu, ModelAvailability::Blocked},
@@ -381,7 +435,9 @@ std::optional<ModelAuditError> ModelDatabase::Register(ModelAuditRecord model) {
     if (!IsAuthorizedCleanRoomDevice(model) ||
         (model.kind == ModelKind::Bjt && (!model.polarity.has_value() || !HasBjtParameterContract(model))) ||
         (model.kind == ModelKind::Jfet && (!model.polarity.has_value() || !HasJfetParameterContract(model))) ||
-        (model.kind == ModelKind::Mosfet && (!model.polarity.has_value() || !HasMosfetParameterContract(model)))) {
+        (model.kind == ModelKind::Mosfet && (!model.polarity.has_value() || !HasMosfetParameterContract(model))) ||
+        ((model.kind == ModelKind::Opamp || model.kind == ModelKind::Ota) &&
+         !HasAmplifierParameterContract(model))) {
         return ModelAuditError::MissingModelAuthorization;
     }
     if (model.availability != ModelAvailability::Approved || !IsApprovedKind(model.kind)) {

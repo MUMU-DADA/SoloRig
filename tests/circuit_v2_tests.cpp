@@ -4,6 +4,7 @@
 #include "test_framework.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -1209,6 +1210,135 @@ TEST_CASE("M18-C4 MOSFET rejects nonfinite, singular and bounded-iteration failu
         }), singular_graph.components.end());
     singular_graph.supplies.clear();
     auto singular = solo_rig::CompileMnaCircuit(singular_graph, *database.database);
+    REQUIRE(singular.circuit.has_value());
+    REQUIRE(singular.circuit->Prepare(48000.0));
+    REQUIRE(singular.circuit->Solve(0.0).error == solo_rig::MnaSolveError::SingularMatrix);
+}
+
+TEST_CASE("M18-C5 opamp and OTA inline or audited references reach prepared Solve") {
+    REQUIRE(solo_rig::ParseCircuitV2Json(ReadFixture("m18c5_invalid_amplifier_inline.json")).errors ==
+            std::vector<solo_rig::CircuitLoadError>{solo_rig::CircuitLoadError::InvalidValue});
+    auto inline_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c5_opamp_inline.json"));
+    REQUIRE(inline_graph.circuit.has_value());
+    auto inline_compiled = solo_rig::CompileMnaCircuit(*inline_graph.circuit);
+    REQUIRE(inline_compiled.circuit.has_value());
+    REQUIRE(inline_compiled.circuit->Prepare(48000.0));
+    REQUIRE(std::fabs(inline_compiled.circuit->Solve(0.5).output_voltage - 1.0) < 5.0e-5);
+    REQUIRE(std::fabs(inline_compiled.circuit->Solve(2.0).output_voltage - 2.0) < 1.0e-8);
+
+    const auto inline_ota_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c5_ota_inline.json"));
+    REQUIRE(inline_ota_graph.circuit.has_value());
+    auto inline_ota = solo_rig::CompileMnaCircuit(*inline_ota_graph.circuit);
+    REQUIRE(inline_ota.circuit.has_value());
+    REQUIRE(inline_ota.circuit->Prepare(48000.0));
+    REQUIRE(std::fabs(inline_ota.circuit->Solve(1.0).output_voltage - 1.0) < 1.0e-8);
+
+    const auto opamp_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c5_opamp_reference.json"));
+    const auto opamp_database = solo_rig::BuildModelDatabase(ReadFixture("m18c5_cleanroom_opamp_model.json"));
+    REQUIRE(opamp_graph.circuit.has_value());
+    REQUIRE(opamp_database.database.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*opamp_graph.circuit).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+    auto opamp = solo_rig::CompileMnaCircuit(*opamp_graph.circuit, *opamp_database.database);
+    REQUIRE(opamp.circuit.has_value());
+    REQUIRE(opamp.circuit->Prepare(48000.0));
+    for (const auto point : std::array<std::array<double, 2>, 5>{
+             {{{-2.0, -2.0}}, {{-0.5, -1.0}}, {{0.0, 0.0}}, {{0.5, 1.0}}, {{2.0, 2.0}}}}) {
+        const auto solved = opamp.circuit->Solve(point[0]);
+        REQUIRE(solved.Succeeded());
+        REQUIRE(std::fabs(solved.output_voltage - point[1]) < 5.0e-5);
+    }
+
+    const auto ota_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c5_ota_reference.json"));
+    const auto ota_database = solo_rig::BuildModelDatabase(ReadFixture("m18c5_cleanroom_ota_model.json"));
+    REQUIRE(ota_graph.circuit.has_value());
+    REQUIRE(ota_database.database.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*ota_graph.circuit, *opamp_database.database).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+    auto ota = solo_rig::CompileMnaCircuit(*ota_graph.circuit, *ota_database.database);
+    REQUIRE(ota.circuit.has_value());
+    REQUIRE(ota.circuit->Prepare(48000.0));
+    for (const auto point : std::array<std::array<double, 2>, 5>{
+             {{{-3.0, -2.0}}, {{-1.0, -1.0}}, {{0.0, 0.0}}, {{1.0, 1.0}}, {{3.0, 2.0}}}}) {
+        const auto solved = ota.circuit->Solve(point[0]);
+        REQUIRE(solved.Succeeded());
+        REQUIRE(std::fabs(solved.output_voltage - point[1]) < 1.0e-8);
+    }
+
+    const auto unknown = solo_rig::ParseCircuitV2Json(ReadFixture("m18c5_unknown_opamp_reference.json"));
+    REQUIRE(unknown.circuit.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*unknown.circuit, *opamp_database.database).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+
+    const auto misplaced = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","0"],
+      "ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],
+      "components":[{"id":"r","type":"resistor","pins":["in","out"],"value":1000,
+        "amplifierModel":{"kind":"bounded-ota","modelVersion":1,"gain":0.001,
+          "minimumOutput":-0.002,"maximumOutput":0.002,"maxStep":0.5}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler"}
+    })");
+    REQUIRE(misplaced.errors ==
+            std::vector<solo_rig::CircuitLoadError>{solo_rig::CircuitLoadError::InvalidValue});
+}
+
+TEST_CASE("M18-C5 dynamic OTA matches independent backward-Euler reference and Reset") {
+    const auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c5_dynamic_ota_reference.json"));
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c5_cleanroom_ota_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(48000.0));
+    const auto run = [](solo_rig::MnaPreparedCircuit& circuit) {
+        constexpr double resistor_conductance = 1.0 / 1000.0;
+        constexpr double capacitor_conductance = 1.0e-6 * 48000.0;
+        double history = 0.25;
+        double final_output = 0.0;
+        for (const double input : {-1.0, 0.5, 3.0, -3.0, 0.25}) {
+            const auto current = std::clamp(0.001 * input, -0.002, 0.002);
+            const auto reference = (current + capacitor_conductance * history) /
+                (resistor_conductance + capacitor_conductance);
+            const auto solved = circuit.Solve(input);
+            REQUIRE(solved.Succeeded());
+            REQUIRE(std::fabs(solved.output_voltage - reference) < 1.0e-10);
+            history = reference;
+            final_output = reference;
+        }
+        return final_output;
+    };
+    const auto first = run(*compiled.circuit);
+    compiled.circuit->Reset();
+    REQUIRE(std::fabs(run(*compiled.circuit) - first) < 1.0e-12);
+}
+
+TEST_CASE("M18-C5 amplifier runtime rejects failures and remains preallocated at 192 kHz 4x") {
+    auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c5_ota_reference.json"));
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c5_cleanroom_ota_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    graph.circuit->solver.oversampling = 4U;
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(192000.0));
+    REQUIRE(compiled.circuit->Solve(std::numeric_limits<double>::infinity()).error ==
+            solo_rig::MnaSolveError::NonFinite);
+    constexpr auto contract = solo_rig::MnaPreparedCircuit::ProcessContract();
+    static_assert(!contract.process_allocates && !contract.process_locks &&
+                  !contract.process_reads_files && !contract.process_parses_json);
+    for (std::uint32_t sample = 0; sample < 1024U; ++sample) {
+        REQUIRE(compiled.circuit->Solve(sample % 2U == 0U ? -3.0 : 3.0).Succeeded());
+    }
+
+    graph.circuit->solver.oversampling = 1U;
+    graph.circuit->solver.convergence.max_iterations = 1U;
+    auto bounded = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(bounded.circuit.has_value());
+    REQUIRE(bounded.circuit->Prepare(48000.0));
+    REQUIRE(bounded.circuit->Solve(1.0).error == solo_rig::MnaSolveError::NonConvergent);
+
+    graph.circuit->components.erase(graph.circuit->components.begin() + 1);
+    auto singular = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
     REQUIRE(singular.circuit.has_value());
     REQUIRE(singular.circuit->Prepare(48000.0));
     REQUIRE(singular.circuit->Solve(0.0).error == solo_rig::MnaSolveError::SingularMatrix);
