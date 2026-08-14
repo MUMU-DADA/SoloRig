@@ -389,6 +389,38 @@ void StampPentode(std::vector<double>& matrix, std::vector<double>& rhs, std::ui
     }
 }
 
+void StampVariMu(std::vector<double>& matrix, std::vector<double>& rhs, std::uint32_t size,
+                 const MnaPreparedCircuit::Element& element, const std::vector<double>& guess) noexcept {
+    const auto voltage = [&guess](std::int32_t node) {
+        return node >= 0 ? guess[static_cast<std::size_t>(node)] : 0.0;
+    };
+    const double plate = voltage(element.positive_node);
+    const double grid = voltage(element.vari_mu_grid_node);
+    const double cathode = voltage(element.negative_node);
+    const auto evaluation = EvaluateNonlinearVariMu(
+        element.nonlinear_vari_mu_model, plate, grid, cathode);
+    if (!evaluation.Succeeded()) {
+        StampConductance(matrix, size, element.positive_node, element.negative_node,
+                         std::numeric_limits<double>::quiet_NaN());
+        return;
+    }
+    const std::int32_t nodes[3] = {
+        element.positive_node, element.vari_mu_grid_node, element.negative_node};
+    const double voltages[3] = {plate, grid, cathode};
+    for (std::size_t row = 0; row < 3U; ++row) {
+        if (nodes[row] < 0) continue;
+        double equivalent_current = evaluation.currents[row];
+        for (std::size_t column = 0; column < 3U; ++column) {
+            equivalent_current -= evaluation.jacobian[row][column] * voltages[column];
+            if (nodes[column] >= 0) {
+                matrix[static_cast<std::size_t>(nodes[row]) * size +
+                       static_cast<std::size_t>(nodes[column])] += evaluation.jacobian[row][column];
+            }
+        }
+        rhs[static_cast<std::size_t>(nodes[row])] -= equivalent_current;
+    }
+}
+
 void StampBeamTetrode(std::vector<double>& matrix, std::vector<double>& rhs, std::uint32_t size,
                       const MnaPreparedCircuit::Element& element, const std::vector<double>& guess) noexcept {
     const auto voltage = [&guess](std::int32_t node) { return node >= 0 ? guess[static_cast<std::size_t>(node)] : 0.0; };
@@ -554,6 +586,9 @@ void MnaPreparedCircuit::Reset() noexcept {
         if (element.type == CircuitComponentType::BeamTetrode && element.beam_tetrode_grid_node >= 0) {
             solution_[element.beam_tetrode_grid_node] = element.initial;
         }
+        if (element.type == CircuitComponentType::VariMu && element.vari_mu_grid_node >= 0) {
+            solution_[element.vari_mu_grid_node] = element.initial;
+        }
     }
 }
 
@@ -573,6 +608,7 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                    element.type == CircuitComponentType::OpAmp || element.type == CircuitComponentType::Ota ||
                    element.type == CircuitComponentType::Triode || element.type == CircuitComponentType::Pentode ||
                    element.type == CircuitComponentType::BeamTetrode ||
+                   element.type == CircuitComponentType::VariMu ||
                    element.controlled_has_limits;
         });
         bool converged = !has_nonlinearity;
@@ -635,6 +671,9 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     break;
                 case CircuitComponentType::BeamTetrode:
                     StampBeamTetrode(matrix_, rhs_, matrix_size_, element, newton_previous_);
+                    break;
+                case CircuitComponentType::VariMu:
+                    StampVariMu(matrix_, rhs_, matrix_size_, element, newton_previous_);
                     break;
                 case CircuitComponentType::Potentiometer:
                 case CircuitComponentType::Switch:
@@ -791,6 +830,21 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                             element.nonlinear_beam_tetrode_model.max_step / largest);
                     }
                 }
+                if (element.type == CircuitComponentType::VariMu) {
+                    const auto old_p = element.positive_node >= 0 ? newton_previous_[element.positive_node] : 0.0;
+                    const auto old_g = element.vari_mu_grid_node >= 0 ? newton_previous_[element.vari_mu_grid_node] : 0.0;
+                    const auto old_k = element.negative_node >= 0 ? newton_previous_[element.negative_node] : 0.0;
+                    const auto new_p = element.positive_node >= 0 ? solution_[element.positive_node] : 0.0;
+                    const auto new_g = element.vari_mu_grid_node >= 0 ? solution_[element.vari_mu_grid_node] : 0.0;
+                    const auto new_k = element.negative_node >= 0 ? solution_[element.negative_node] : 0.0;
+                    const double largest = std::max(
+                        std::fabs((new_p - new_k) - (old_p - old_k)),
+                        std::fabs((new_g - new_k) - (old_g - old_k)));
+                    if (largest > element.nonlinear_vari_mu_model.max_step && std::isfinite(largest)) {
+                        nonlinear_step_scale = std::min(
+                            nonlinear_step_scale, element.nonlinear_vari_mu_model.max_step / largest);
+                    }
+                }
             }
             // Nonlinear junction steps are damped, rather than allocating a second
             // trial vector. If the bounded iteration budget is exhausted the
@@ -884,7 +938,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
              component.type != CircuitComponentType::Ota) ||
             (component.triode_model.has_value() && component.type != CircuitComponentType::Triode) ||
             (component.pentode_model.has_value() && component.type != CircuitComponentType::Pentode) ||
-            (component.beam_tetrode_model.has_value() && component.type != CircuitComponentType::BeamTetrode)) {
+            (component.beam_tetrode_model.has_value() && component.type != CircuitComponentType::BeamTetrode) ||
+            (component.vari_mu_model.has_value() && component.type != CircuitComponentType::VariMu)) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
         }
         if (component.type != CircuitComponentType::Resistor && component.type != CircuitComponentType::Capacitor &&
@@ -895,7 +950,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             component.type != CircuitComponentType::Ota && component.type != CircuitComponentType::Bjt &&
             component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet &&
             component.type != CircuitComponentType::Triode && component.type != CircuitComponentType::Pentode &&
-            component.type != CircuitComponentType::BeamTetrode) {
+            component.type != CircuitComponentType::BeamTetrode && component.type != CircuitComponentType::VariMu) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
         }
         if (component.type == CircuitComponentType::Bjt) {
@@ -1071,6 +1126,29 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
             }
         }
+        if (component.type == CircuitComponentType::VariMu) {
+            if (component.pins.size() != 3U ||
+                (!component.vari_mu_model.has_value() && !component.model.has_value()) ||
+                component.value.has_value() || component.tolerance.has_value() ||
+                component.diode_model.has_value() || component.potentiometer.has_value() ||
+                component.controlled_source.has_value() || component.bjt_model.has_value() ||
+                component.jfet_model.has_value() || component.mosfet_model.has_value() ||
+                component.amplifier_model.has_value() || component.triode_model.has_value() ||
+                component.pentode_model.has_value() || component.beam_tetrode_model.has_value() ||
+                component.switch_spec.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            if (component.model.has_value() && !component.vari_mu_model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& item = *component.vari_mu_model;
+            const NonlinearVariMuModel model{item.amplification_factor, item.perveance,
+                item.remote_cutoff_coefficient, item.max_current, item.max_step};
+            if (item.kind != "remote-cutoff" || item.model_version != 1U ||
+                !ValidateNonlinearVariMuModel(model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+        }
         if ((component.type == CircuitComponentType::Resistor || component.type == CircuitComponentType::Capacitor ||
              component.type == CircuitComponentType::Inductor ||
              component.type == CircuitComponentType::VoltageSource || component.type == CircuitComponentType::Potentiometer) &&
@@ -1158,7 +1236,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         const auto positive = FindNode(circuit, component.pins[0]);
         const bool is_three_terminal = component.type == CircuitComponentType::Bjt ||
             component.type == CircuitComponentType::Jfet || component.type == CircuitComponentType::Mosfet ||
-            component.type == CircuitComponentType::Triode;
+            component.type == CircuitComponentType::Triode || component.type == CircuitComponentType::VariMu;
         const auto negative = FindNode(circuit, component.pins[
             is_three_terminal ? 2U :
                 ((component.type == CircuitComponentType::Pentode ||
@@ -1344,6 +1422,24 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             prepared.elements_.push_back(element);
             continue;
         }
+        if (component.type == CircuitComponentType::VariMu) {
+            const auto grid = FindNode(circuit, component.pins[1]);
+            if (grid == -2 || grid == positive || grid == negative) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+            }
+            const auto& item = *component.vari_mu_model;
+            MnaPreparedCircuit::Element element{};
+            element.type = CircuitComponentType::VariMu;
+            element.positive_node = positive;
+            element.negative_node = negative;
+            element.vari_mu_grid_node = grid;
+            element.branch_index = kNoIndex;
+            element.initial = component.initial.value_or(0.0);
+            element.nonlinear_vari_mu_model = {item.amplification_factor, item.perveance,
+                item.remote_cutoff_coefficient, item.max_current, item.max_step};
+            prepared.elements_.push_back(element);
+            continue;
+        }
         if (component.type == CircuitComponentType::Potentiometer) {
             const auto& spec = *component.potentiometer;
             std::string wiper_name;
@@ -1518,7 +1614,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
             component.type != CircuitComponentType::Jfet && component.type != CircuitComponentType::Mosfet &&
             component.type != CircuitComponentType::OpAmp && component.type != CircuitComponentType::Ota &&
             component.type != CircuitComponentType::Triode && component.type != CircuitComponentType::Pentode &&
-            component.type != CircuitComponentType::BeamTetrode) {
+            component.type != CircuitComponentType::BeamTetrode && component.type != CircuitComponentType::VariMu) {
             continue;
         }
         if (!component.model.has_value()) {
@@ -1540,6 +1636,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
             }
             if (component.type == CircuitComponentType::Pentode && component.pentode_model.has_value()) continue;
             if (component.type == CircuitComponentType::BeamTetrode && component.beam_tetrode_model.has_value()) continue;
+            if (component.type == CircuitComponentType::VariMu && component.vari_mu_model.has_value()) continue;
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
         }
         if (component.type == CircuitComponentType::Bjt) {
@@ -1690,6 +1787,27 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit, const ModelDat
                 .kind = "beam-capture", .model_version = 1U,
                 .screen_amplification_factor = *amplification, .perveance = *perveance,
                 .knee_voltage = *knee, .screen_current_fraction = *fraction,
+                .max_current = *max_current, .max_step = *max_step};
+            continue;
+        }
+        if (component.type == CircuitComponentType::VariMu) {
+            const auto result = model_database.Bind({*component.model, ModelKind::VariMu});
+            if (!result.model.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::MissingModelAuthorization};
+            }
+            const auto& record = *result.model;
+            const auto amplification = ModelParameter(record, "amplification-factor");
+            const auto perveance = ModelParameter(record, "perveance");
+            const auto coefficient = ModelParameter(record, "remote-cutoff-coefficient");
+            const auto max_current = ModelParameter(record, "max-current");
+            const auto max_step = ModelParameter(record, "max-step");
+            if (!amplification || !perveance || !coefficient || !max_current || !max_step) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            component.vari_mu_model = CircuitVariMuModel{
+                .kind = "remote-cutoff", .model_version = 1U,
+                .amplification_factor = *amplification, .perveance = *perveance,
+                .remote_cutoff_coefficient = *coefficient,
                 .max_current = *max_current, .max_step = *max_step};
             continue;
         }

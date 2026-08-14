@@ -9,3 +9,4 @@
 #include "dsp/nonlinear_mosfet.hpp"
 #include "dsp/nonlinear_pentode.hpp"
 #include "dsp/nonlinear_triode.hpp"
+#include "dsp/nonlinear_vari_mu.hpp"

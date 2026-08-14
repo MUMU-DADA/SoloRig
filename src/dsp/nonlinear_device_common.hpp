@@ -14,6 +14,7 @@ enum class NonlinearDeviceKind {
     Triode,
     Pentode,
     BeamTetrode,
+    VariMu,
 };
 
 enum class NonlinearDeviceError {

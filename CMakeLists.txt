@@ -64,6 +64,7 @@ add_library(solo_rig_core STATIC
     src/dsp/nonlinear_mosfet.cpp
     src/dsp/nonlinear_pentode.cpp
     src/dsp/nonlinear_triode.cpp
+    src/dsp/nonlinear_vari_mu.cpp
     src/dsp/digital_delay.cpp
     src/dsp/impulse_response.cpp
     src/dsp/nam_processor.cpp
@@ -236,6 +237,7 @@ if(BUILD_TESTING)
         tests/nonlinear_mosfet_tests.cpp
         tests/nonlinear_pentode_tests.cpp
         tests/nonlinear_triode_tests.cpp
+        tests/nonlinear_vari_mu_tests.cpp
         tests/digital_delay_tests.cpp
         tests/impulse_response_tests.cpp
         tests/nam_processor_tests.cpp

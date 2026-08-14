@@ -90,12 +90,11 @@ TEST_CASE("M14 rejects missing fields, nonfinite values, ranges, version and unk
 
 TEST_CASE("M14 protected device contracts remain explicit after later family approvals") {
     const auto contracts = solo_rig::ModelKindContracts();
-    for (const auto kind : {solo_rig::ModelKind::VariMu, solo_rig::ModelKind::TransformerCore}) {
-        const auto found = std::find_if(contracts.begin(), contracts.end(),
-                                        [kind](const auto& contract) { return contract.kind == kind; });
-        REQUIRE(found != contracts.end());
-        REQUIRE(found->availability == solo_rig::ModelAvailability::Blocked);
-    }
+    const auto transformer = std::find_if(contracts.begin(), contracts.end(), [](const auto& contract) {
+        return contract.kind == solo_rig::ModelKind::TransformerCore;
+    });
+    REQUIRE(transformer != contracts.end());
+    REQUIRE(transformer->availability == solo_rig::ModelAvailability::Blocked);
     const auto test_kind = std::find_if(contracts.begin(), contracts.end(),
                                         [](const auto& contract) {
                                             return contract.kind == solo_rig::ModelKind::TestMathematical;
@@ -130,12 +129,11 @@ TEST_CASE("M18-C1 registers only self-authored clean-room diode and Zener famili
         REQUIRE(found != contracts.end());
         REQUIRE(found->availability == solo_rig::ModelAvailability::Approved);
     }
-    for (const auto kind : {solo_rig::ModelKind::VariMu, solo_rig::ModelKind::TransformerCore}) {
-        const auto found = std::find_if(contracts.begin(), contracts.end(),
-                                        [kind](const auto& contract) { return contract.kind == kind; });
-        REQUIRE(found != contracts.end());
-        REQUIRE(found->availability == solo_rig::ModelAvailability::Blocked);
-    }
+    const auto transformer = std::find_if(contracts.begin(), contracts.end(), [](const auto& contract) {
+        return contract.kind == solo_rig::ModelKind::TransformerCore;
+    });
+    REQUIRE(transformer != contracts.end());
+    REQUIRE(transformer->availability == solo_rig::ModelAvailability::Blocked);
 }
 
 TEST_CASE("M18-C2 audits and registers only complete authorized clean-room BJT models") {
@@ -431,5 +429,30 @@ TEST_CASE("M18-C7b audits and registers only complete authorized clean-room beam
         return item.kind == solo_rig::ModelKind::VariMu;
     });
     REQUIRE(vari_mu != contracts.end());
-    REQUIRE(vari_mu->availability == solo_rig::ModelAvailability::Blocked);
+    REQUIRE(vari_mu->availability == solo_rig::ModelAvailability::Approved);
+}
+
+TEST_CASE("M18-C7c audits and registers only complete authorized clean-room vari-mu models") {
+    const auto built = solo_rig::BuildModelDatabase(ReadFixture("m18c7c_cleanroom_vari_mu_model.json"));
+    REQUIRE(built.database.has_value());
+    REQUIRE(built.database->Bind({"solorig.cleanroom.vari-mu.remote-cutoff.v1",
+                                  solo_rig::ModelKind::VariMu}).model.has_value());
+    REQUIRE(built.database->Bind({"solorig.cleanroom.vari-mu.remote-cutoff.v1",
+                                  solo_rig::ModelKind::Triode}).error ==
+            solo_rig::ModelAuditError::ModelKindMismatch);
+    REQUIRE(solo_rig::BuildModelDatabase(ReadFixture("m18c7c_untrusted_vari_mu_model.json")).error ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+    REQUIRE(solo_rig::BuildModelDatabase(ReadFixture("m18c7c_incomplete_vari_mu_model.json")).error ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+    const auto contracts = solo_rig::ModelKindContracts();
+    const auto vari_mu = std::find_if(contracts.begin(), contracts.end(), [](const auto& item) {
+        return item.kind == solo_rig::ModelKind::VariMu;
+    });
+    REQUIRE(vari_mu != contracts.end());
+    REQUIRE(vari_mu->availability == solo_rig::ModelAvailability::Approved);
+    const auto transformer = std::find_if(contracts.begin(), contracts.end(), [](const auto& item) {
+        return item.kind == solo_rig::ModelKind::TransformerCore;
+    });
+    REQUIRE(transformer != contracts.end());
+    REQUIRE(transformer->availability == solo_rig::ModelAvailability::Blocked);
 }

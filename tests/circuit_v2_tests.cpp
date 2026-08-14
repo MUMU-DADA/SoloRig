@@ -1645,6 +1645,119 @@ TEST_CASE("M18-C7b beam tetrode runtime rejects failures and remains preallocate
     REQUIRE(singular.circuit->Solve(0.0).error == solo_rig::MnaSolveError::SingularMatrix);
 }
 
+TEST_CASE("M18-C7c vari-mu inline and audited references reach prepared Solve") {
+    REQUIRE(solo_rig::ParseCircuitV2Json(ReadFixture("m18c7c_invalid_vari_mu_inline.json")).errors ==
+            std::vector<solo_rig::CircuitLoadError>{solo_rig::CircuitLoadError::InvalidValue});
+    auto cross_family = ReadFixture("m18c7c_vari_mu_inline.json");
+    const auto vari_mu_type = cross_family.find("\"type\":\"vari-mu\"");
+    REQUIRE(vari_mu_type != std::string::npos);
+    cross_family.replace(vari_mu_type, std::string("\"type\":\"vari-mu\"").size(), "\"type\":\"triode\"");
+    REQUIRE(solo_rig::ParseCircuitV2Json(cross_family).errors ==
+            std::vector<solo_rig::CircuitLoadError>{solo_rig::CircuitLoadError::InvalidValue});
+    const auto inline_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c7c_vari_mu_inline.json"));
+    REQUIRE(inline_graph.circuit.has_value());
+    auto inline_compiled = solo_rig::CompileMnaCircuit(*inline_graph.circuit);
+    REQUIRE(inline_compiled.circuit.has_value());
+    REQUIRE(inline_compiled.circuit->Prepare(48000.0));
+    REQUIRE(std::fabs(inline_compiled.circuit->Solve(-1.0).output_voltage - 12.0) < 1.0e-8);
+    REQUIRE(inline_compiled.circuit->Solve(0.0).output_voltage < 12.0);
+
+    const auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c7c_vari_mu_reference.json"));
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c7c_cleanroom_vari_mu_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*graph.circuit).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(48000.0));
+    double previous = 12.0;
+    for (const double grid : {-1.0, -0.5, -0.2, 0.0, 0.2}) {
+        const auto solved = compiled.circuit->Solve(grid);
+        REQUIRE(solved.Succeeded());
+        REQUIRE(solved.output_voltage <= previous + 1.0e-10);
+        previous = solved.output_voltage;
+    }
+    const auto unknown = solo_rig::ParseCircuitV2Json(ReadFixture("m18c7c_unknown_vari_mu_reference.json"));
+    REQUIRE(unknown.circuit.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*unknown.circuit, *database.database).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+    const auto wrong_database = solo_rig::BuildModelDatabase(
+        ReadFixture("m18c7b_cleanroom_beam_tetrode_model.json"));
+    REQUIRE(wrong_database.database.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*graph.circuit, *wrong_database.database).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+}
+
+TEST_CASE("M18-C7c dynamic vari-mu matches independent backward-Euler reference after Reset") {
+    const auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c7c_dynamic_vari_mu_reference.json"));
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c7c_cleanroom_vari_mu_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(48000.0));
+    const auto run = [](solo_rig::MnaPreparedCircuit& circuit) {
+        double history = -0.5;
+        double final_plate = 0.0;
+        for (const double input : {-0.8, -0.2, 0.1, 0.3, -0.1}) {
+            const double grid = (0.001 * input + 0.048 * history) / 0.049;
+            const double bias = std::max(-grid, 0.0);
+            const double remote_scale = 1.0 / std::sqrt(1.0 + 4.0 * bias * bias);
+            double plate = 12.0;
+            for (std::uint32_t iteration = 0; iteration < 64U; ++iteration) {
+                const double control = std::max(0.0, grid + plate / 20.0);
+                const double root = std::sqrt(control);
+                const double current = 0.001 * remote_scale * control * root;
+                const double derivative = control > 0.0
+                    ? 0.001 * remote_scale * 1.5 * root / 20.0 : 0.0;
+                const double residual = (plate - 12.0) / 10000.0 + current;
+                plate -= residual / (0.0001 + derivative);
+            }
+            const auto solved = circuit.Solve(input);
+            REQUIRE(solved.Succeeded());
+            REQUIRE(std::fabs(solved.output_voltage - plate) < 1.0e-8);
+            history = grid;
+            final_plate = plate;
+        }
+        return final_plate;
+    };
+    const double first = run(*compiled.circuit);
+    compiled.circuit->Reset();
+    REQUIRE(std::fabs(run(*compiled.circuit) - first) < 1.0e-10);
+}
+
+TEST_CASE("M18-C7c vari-mu runtime rejects failures and remains preallocated at 192 kHz 4x") {
+    auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c7c_vari_mu_reference.json"));
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c7c_cleanroom_vari_mu_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    graph.circuit->solver.oversampling = 4U;
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(192000.0));
+    REQUIRE(compiled.circuit->Solve(std::numeric_limits<double>::quiet_NaN()).error ==
+            solo_rig::MnaSolveError::NonFinite);
+    constexpr auto contract = solo_rig::MnaPreparedCircuit::ProcessContract();
+    static_assert(!contract.process_allocates && !contract.process_locks &&
+                  !contract.process_reads_files && !contract.process_parses_json);
+    for (std::uint32_t sample = 0; sample < 1024U; ++sample) {
+        REQUIRE(compiled.circuit->Solve(sample % 2U == 0U ? -0.5 : 0.2).Succeeded());
+    }
+    graph.circuit->solver.oversampling = 1U;
+    graph.circuit->solver.convergence.max_iterations = 1U;
+    auto bounded = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(bounded.circuit.has_value());
+    REQUIRE(bounded.circuit->Prepare(48000.0));
+    REQUIRE(bounded.circuit->Solve(0.2).error == solo_rig::MnaSolveError::NonConvergent);
+    graph.circuit->components.erase(graph.circuit->components.begin() + 1);
+    graph.circuit->supplies.clear();
+    auto singular = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(singular.circuit.has_value());
+    REQUIRE(singular.circuit->Prepare(48000.0));
+    REQUIRE(singular.circuit->Solve(0.0).error == solo_rig::MnaSolveError::SingularMatrix);
+}
+
 TEST_CASE("M18-C1 MNA solves forward conduction reverse breakdown and zero bias") {
     auto diode_compiled = solo_rig::CompileMnaCircuit(
         *solo_rig::ParseCircuitV2Json(ReadFixture("m18c1_diode_forward.json")).circuit);

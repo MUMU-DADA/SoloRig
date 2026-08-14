@@ -68,6 +68,7 @@ bool IsApprovedKind(ModelKind kind) {
            kind == ModelKind::Bjt || kind == ModelKind::Jfet || kind == ModelKind::Mosfet ||
            kind == ModelKind::Opamp || kind == ModelKind::Ota ||
            kind == ModelKind::Triode || kind == ModelKind::Pentode || kind == ModelKind::BeamTetrode ||
+           kind == ModelKind::VariMu ||
            kind == ModelKind::TestMathematical;
 }
 
@@ -282,12 +283,34 @@ bool HasBeamTetrodeParameterContract(const ModelAuditRecord& model) {
     });
 }
 
+bool HasVariMuParameterContract(const ModelAuditRecord& model) {
+    if (model.kind != ModelKind::VariMu) return true;
+    struct Required { std::string_view id; std::string_view unit; double minimum; double maximum; };
+    constexpr Required required[] = {
+        {"amplification-factor", "1", 1.0, 1.0e6},
+        {"perveance", "A/V^1.5", 1.0e-12, 1.0e6},
+        {"remote-cutoff-coefficient", "1/V", 1.0e-12, 1.0e6},
+        {"max-current", "A", 1.0e-12, 1.0e6},
+        {"max-step", "V", 1.0e-20, 10.0}};
+    if (model.parameters.size() != std::size(required)) return false;
+    return std::all_of(std::begin(required), std::end(required), [&model](const auto& expected) {
+        return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
+            return parameter.id == expected.id && parameter.unit == expected.unit &&
+                   std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
+                   parameter.default_value <= expected.maximum && std::isfinite(parameter.minimum) &&
+                   std::isfinite(parameter.maximum) && parameter.minimum >= expected.minimum &&
+                   parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
+                   parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
+        }) == 1;
+    });
+}
+
 bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
     if (model.kind != ModelKind::Diode && model.kind != ModelKind::Zener && model.kind != ModelKind::Bjt &&
         model.kind != ModelKind::Jfet && model.kind != ModelKind::Mosfet &&
         model.kind != ModelKind::Opamp && model.kind != ModelKind::Ota &&
         model.kind != ModelKind::Triode && model.kind != ModelKind::Pentode &&
-        model.kind != ModelKind::BeamTetrode) {
+        model.kind != ModelKind::BeamTetrode && model.kind != ModelKind::VariMu) {
         return true;
     }
     if (model.kind == ModelKind::Opamp || model.kind == ModelKind::Ota) {
@@ -312,6 +335,11 @@ bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
         return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
                model.license.permission_evidence == "self-authored-clean-room" &&
                model.part_number == "self-authored-beam-tetrode-capture-no-commercial-part";
+    }
+    if (model.kind == ModelKind::VariMu) {
+        return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
+               model.license.permission_evidence == "self-authored-clean-room" &&
+               model.part_number == "self-authored-vari-mu-remote-cutoff-no-commercial-part";
     }
     if (model.kind == ModelKind::Bjt || model.kind == ModelKind::Jfet || model.kind == ModelKind::Mosfet) {
         const bool polarity_allowed = model.kind == ModelKind::Bjt
@@ -362,7 +390,7 @@ std::vector<ModelKindContract> ModelKindContracts() {
         {ModelKind::Triode, ModelAvailability::Approved},
         {ModelKind::Pentode, ModelAvailability::Approved},
         {ModelKind::BeamTetrode, ModelAvailability::Approved},
-        {ModelKind::VariMu, ModelAvailability::Blocked},
+        {ModelKind::VariMu, ModelAvailability::Approved},
         {ModelKind::TransformerCore, ModelAvailability::Blocked},
         {ModelKind::TestMathematical, ModelAvailability::Approved},
     };
@@ -536,7 +564,8 @@ std::optional<ModelAuditError> ModelDatabase::Register(ModelAuditRecord model) {
          !HasAmplifierParameterContract(model)) ||
         (model.kind == ModelKind::Triode && !HasTriodeParameterContract(model)) ||
         (model.kind == ModelKind::Pentode && !HasPentodeParameterContract(model)) ||
-        (model.kind == ModelKind::BeamTetrode && !HasBeamTetrodeParameterContract(model))) {
+        (model.kind == ModelKind::BeamTetrode && !HasBeamTetrodeParameterContract(model)) ||
+        (model.kind == ModelKind::VariMu && !HasVariMuParameterContract(model))) {
         return ModelAuditError::MissingModelAuthorization;
     }
     if (model.availability != ModelAvailability::Approved || !IsApprovedKind(model.kind)) {

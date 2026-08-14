@@ -30,6 +30,7 @@ enum class CircuitComponentType {
     Triode,
     Pentode,
     BeamTetrode,
+    VariMu,
     Switch,
 };
 
@@ -120,6 +121,16 @@ struct CircuitBeamTetrodeModel {
     double max_step{1.0};
 };
 
+struct CircuitVariMuModel {
+    std::string kind{"remote-cutoff"};
+    std::uint32_t model_version{1};
+    double amplification_factor{20.0};
+    double perveance{1.0e-3};
+    double remote_cutoff_coefficient{2.0};
+    double max_current{1.0e-2};
+    double max_step{1.0};
+};
+
 struct CircuitSwitchSpec {
     std::vector<std::string> states;
     std::uint32_t initial_state{};
@@ -167,6 +178,7 @@ struct CircuitComponent {
     std::optional<CircuitTriodeModel> triode_model;
     std::optional<CircuitPentodeModel> pentode_model;
     std::optional<CircuitBeamTetrodeModel> beam_tetrode_model;
+    std::optional<CircuitVariMuModel> vari_mu_model;
     std::optional<CircuitSwitchSpec> switch_spec;
 };
 
