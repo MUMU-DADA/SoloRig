@@ -4,7 +4,7 @@
 
 ## 结论
 
-当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 diode/Zener、BJT、JFET、MOSFET、bounded opamp/OTA、triode 等第一批通用有源模型；generic pentode 是尚未进入 Git 基线的本地候选。它可以作为简单模拟削波、Fuzz、Boost、滤波、音调网络和部分运放/OTA、电子管级电路的结构基础。
+当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 diode/Zener、BJT、JFET、MOSFET、bounded opamp/OTA、triode、generic pentode 等第一批通用有源模型；generic beam tetrode 是当前尚未进入 Git 基线的本地候选。它可以作为简单模拟削波、Fuzz、Boost、滤波、音调网络和部分运放/OTA、电子管级电路的结构基础。
 
 当前仍不能宣称覆盖“绝大多数单块效果器和箱头”。主要阻塞不只是元件数量，还包括实时旋钮/开关、行为模块、复杂拓扑编译、器件高阶物理、功放与电源/负载交互，以及 SPICE/golden/实机误差验证。
 
@@ -21,7 +21,7 @@
 
 ## 器件族代码组织规则
 
-- 非线性器件按族维护独立的 `src/dsp/nonlinear_<family>.hpp/.cpp`，当前边界为 diode/Zener、BJT、JFET、MOSFET、opamp/OTA、triode 和 pentode；后续 beam tetrode、vari-mu、transformer/core 等不得重新堆入单一大型实现文件。
+- 非线性器件按族维护独立的 `src/dsp/nonlinear_<family>.hpp/.cpp`，当前边界为 diode/Zener、BJT、JFET、MOSFET、opamp/OTA、triode、pentode 和 beam tetrode；后续 vari-mu、transformer/core 等不得重新堆入单一大型实现文件。
 - `src/dsp/nonlinear_device_common.hpp` 只保存跨族公共枚举，`nonlinear_device.hpp` 仅作为兼容 umbrella；通用且确实共享的有界数学辅助可以独立存在，但不得借共享辅助隐藏某一器件族的模型语义。
 - 每个器件族的 evaluator 单元测试放在对应 `tests/nonlinear_<family>_tests.cpp`。网表 parser、ModelDatabase、Compile/Prepare/Solve 和外部 runtime 集成测试仍按各自系统边界集中维护，并以器件族命名的测试用例和 fixtures 保持可审计性。
 - 中央 parser/dispatch 和通用 Newton/MNA 矩阵基础可以共享。stamp/binding 只有在不暴露求解器内部状态、不改变 POD/ABI 且能保持实时预分配契约时才独立拆分；不能为了文件数量制造跨层回调或动态分派。
@@ -55,8 +55,8 @@
 | bounded opamp | 已交付 | 无频率状态的有界电压放大器；没有供电脚、阻抗、偏置/失调、共模范围、slew rate、GBW/极点、PSRR/CMRR 和噪声。 |
 | bounded OTA | 已交付 | 无频率状态的有界跨导放大器；没有真实芯片控制、电源、频率和噪声特性。 |
 | triode | 已交付 | M18-C6 generic space-charge v1 已由 `667d1f2` 提交；没有栅极导通/漏电、极间电容、加热器、温度、自热、老化、microphonics 和商业管参数。 |
-| pentode | 本地候选 | M18-C7a generic space-charge/screen-share v1 已通过本地全量门禁、尚未提交；没有商业管型、真实 suppressor-grid/beam-forming、secondary emission、反向/栅极导通、动态电容和热行为。 |
-| beam tetrode | 未实现 | C7b 保持 blocked；没有 beam-forming、屏栅/板极高阶交互或商业管参数。 |
+| pentode | 已交付 | M18-C7a generic space-charge/screen-share v1 已由 `cd5f1bc` 提交；没有商业管型、真实 suppressor-grid/beam-forming、secondary emission、反向/栅极导通、动态电容和热行为。 |
+| beam tetrode | 本地候选 | M18-C7b generic beam-capture v1 已通过本地全量 Release 门禁、待提交；平方有理 capture 不是实际 beam-forming，不含 secondary-emission kink、反向/栅极导通、动态电容、热行为或商业管参数。 |
 | vari-mu | 未实现 | 可变增益电子管和相关压缩电路缺口。 |
 | 真实变压器/磁芯 | 未实现 | 没有绕组电阻、励磁/漏感、饱和及磁滞。 |
 
@@ -73,7 +73,7 @@
 | 光学压缩、光学 Tremolo、Uni-Vibe | 未完整覆盖 | 缺少 LED/LDR/灯泡耦合、记忆和时间常数模型。 |
 | Chorus、Flanger、Analog Delay | 未完整覆盖 | 缺少 BBD、clock、VCO/LFO、插值/抗混叠和行为岛真实绑定。 |
 | Spring Reverb | 未完整覆盖 | 只有行为 lowering/契约基础，没有可运行弹簧与换能器模型。 |
-| 真空管前级单块/前级通道 | 本地初步能力 | generic triode 是候选基础；真实栅流、极间电容、供电和具体管型尚未完成。 |
+| 真空管前级单块/前级通道 | 通用模型初步能力 | generic triode/pentode 已交付，beam tetrode 是本地候选；真实栅流、极间电容、供电和具体管型尚未完成。 |
 
 上述“可实现”表示通用模型具备搭建条件，不表示仓库已经交付相应产品模块，也不表示声音达到具体设备的 1:1 精度。
 
@@ -81,7 +81,7 @@
 
 要覆盖绝大多数电子管箱头，仅有 triode 前级模型不够，至少还需要：
 
-1. 提交并独立复验 generic pentode；继续补齐 beam tetrode，以及屏栅、抑制栅和功率管高阶行为；
+1. 提交并独立复验 generic beam tetrode；继续补齐屏栅、抑制栅和功率管高阶行为；
 2. 输出变压器的耦合电感、绕组损耗、漏感、励磁、磁芯饱和与磁滞；
 3. 整流器、储能电容、供电阻抗、纹波、Sag 和负载恢复；
 4. 扬声器随频率和振幅变化的复阻抗负载，以及它与输出级/负反馈的交互；
@@ -106,13 +106,14 @@
 
 ## 纳入项目计划
 
-后续工作按下表纳入 M18-M20。登记计划不等于授权开工；当前只允许收口 M18-C7a，后续子里程碑仍需逐项登记范围、测试和禁止扩展。
+后续工作按下表纳入 M18-M20。登记计划不等于完成；当前只收口 M18-C7b，C7c 及后续子里程碑仍需逐项登记范围、测试和禁止扩展。
 
 | 阶段 | 计划内容 | 完成判据摘要 |
 | --- | --- | --- |
 | M18-C6 | generic triode 主线化 | 已由 `667d1f2` 完成提交；保持商业管型及高阶物理边界。 |
-| M18-C7a | generic pentode | 本地候选已通过四端电流、Jacobian、DC/动态/收敛/Reset/极端输入及全量 Release 门禁，待提交和独立复验；不伪装商业管型。 |
-| M18-C7b/C7c | beam tetrode、vari-mu | 逐族登记模型语义和证据，未登记前保持 blocked。 |
+| M18-C7a | generic pentode | 已由 `cd5f1bc` 完成提交；保持商业管型及高阶物理边界。 |
+| M18-C7b | generic beam tetrode | 本地 beam-capture 候选已通过四端电流、Jacobian、DC/动态/收敛/Reset/极端输入及全量 Release 门禁，待提交；不伪装真实 beam-forming 或商业管型。 |
+| M18-C7c | vari-mu | 尚未开工并保持 blocked；需独立登记模型、状态、控制与动态参考证据。 |
 | M18-C8 | coupled inductor、transformer/core | 匝比、绕组损耗、励磁/漏感、饱和/磁滞的状态与能量/稳定性证据。 |
 | M18-C9 | 半导体与运放高阶物理 | 补齐二极管动态、BJT/JFET/MOSFET 寄生与温度、真实运放电源/频率/瞬态行为；逐项与参考模型比较。 |
 | M18-C10 | 电源与负载交互 | 整流、纹波、Sag、供电恢复、扬声器动态阻抗及功放反馈联调。 |

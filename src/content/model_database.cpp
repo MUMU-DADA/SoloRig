@@ -41,6 +41,7 @@ std::optional<ModelKind> ParseKind(std::string_view value) {
     if (value == "ota") return ModelKind::Ota;
     if (value == "triode") return ModelKind::Triode;
     if (value == "pentode") return ModelKind::Pentode;
+    if (value == "beam-tetrode") return ModelKind::BeamTetrode;
     if (value == "vari-mu") return ModelKind::VariMu;
     if (value == "transformer-core") return ModelKind::TransformerCore;
     if (value == "test-mathematical") return ModelKind::TestMathematical;
@@ -66,7 +67,7 @@ bool IsApprovedKind(ModelKind kind) {
     return kind == ModelKind::Diode || kind == ModelKind::Zener ||
            kind == ModelKind::Bjt || kind == ModelKind::Jfet || kind == ModelKind::Mosfet ||
            kind == ModelKind::Opamp || kind == ModelKind::Ota ||
-           kind == ModelKind::Triode || kind == ModelKind::Pentode ||
+           kind == ModelKind::Triode || kind == ModelKind::Pentode || kind == ModelKind::BeamTetrode ||
            kind == ModelKind::TestMathematical;
 }
 
@@ -258,11 +259,35 @@ bool HasPentodeParameterContract(const ModelAuditRecord& model) {
     });
 }
 
+bool HasBeamTetrodeParameterContract(const ModelAuditRecord& model) {
+    if (model.kind != ModelKind::BeamTetrode) return true;
+    struct Required { std::string_view id; std::string_view unit; double minimum; double maximum; };
+    constexpr Required required[] = {
+        {"screen-amplification-factor", "1", 1.0, 1.0e6},
+        {"perveance", "A/V^1.5", 1.0e-12, 1.0e6},
+        {"knee-voltage", "V", 1.0e-6, 1.0e6},
+        {"screen-current-fraction", "1", 0.0, 0.5},
+        {"max-current", "A", 1.0e-12, 1.0e6},
+        {"max-step", "V", 1.0e-20, 10.0}};
+    if (model.parameters.size() != std::size(required)) return false;
+    return std::all_of(std::begin(required), std::end(required), [&model](const auto& expected) {
+        return std::count_if(model.parameters.begin(), model.parameters.end(), [&expected](const auto& parameter) {
+            return parameter.id == expected.id && parameter.unit == expected.unit &&
+                   std::isfinite(parameter.default_value) && parameter.default_value >= expected.minimum &&
+                   parameter.default_value <= expected.maximum && std::isfinite(parameter.minimum) &&
+                   std::isfinite(parameter.maximum) && parameter.minimum >= expected.minimum &&
+                   parameter.maximum <= expected.maximum && parameter.minimum < parameter.maximum &&
+                   parameter.default_value >= parameter.minimum && parameter.default_value <= parameter.maximum;
+        }) == 1;
+    });
+}
+
 bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
     if (model.kind != ModelKind::Diode && model.kind != ModelKind::Zener && model.kind != ModelKind::Bjt &&
         model.kind != ModelKind::Jfet && model.kind != ModelKind::Mosfet &&
         model.kind != ModelKind::Opamp && model.kind != ModelKind::Ota &&
-        model.kind != ModelKind::Triode && model.kind != ModelKind::Pentode) {
+        model.kind != ModelKind::Triode && model.kind != ModelKind::Pentode &&
+        model.kind != ModelKind::BeamTetrode) {
         return true;
     }
     if (model.kind == ModelKind::Opamp || model.kind == ModelKind::Ota) {
@@ -282,6 +307,11 @@ bool IsAuthorizedCleanRoomDevice(const ModelAuditRecord& model) {
         return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
                model.license.permission_evidence == "self-authored-clean-room" &&
                model.part_number == "self-authored-space-charge-pentode-no-commercial-part";
+    }
+    if (model.kind == ModelKind::BeamTetrode) {
+        return model.source.origin.starts_with("SoloRig self-authored clean-room ") &&
+               model.license.permission_evidence == "self-authored-clean-room" &&
+               model.part_number == "self-authored-beam-tetrode-capture-no-commercial-part";
     }
     if (model.kind == ModelKind::Bjt || model.kind == ModelKind::Jfet || model.kind == ModelKind::Mosfet) {
         const bool polarity_allowed = model.kind == ModelKind::Bjt
@@ -312,6 +342,7 @@ const char* ModelKindName(ModelKind kind) noexcept {
     case ModelKind::Ota: return "ota";
     case ModelKind::Triode: return "triode";
     case ModelKind::Pentode: return "pentode";
+    case ModelKind::BeamTetrode: return "beam-tetrode";
     case ModelKind::VariMu: return "vari-mu";
     case ModelKind::TransformerCore: return "transformer-core";
     case ModelKind::TestMathematical: return "test-mathematical";
@@ -330,6 +361,7 @@ std::vector<ModelKindContract> ModelKindContracts() {
         {ModelKind::Ota, ModelAvailability::Approved},
         {ModelKind::Triode, ModelAvailability::Approved},
         {ModelKind::Pentode, ModelAvailability::Approved},
+        {ModelKind::BeamTetrode, ModelAvailability::Approved},
         {ModelKind::VariMu, ModelAvailability::Blocked},
         {ModelKind::TransformerCore, ModelAvailability::Blocked},
         {ModelKind::TestMathematical, ModelAvailability::Approved},
@@ -503,7 +535,8 @@ std::optional<ModelAuditError> ModelDatabase::Register(ModelAuditRecord model) {
         ((model.kind == ModelKind::Opamp || model.kind == ModelKind::Ota) &&
          !HasAmplifierParameterContract(model)) ||
         (model.kind == ModelKind::Triode && !HasTriodeParameterContract(model)) ||
-        (model.kind == ModelKind::Pentode && !HasPentodeParameterContract(model))) {
+        (model.kind == ModelKind::Pentode && !HasPentodeParameterContract(model)) ||
+        (model.kind == ModelKind::BeamTetrode && !HasBeamTetrodeParameterContract(model))) {
         return ModelAuditError::MissingModelAuthorization;
     }
     if (model.availability != ModelAvailability::Approved || !IsApprovedKind(model.kind)) {

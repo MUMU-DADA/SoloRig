@@ -37,7 +37,7 @@
 }
 ```
 
-节点、端口、供电和元件 ID 在整个网表中必须唯一，所有引脚必须引用已声明节点。下表包含 M18-C2/C3/C4/C5/C6/C7a clean-room BJT、JFET、MOSFET、bounded opamp/OTA、generic triode 和 generic pentode 主线路径；它不代表完整模型数据库、具体器件或白盒等价能力已经交付。
+节点、端口、供电和元件 ID 在整个网表中必须唯一，所有引脚必须引用已声明节点。下表包含 M18-C2/C3/C4/C5/C6/C7a/C7b clean-room BJT、JFET、MOSFET、bounded opamp/OTA、generic triode、generic pentode 和 generic beam tetrode 主线路径；它不代表完整模型数据库、具体器件或白盒等价能力已经交付。
 
 | 类型 | v2 解析 | MNA Compile/Prepare/Solve | 状态/模型 |
 | --- | --- | --- | --- |
@@ -56,6 +56,7 @@
 | `mosfet` | 支持 | 支持 clean-room enhancement square-law Newton | 三引脚 `[drain, gate, source]`；兼容 inline `mosfetModel`，或由 `ModelDatabase` 按 MOSFET 类型/极性绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
 | `triode` | 支持 | 支持 clean-room space-charge Newton | 三引脚 `[plate, grid, cathode]`；兼容 inline `triodeModel`，或由 `ModelDatabase` 按 triode 类型绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
 | `pentode` | 支持 | 支持 clean-room space-charge/screen-share Newton | 四引脚 `[plate, screen, grid, cathode]`；兼容 inline `pentodeModel`，或由 `ModelDatabase` 按 pentode 类型绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
+| `beam-tetrode` | 支持 | 支持 clean-room beam-capture Newton | 四引脚 `[plate, screen, grid, cathode]`；兼容 inline `beamTetrodeModel.kind=beam-capture`，或由 `ModelDatabase` 按 beam-tetrode 类型绑定的安全字符串引用；`initial` 是栅极节点电压初始猜测 |
 | `switch` | 支持契约解析 | `UnsupportedComponent` | 状态列表/初态会校验，运行时尚未提供控制邮箱 |
 
 电感采用 branch-current MNA 形式：每个 backward-Euler 步求解 `v+ - v- - (L/dt)i = -(L/dt)i_previous`，并在 `Reset`/重复 `Prepare` 时恢复声明的初始电流。电容使用 companion conductance 与电压历史；`voltage-source`、`supplies` 和理想运放使用额外 MNA branch unknown。电位器在 Compile 阶段按归一化位置展开为端点到 wiper、wiper 到端点的两个电阻，位置扫动通过重新 Compile/Prepare 完成；端点的零段以极小正阻值保持矩阵可解。VCCS 直接印章四端线性跨导矩阵；理想运放印章有限增益 VCVS，带限幅时在 Prepare 后的预分配 Newton 工作区内选择线性/饱和分支。已发布的 runtime 没有实时旋钮或受控源参数更新入口，`SetParameter` 会明确拒绝该更新。矩阵奇异、非有限输入/结果、Newton 不收敛会返回稳定错误；未知器件、未知控制状态、缺失模型不会静默退化。
@@ -74,8 +75,10 @@ M18-C6 的 `triode` 使用统一 `EvaluateNonlinearTriode` 三端 space-charge e
 
 M18-C7a 的 `pentode` 使用统一 `EvaluateNonlinearPentode` 四端 space-charge/screen-share evaluator。控制量为 `Vgk + Vsk / screenAmplificationFactor`，总空间电流为 `perveance * control^(3/2)`，plate share 为 `1 - exp(-Vpk / kneeVoltage)`；只有 `Vpk > 0`、`Vsk > 0` 且控制量为正时导通。plate current 是扣除 `screenCurrentFraction` 后的总电流乘以 plate share，screen current 是总电流的固定分量，grid current 为零，cathode current 保持四端 KCL。完整 4x4 Jacobian 与独立中心有限差分一致；总空间电流在幂运算前受 `maxCurrent` 限制，钳位后 screen/control 导数为零，但未饱和的 plate-knee 导数继续与返回 plate current 一致；`maxStep` 对 Vpk/Vsk/Vgk Newton 步长阻尼。审计引用只在 Compile/Prepare 边界绑定为 POD。该 generic v1 不包含商业管型、beam tetrode/vari-mu、真实 suppressor-grid/beam-forming、secondary emission、反向导通、grid conduction/leakage、heater/filament、极间电容/电荷、温度/自热、老化、microphonics 或噪声。
 
+M18-C7b 的 `beam-tetrode` 使用独立 `EvaluateNonlinearBeamTetrode` 四端 beam-capture evaluator。控制量为 `Vgk + Vsk / screenAmplificationFactor`，可用空间电流为 `perveance * control^(3/2)`；令 `x = Vpk / kneeVoltage`，plate capture 为 `x^2 / (1 + x^2)`，plate current 为总空间电流乘以 capture，screen current 为 `screenCurrentFraction * spaceCurrent * (1 - capture)`，grid current 为零，cathode current 保持四端 KCL。只有 `Vpk > 0`、`Vsk > 0` 且控制量为正时导通。完整 4x4 Jacobian 与独立中心有限差分一致；`maxCurrent` 在幂运算前限制空间电流，钳位后控制量导数为零而 capture 导数继续与返回电流一致；极端有限 `Vpk/kneeVoltage` 使用归一化分支避免平方溢出，`maxStep` 对 Vpk/Vsk/Vgk Newton 步长阻尼。审计引用只在 Compile/Prepare 边界绑定为 POD。该平方有理 capture 曲线只是 SoloRig 自有 generic beam-knee 数学契约，不包含商业管型、真实 beam-forming/suppressor-grid、secondary-emission kink、反向导通、grid conduction/leakage、heater/filament、极间电容/电荷、温度/自热、老化、microphonics 或噪声。
+
 模块加载器对旧的 `schemaVersion: 1` + `kind: "analog-circuit"` 保持原受限 RC/二极管适配器；v2 读取根对象的 `version: 2`。未知版本、缺失字段、重复 ID、非法节点/引脚、范围值、缺失模型和危险路径均拒绝加载。v1 不会被静默转换为 v2，v2 也不会回退到旧硬编码拓扑。
 
 M18-C1 的 Zener 使用 self-authored 双指数静态数学契约，参数包括正向饱和电流/热电压、反向击穿电压/电流/斜率和最大 Newton 步长；这不是商业器件参数。安全字符串引用只有通过 `CompileMnaCircuit(circuit, ModelDatabase)` 才能在 Prepare 阶段绑定，普通编译稳定返回 `MissingModelAuthorization`；inline 模型对象不经过数据库，必须按本规范范围校验且只代表 generic clean-room 数学模型。
 
-本版本仍不宣称通用器件覆盖、真实设备 1:1 校准、实时参数控制电位器、开关/受控源控制、真实非理想/商业运放芯片、商业真空管、beam tetrode/vari-mu/transformer、结电容、Early/热效应、供电下垂或测量基线自动校准；这些属于后续独立范围。M18-C2/C3/C4/C5/C6/C7a 分别完成 generic BJT/JFET/MOSFET/bounded opamp+OTA/space-charge triode/space-charge pentode 主线化，但不构成 PedalKernel 等价或完整白盒完成。
+本版本仍不宣称通用器件覆盖、真实设备 1:1 校准、实时参数控制电位器、开关/受控源控制、真实非理想/商业运放芯片、商业真空管、真实 beam-forming、vari-mu/transformer、结电容、Early/热效应、供电下垂或测量基线自动校准；这些属于后续独立范围。M18-C2/C3/C4/C5/C6/C7a/C7b 分别完成 generic BJT/JFET/MOSFET/bounded opamp+OTA/space-charge triode/space-charge pentode/beam-capture tetrode 主线化，但不构成 PedalKernel 等价或完整白盒完成。

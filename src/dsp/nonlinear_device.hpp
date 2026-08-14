@@ -2,6 +2,7 @@
 
 // Compatibility umbrella. New code may include the device-family header directly.
 #include "dsp/nonlinear_amplifier.hpp"
+#include "dsp/nonlinear_beam_tetrode.hpp"
 #include "dsp/nonlinear_bjt.hpp"
 #include "dsp/nonlinear_diode.hpp"
 #include "dsp/nonlinear_jfet.hpp"

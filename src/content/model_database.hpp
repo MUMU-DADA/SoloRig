@@ -37,6 +37,7 @@ enum class ModelKind {
     Ota,
     Triode,
     Pentode,
+    BeamTetrode,
     VariMu,
     TransformerCore,
     TestMathematical,

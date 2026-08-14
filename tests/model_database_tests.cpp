@@ -411,3 +411,25 @@ TEST_CASE("M18-C7a audits and registers only complete authorized clean-room pent
     REQUIRE(pentode != contracts.end());
     REQUIRE(pentode->availability == solo_rig::ModelAvailability::Approved);
 }
+
+TEST_CASE("M18-C7b audits and registers only complete authorized clean-room beam tetrode models") {
+    const auto built = solo_rig::BuildModelDatabase(ReadFixture("m18c7b_cleanroom_beam_tetrode_model.json"));
+    REQUIRE(built.database.has_value());
+    REQUIRE(built.database->Bind({"solorig.cleanroom.beam-tetrode.capture.v1",
+                                  solo_rig::ModelKind::BeamTetrode}).model.has_value());
+    REQUIRE(solo_rig::BuildModelDatabase(ReadFixture("m18c7b_untrusted_beam_tetrode_model.json")).error ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+    REQUIRE(solo_rig::BuildModelDatabase(ReadFixture("m18c7b_incomplete_beam_tetrode_model.json")).error ==
+            solo_rig::ModelAuditError::MissingModelAuthorization);
+    const auto contracts = solo_rig::ModelKindContracts();
+    const auto beam_tetrode = std::find_if(contracts.begin(), contracts.end(), [](const auto& item) {
+        return item.kind == solo_rig::ModelKind::BeamTetrode;
+    });
+    REQUIRE(beam_tetrode != contracts.end());
+    REQUIRE(beam_tetrode->availability == solo_rig::ModelAvailability::Approved);
+    const auto vari_mu = std::find_if(contracts.begin(), contracts.end(), [](const auto& item) {
+        return item.kind == solo_rig::ModelKind::VariMu;
+    });
+    REQUIRE(vari_mu != contracts.end());
+    REQUIRE(vari_mu->availability == solo_rig::ModelAvailability::Blocked);
+}

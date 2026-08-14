@@ -57,6 +57,7 @@ add_library(solo_rig_core STATIC
     src/dsp/diode_clipper.cpp
     src/dsp/mna_solver.cpp
     src/dsp/nonlinear_amplifier.cpp
+    src/dsp/nonlinear_beam_tetrode.cpp
     src/dsp/nonlinear_bjt.cpp
     src/dsp/nonlinear_diode.cpp
     src/dsp/nonlinear_jfet.cpp
@@ -228,6 +229,7 @@ if(BUILD_TESTING)
         tests/wdf_runtime_tests.cpp
         tests/diode_clipper_tests.cpp
         tests/nonlinear_amplifier_tests.cpp
+        tests/nonlinear_beam_tetrode_tests.cpp
         tests/nonlinear_bjt_tests.cpp
         tests/nonlinear_diode_tests.cpp
         tests/nonlinear_jfet_tests.cpp

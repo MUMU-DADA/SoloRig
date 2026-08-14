@@ -29,6 +29,7 @@ enum class CircuitComponentType {
     Mosfet,
     Triode,
     Pentode,
+    BeamTetrode,
     Switch,
 };
 
@@ -108,6 +109,17 @@ struct CircuitPentodeModel {
     double max_step{1.0};
 };
 
+struct CircuitBeamTetrodeModel {
+    std::string kind{"beam-capture"};
+    std::uint32_t model_version{1};
+    double screen_amplification_factor{20.0};
+    double perveance{1.0e-3};
+    double knee_voltage{2.0};
+    double screen_current_fraction{0.1};
+    double max_current{1.0e-2};
+    double max_step{1.0};
+};
+
 struct CircuitSwitchSpec {
     std::vector<std::string> states;
     std::uint32_t initial_state{};
@@ -154,6 +166,7 @@ struct CircuitComponent {
     std::optional<CircuitAmplifierModel> amplifier_model;
     std::optional<CircuitTriodeModel> triode_model;
     std::optional<CircuitPentodeModel> pentode_model;
+    std::optional<CircuitBeamTetrodeModel> beam_tetrode_model;
     std::optional<CircuitSwitchSpec> switch_spec;
 };
 
