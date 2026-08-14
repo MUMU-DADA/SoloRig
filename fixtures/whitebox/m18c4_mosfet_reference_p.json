@@ -1,0 +1,7 @@
+{
+  "version":2,"schema":"circuit","referenceGround":"0","nodes":["vss","d","g","0"],
+  "ports":[{"id":"input","direction":"input","node":"g"},{"id":"output","direction":"output","node":"d"}],
+  "supplies":[{"id":"supply","positive":"vss","negative":"0","voltage":-5.0}],
+  "components":[{"id":"m","type":"mosfet","pins":["d","g","0"],"model":"solorig.cleanroom.mosfet.p-channel.v1"},{"id":"rd","type":"resistor","pins":["vss","d"],"value":1000.0}],
+  "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,"convergence":{"maxIterations":64,"absoluteTolerance":1.0e-10,"relativeTolerance":1.0e-8}}
+}

@@ -24,6 +24,7 @@ enum class CircuitComponentType {
     IdealOpAmp,
     Bjt,
     Jfet,
+    Mosfet,
     Switch,
 };
 
@@ -59,6 +60,16 @@ struct CircuitJfetModel {
     std::uint32_t model_version{1};
     std::string polarity{"n-channel"};
     double pinch_off_voltage{1.0};
+    double transconductance_parameter{1.0e-3};
+    double max_current{1.0e-2};
+    double max_step{1.0};
+};
+
+struct CircuitMosfetModel {
+    std::string kind{"enhancement-square-law"};
+    std::uint32_t model_version{1};
+    std::string polarity{"n-channel"};
+    double threshold_voltage{1.0};
     double transconductance_parameter{1.0e-3};
     double max_current{1.0e-2};
     double max_step{1.0};
@@ -106,6 +117,7 @@ struct CircuitComponent {
     std::optional<CircuitControlledSourceSpec> controlled_source;
     std::optional<CircuitBjtModel> bjt_model;
     std::optional<CircuitJfetModel> jfet_model;
+    std::optional<CircuitMosfetModel> mosfet_model;
     std::optional<CircuitSwitchSpec> switch_spec;
 };
 

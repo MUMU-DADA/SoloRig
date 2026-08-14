@@ -1,0 +1,6 @@
+{
+  "version":2,"schema":"circuit","referenceGround":"0","nodes":["d","g","0"],
+  "ports":[{"id":"input","direction":"input","node":"g"},{"id":"output","direction":"output","node":"d"}],
+  "components":[{"id":"m","type":"mosfet","pins":["d","g","0"],"model":"unknown.mosfet.reference"},{"id":"rd","type":"resistor","pins":["d","0"],"value":1000.0}],
+  "solver":{"method":"modified-nodal-analysis","integration":"backward-euler"}
+}

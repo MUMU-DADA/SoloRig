@@ -84,6 +84,9 @@ std::optional<CircuitComponentType> ComponentType(std::string_view text) {
     if (text == "jfet") {
         return CircuitComponentType::Jfet;
     }
+    if (text == "mosfet") {
+        return CircuitComponentType::Mosfet;
+    }
     if (text == "switch") {
         return CircuitComponentType::Switch;
     }
@@ -255,9 +258,15 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         const bool is_controlled_source = *type == CircuitComponentType::Vccs || *type == CircuitComponentType::IdealOpAmp;
         const bool is_bjt = *type == CircuitComponentType::Bjt;
         const bool is_jfet = *type == CircuitComponentType::Jfet;
+        const bool is_mosfet = *type == CircuitComponentType::Mosfet;
+        if ((Find(*component, "bjtModel") != nullptr && !is_bjt) ||
+            (Find(*component, "jfetModel") != nullptr && !is_jfet) ||
+            (Find(*component, "mosfetModel") != nullptr && !is_mosfet)) {
+            return Failure(CircuitLoadError::InvalidValue);
+        }
         if (pins->size() != 2U && !(is_potentiometer && pins->size() == 3U) &&
             !(is_controlled_source && pins->size() == 4U) &&
-            !((is_bjt || is_jfet) && pins->size() == 3U)) {
+            !((is_bjt || is_jfet || is_mosfet) && pins->size() == 3U)) {
             return Failure(CircuitLoadError::InvalidPin);
         }
         for (const auto& pin : *pins) {
@@ -521,6 +530,46 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             }
         }
         if (is_jfet && !parsed_component.jfet_model.has_value() && !parsed_component.model.has_value()) {
+            return Failure(CircuitLoadError::InvalidValue);
+        }
+        if (is_mosfet) {
+            const auto* mosfet_value = Find(*component, "mosfetModel");
+            const auto* mosfet = mosfet_value == nullptr ? nullptr : mosfet_value->AsObject();
+            const auto kind = mosfet == nullptr ? std::nullopt : StringValue(Find(*mosfet, "kind"));
+            const auto model_version = mosfet == nullptr ? std::nullopt : UnsignedValue(Find(*mosfet, "modelVersion"));
+            const auto polarity = mosfet == nullptr ? std::nullopt : StringValue(Find(*mosfet, "polarity"));
+            const auto threshold = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "thresholdVoltage"));
+            const auto transconductance = mosfet == nullptr
+                ? std::nullopt : NumberValue(Find(*mosfet, "transconductanceParameter"));
+            const auto max_current = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "maxCurrent"));
+            const auto max_step = mosfet == nullptr ? std::nullopt : NumberValue(Find(*mosfet, "maxStep"));
+            if (mosfet == nullptr && !parsed_component.model.has_value()) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            if (mosfet != nullptr && (!kind.has_value() || *kind != "enhancement-square-law" ||
+                !model_version.has_value() || *model_version != 1U || !polarity.has_value() ||
+                (*polarity != "n-channel" && *polarity != "p-channel") || !threshold.has_value() ||
+                *threshold < 1.0e-6 || *threshold > 100.0 || !transconductance.has_value() ||
+                *transconductance < 1.0e-12 || *transconductance > 1.0e6 || !max_current.has_value() ||
+                *max_current < 1.0e-12 || *max_current > 1.0e6 || !max_step.has_value() ||
+                *max_step < 1.0e-20 || *max_step > 10.0 || parsed_component.value.has_value() ||
+                parsed_component.tolerance.has_value() || parsed_component.model.has_value() ||
+                parsed_component.diode_model.has_value() || parsed_component.potentiometer.has_value() ||
+                parsed_component.controlled_source.has_value() || parsed_component.bjt_model.has_value() ||
+                parsed_component.jfet_model.has_value() || parsed_component.switch_spec.has_value())) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            if (mosfet != nullptr) {
+                parsed_component.mosfet_model = CircuitMosfetModel{.kind = *kind,
+                                                                   .model_version = *model_version,
+                                                                   .polarity = *polarity,
+                                                                   .threshold_voltage = *threshold,
+                                                                   .transconductance_parameter = *transconductance,
+                                                                   .max_current = *max_current,
+                                                                   .max_step = *max_step};
+            }
+        }
+        if (is_mosfet && !parsed_component.mosfet_model.has_value() && !parsed_component.model.has_value()) {
             return Failure(CircuitLoadError::InvalidValue);
         }
         circuit.components.push_back(std::move(parsed_component));

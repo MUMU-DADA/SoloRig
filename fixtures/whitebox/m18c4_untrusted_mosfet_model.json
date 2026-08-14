@@ -1,0 +1,5 @@
+{
+  "version":1,"schema":"solorig-model-audit","modelId":"untrusted.commercial.mosfet","deviceFamily":"mosfet","partNumber":"unverified-commercial-part","modelKind":"mosfet","polarity":"n-channel","runtimeStatus":"approved",
+  "parameters":[{"id":"threshold-voltage","default":1.0,"min":1.0e-6,"max":100.0,"unit":"V"},{"id":"transconductance-parameter","default":0.001,"min":1.0e-12,"max":1.0e6,"unit":"A/V^2"},{"id":"max-current","default":0.01,"min":1.0e-12,"max":1.0e6,"unit":"A"},{"id":"max-step","default":0.5,"min":1.0e-20,"max":10.0,"unit":"V"}],
+  "source":{"origin":"unverified external claim","version":"unknown","integrity":"unverified"},"license":{"spdx":"MIT","permissionEvidence":"unverified-claim","reviewStatus":"approved"},"applicability":[{"quantity":"terminal-voltage","min":-20.0,"max":20.0,"unit":"V"}],"evidenceRefs":["claim:unverified"]
+}

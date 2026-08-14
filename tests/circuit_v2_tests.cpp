@@ -607,7 +607,7 @@ TEST_CASE("circuit v2 rejects unknown components and invalid solver configuratio
     const auto unknown = solo_rig::ParseCircuitV2Json(R"({
       "version":2,"schema":"circuit","referenceGround":"0","nodes":["out","0"],
       "ports":[{"id":"output","direction":"output","node":"out"}],
-      "components":[{"id":"x","type":"mosfet","pins":["out","0"]}],
+      "components":[{"id":"x","type":"unknown-active-device","pins":["out","0"]}],
       "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
     })");
     REQUIRE(unknown.errors.front() == solo_rig::CircuitLoadError::UnknownComponent);
@@ -1073,6 +1073,145 @@ TEST_CASE("M18-C3 JFET rejects nonfinite and bounded-iteration failures at realt
     REQUIRE(singular.circuit.has_value());
     REQUIRE(singular.circuit->Prepare(48000.0));
     REQUIRE(singular.circuit->Solve(-2.0).error == solo_rig::MnaSolveError::SingularMatrix);
+}
+
+TEST_CASE("M18-C4 MOSFET inline and audited N/P references reach prepared Solve") {
+    REQUIRE(solo_rig::ParseCircuitV2Json(ReadFixture("m18c4_invalid_mosfet_inline.json")).errors ==
+            std::vector<solo_rig::CircuitLoadError>{solo_rig::CircuitLoadError::InvalidValue});
+    const auto inline_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c4_mosfet_inline_n.json"));
+    REQUIRE(inline_graph.circuit.has_value());
+    auto inline_compiled = solo_rig::CompileMnaCircuit(*inline_graph.circuit);
+    REQUIRE(inline_compiled.circuit.has_value());
+    REQUIRE(inline_compiled.circuit->Prepare(48000.0));
+    const auto inline_result = inline_compiled.circuit->Solve(2.0);
+    REQUIRE(inline_result.Succeeded());
+    REQUIRE(std::fabs(inline_result.output_voltage - 4.0) < 1.0e-8);
+
+    const auto n_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c4_mosfet_reference_n.json"));
+    const auto n_database = solo_rig::BuildModelDatabase(ReadFixture("m18c4_cleanroom_n_mosfet_model.json"));
+    REQUIRE(n_graph.circuit.has_value());
+    REQUIRE(n_database.database.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*n_graph.circuit).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+    auto n_compiled = solo_rig::CompileMnaCircuit(*n_graph.circuit, *n_database.database);
+    REQUIRE(n_compiled.circuit.has_value());
+    REQUIRE(n_compiled.circuit->Prepare(48000.0));
+    const auto n_result = n_compiled.circuit->Solve(2.0);
+    REQUIRE(n_result.Succeeded());
+    REQUIRE(std::fabs(n_result.output_voltage - 4.0) < 1.0e-8);
+    for (const double gate : {0.5, 1.5, 2.0, 2.5}) {
+        const auto overdrive = std::max(0.0, gate - 1.0);
+        const auto reference = 5.0 - overdrive * overdrive;
+        const auto swept = n_compiled.circuit->Solve(gate);
+        REQUIRE(swept.Succeeded());
+        REQUIRE(std::fabs(swept.output_voltage - reference) < 1.0e-8);
+    }
+
+    const auto p_graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c4_mosfet_reference_p.json"));
+    const auto p_database = solo_rig::BuildModelDatabase(ReadFixture("m18c4_cleanroom_p_mosfet_model.json"));
+    REQUIRE(p_graph.circuit.has_value());
+    REQUIRE(p_database.database.has_value());
+    auto p_compiled = solo_rig::CompileMnaCircuit(*p_graph.circuit, *p_database.database);
+    REQUIRE(p_compiled.circuit.has_value());
+    REQUIRE(p_compiled.circuit->Prepare(48000.0));
+    const auto p_result = p_compiled.circuit->Solve(-2.0);
+    REQUIRE(p_result.Succeeded());
+    REQUIRE(std::fabs(n_result.output_voltage + p_result.output_voltage) < 1.0e-8);
+
+    const auto unknown = solo_rig::ParseCircuitV2Json(ReadFixture("m18c4_unknown_mosfet_reference.json"));
+    REQUIRE(unknown.circuit.has_value());
+    REQUIRE(solo_rig::CompileMnaCircuit(*unknown.circuit, *n_database.database).error ==
+            solo_rig::MnaCompileError::MissingModelAuthorization);
+}
+
+TEST_CASE("M18-C4 MOSFET model fields cannot cross component-family boundaries") {
+    const auto misplaced_json = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0","nodes":["a","b","0"],
+      "ports":[{"id":"input","direction":"input","node":"a"},
+               {"id":"output","direction":"output","node":"b"}],
+      "components":[{"id":"r","type":"resistor","pins":["a","b"],"value":1000,
+        "mosfetModel":{"kind":"enhancement-square-law","modelVersion":1,"polarity":"n-channel",
+          "thresholdVoltage":1,"transconductanceParameter":0.001,"maxCurrent":0.01,"maxStep":0.5}}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler"}
+    })");
+    REQUIRE(misplaced_json.errors ==
+            std::vector<solo_rig::CircuitLoadError>{solo_rig::CircuitLoadError::InvalidValue});
+
+    auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c4_mosfet_inline_n.json"));
+    REQUIRE(graph.circuit.has_value());
+    graph.circuit->components.front().jfet_model = solo_rig::CircuitJfetModel{};
+    REQUIRE(solo_rig::CompileMnaCircuit(*graph.circuit).error == solo_rig::MnaCompileError::InvalidModel);
+}
+
+TEST_CASE("M18-C4 dynamic audited MOSFET matches independent backward-Euler reference and Reset") {
+    const auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c4_dynamic_reference_n.json"));
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c4_cleanroom_n_mosfet_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(48000.0));
+
+    const auto run_sequence = [](solo_rig::MnaPreparedCircuit& circuit) {
+        double gate_history = 2.0;
+        double final_output = 0.0;
+        constexpr double resistor_conductance = 1.0 / 1000.0;
+        constexpr double capacitor_conductance = 1.0e-6 * 48000.0;
+        for (const double input : {1.5, 2.0, 2.4, 1.8, 2.2}) {
+            const auto gate = (resistor_conductance * input + capacitor_conductance * gate_history) /
+                (resistor_conductance + capacitor_conductance);
+            const auto overdrive = std::max(0.0, gate - 1.0);
+            const auto channel_current = 1.0e-3 * overdrive * overdrive;
+            const auto reference = 5.0 - 1000.0 * channel_current;
+            REQUIRE(reference >= overdrive);
+            const auto solved = circuit.Solve(input);
+            REQUIRE(solved.Succeeded());
+            REQUIRE(std::fabs(solved.output_voltage - reference) < 1.0e-8);
+            gate_history = gate;
+            final_output = reference;
+        }
+        return final_output;
+    };
+    const auto first = run_sequence(*compiled.circuit);
+    compiled.circuit->Reset();
+    REQUIRE(std::fabs(run_sequence(*compiled.circuit) - first) < 1.0e-10);
+}
+
+TEST_CASE("M18-C4 MOSFET rejects nonfinite, singular and bounded-iteration failures") {
+    auto graph = solo_rig::ParseCircuitV2Json(ReadFixture("m18c4_mosfet_reference_n.json"));
+    const auto database = solo_rig::BuildModelDatabase(ReadFixture("m18c4_cleanroom_n_mosfet_model.json"));
+    REQUIRE(graph.circuit.has_value());
+    REQUIRE(database.database.has_value());
+    graph.circuit->solver.oversampling = 4U;
+    auto compiled = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(192000.0));
+    REQUIRE(compiled.circuit->Solve(std::numeric_limits<double>::quiet_NaN()).error ==
+            solo_rig::MnaSolveError::NonFinite);
+    constexpr auto contract = solo_rig::MnaPreparedCircuit::ProcessContract();
+    static_assert(!contract.process_allocates && !contract.process_locks &&
+                  !contract.process_reads_files && !contract.process_parses_json);
+    for (std::uint32_t sample = 0; sample < 1024U; ++sample) {
+        REQUIRE(compiled.circuit->Solve(sample % 2U == 0U ? 1.5 : 2.5).Succeeded());
+    }
+
+    graph.circuit->solver.oversampling = 1U;
+    graph.circuit->solver.convergence.max_iterations = 1U;
+    auto bounded = solo_rig::CompileMnaCircuit(*graph.circuit, *database.database);
+    REQUIRE(bounded.circuit.has_value());
+    REQUIRE(bounded.circuit->Prepare(48000.0));
+    REQUIRE(bounded.circuit->Solve(2.5).error == solo_rig::MnaSolveError::NonConvergent);
+
+    auto singular_graph = *graph.circuit;
+    singular_graph.components.erase(
+        std::remove_if(singular_graph.components.begin(), singular_graph.components.end(), [](const auto& component) {
+            return component.id == "rd";
+        }), singular_graph.components.end());
+    singular_graph.supplies.clear();
+    auto singular = solo_rig::CompileMnaCircuit(singular_graph, *database.database);
+    REQUIRE(singular.circuit.has_value());
+    REQUIRE(singular.circuit->Prepare(48000.0));
+    REQUIRE(singular.circuit->Solve(0.0).error == solo_rig::MnaSolveError::SingularMatrix);
 }
 
 TEST_CASE("M18-C1 MNA solves forward conduction reverse breakdown and zero bias") {

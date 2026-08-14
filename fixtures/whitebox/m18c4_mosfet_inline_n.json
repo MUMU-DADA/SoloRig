@@ -1,0 +1,7 @@
+{
+  "version":2,"schema":"circuit","referenceGround":"0","nodes":["vdd","d","g","0"],
+  "ports":[{"id":"input","direction":"input","node":"g"},{"id":"output","direction":"output","node":"d"}],
+  "supplies":[{"id":"supply","positive":"vdd","negative":"0","voltage":5.0}],
+  "components":[{"id":"m","type":"mosfet","pins":["d","g","0"],"mosfetModel":{"kind":"enhancement-square-law","modelVersion":1,"polarity":"n-channel","thresholdVoltage":1.0,"transconductanceParameter":0.001,"maxCurrent":0.01,"maxStep":0.5}},{"id":"rd","type":"resistor","pins":["vdd","d"],"value":1000.0}],
+  "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,"convergence":{"maxIterations":64,"absoluteTolerance":1.0e-10,"relativeTolerance":1.0e-8}}
+}
