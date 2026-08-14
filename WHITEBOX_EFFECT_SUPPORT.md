@@ -4,7 +4,7 @@
 
 ## 结论
 
-当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 diode/Zener、BJT、JFET、MOSFET、bounded opamp/OTA、triode、generic pentode、generic beam tetrode、generic vari-mu 和受限 lossy-linear coupled-inductor 等通用模型；M18-C8a 已完成本地实现和全量门禁，尚待提交进入 Git 基线。它可以作为简单模拟削波、Fuzz、Boost、滤波、音调网络、部分运放/OTA、电子管级电路和线性耦合电感网络的结构基础。
+当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 diode/Zener、BJT、JFET、MOSFET、bounded opamp/OTA、triode、generic pentode、generic beam tetrode、generic vari-mu 和受限 lossy-linear coupled-inductor 等通用模型；M18-C8a 已由 `f33664a` 提交并通过全量门禁。它可以作为简单模拟削波、Fuzz、Boost、滤波、音调网络、部分运放/OTA、电子管级电路和线性耦合电感网络的结构基础。
 
 当前仍不能宣称覆盖“绝大多数单块效果器和箱头”。主要阻塞不只是元件数量，还包括实时旋钮/开关、行为模块、复杂拓扑编译、器件高阶物理、功放与电源/负载交互，以及 SPICE/golden/实机误差验证。
 
@@ -58,7 +58,7 @@
 | pentode | 已交付 | M18-C7a generic space-charge/screen-share v1 已由 `cd5f1bc` 提交；没有商业管型、真实 suppressor-grid/beam-forming、secondary emission、反向/栅极导通、动态电容和热行为。 |
 | beam tetrode | 已交付 | M18-C7b generic beam-capture v1 已由 `75f061d` 提交；平方有理 capture 不是实际 beam-forming，不含 secondary-emission kink、反向/栅极导通、动态电容、热行为或商业管参数。 |
 | vari-mu | 已交付 | M18-C7c generic 三端 remote-cutoff v1 已由 `bf47d2a` 提交；sidechain/envelope、attack/release、商业管型、动态电容、栅流和热行为不在范围内。 |
-| coupled-inductor / transformer-core | 本地候选完成，待提交 | M18-C8a 已交付有损线性四端模型、匝比、绕组电阻、励磁/漏感、双初态和双支路运行时；仅批准 self-authored lossy-linear v1。饱和、磁滞、剩磁及商业变压器留给 C8b/后续。 |
+| coupled-inductor / transformer-core | 已交付（受限） | M18-C8a 已由 `f33664a` 提交有损线性四端模型、匝比、绕组电阻、励磁/漏感、双初态和双支路运行时；仅批准 self-authored lossy-linear v1。饱和、磁滞、剩磁及商业变压器留给 C8b/后续。 |
 
 ## 效果器类别覆盖判断
 
@@ -106,7 +106,7 @@
 
 ## 纳入项目计划
 
-后续工作按下表纳入 M18-M20。登记计划不等于完成；M18-C7c 已由 `bf47d2a` 提交，M18-C8a 已在本地完成门禁但尚未提交，C8b 及后续子里程碑仍需逐项登记范围、测试和禁止扩展。
+后续工作按下表纳入 M18-M20。登记计划不等于完成；M18-C7c 已由 `bf47d2a` 提交，M18-C8a 已由 `f33664a` 提交，C8b 及后续子里程碑仍需逐项登记范围、测试和禁止扩展。
 
 | 阶段 | 计划内容 | 完成判据摘要 |
 | --- | --- | --- |
@@ -114,7 +114,7 @@
 | M18-C7a | generic pentode | 已由 `cd5f1bc` 完成提交；保持商业管型及高阶物理边界。 |
 | M18-C7b | generic beam tetrode | 已由 `75f061d` 完成提交；保持真实 beam-forming、secondary emission、商业管型及高阶物理边界。 |
 | M18-C7c | vari-mu | 已由 `bf47d2a` 完成提交；商业管型与压缩器行为仍排除。 |
-| M18-C8a | coupled inductor、lossy-linear transformer/core | 本地门禁已通过：核心 283/283、C ABI 9/9、VST3 7/7、Windows UI 6/6、CTest 5/5、Validator 47/47、C# 契约；manifest `517fdf472e9d40dd891595daf640c71d`。尚未提交；饱和/磁滞/剩磁留给 C8b。 |
+| M18-C8a | coupled inductor、lossy-linear transformer/core | 已由 `f33664a` 提交；核心 283/283、C ABI 9/9、VST3 7/7、Windows UI 6/6、CTest 5/5、Validator 47/47、C# 契约；manifest `517fdf472e9d40dd891595daf640c71d`。饱和/磁滞/剩磁留给 C8b。 |
 | M18-C8b | nonlinear transformer/core | 饱和、磁滞、剩磁及采样率/能量稳定性；不得用 C8a 线性模型冒充。 |
 | M18-C9 | 半导体与运放高阶物理 | 补齐二极管动态、BJT/JFET/MOSFET 寄生与温度、真实运放电源/频率/瞬态行为；逐项与参考模型比较。 |
 | M18-C10 | 电源与负载交互 | 整流、纹波、Sag、供电恢复、扬声器动态阻抗及功放反馈联调。 |
