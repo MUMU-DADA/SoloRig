@@ -1,0 +1,82 @@
+{
+    "version": 2,
+    "schema": "circuit",
+    "referenceGround": "0",
+    "nodes": ["vdd", "in", "g", "s", "p", "secondary", "0"],
+    "ports": [
+        {"id": "input", "direction": "input", "node": "in"},
+        {"id": "output", "direction": "output", "node": "secondary"}
+    ],
+    "supplies": [
+        {"id": "vdd", "positive": "vdd", "negative": "0", "voltage": 24.0}
+    ],
+    "components": [
+        {"id": "rg", "type": "resistor", "pins": ["in", "g"], "value": 1000.0},
+        {"id": "cg", "type": "capacitor", "pins": ["g", "0"], "value": 1e-9, "initial": -1.0},
+        {
+            "id": "power-tube",
+            "type": "pentode",
+            "pins": ["p", "s", "g", "0"],
+            "initial": -1.0,
+            "pentodeModel": {
+                "kind": "space-charge",
+                "modelVersion": 1,
+                "screenAmplificationFactor": 20.0,
+                "perveance": 0.001,
+                "kneeVoltage": 2.0,
+                "screenCurrentFraction": 0.1,
+                "maxCurrent": 0.01,
+                "maxStep": 10.0
+            }
+        },
+        {"id": "screen-feed", "type": "resistor", "pins": ["vdd", "s"], "value": 10000.0},
+        {
+            "id": "output-transformer",
+            "type": "coupled-inductor",
+            "pins": ["p", "vdd", "secondary", "0"],
+            "coupledInductorModel": {
+                "kind": "lossy-linear",
+                "modelVersion": 1,
+                "turnsRatio": 2.0,
+                "magnetizingInductance": 0.01,
+                "primaryLeakageInductance": 0.001,
+                "secondaryLeakageInductance": 0.00025,
+                "primaryResistance": 10.0,
+                "secondaryResistance": 5.0
+            }
+        },
+        {
+            "id": "speaker-load",
+            "type": "speaker-load",
+            "pins": ["secondary", "0"],
+            "speakerModel": {
+                "kind": "electrodynamic",
+                "modelVersion": 1,
+                "voiceCoilResistance": 8.0,
+                "voiceCoilInductance": 0.001,
+                "forceFactor": 5.0,
+                "movingMass": 0.02,
+                "mechanicalResistance": 1.0,
+                "compliance": 0.0001,
+                "nonlinearStiffness": 100.0,
+                "nonlinearDisplacementScale": 0.001,
+                "maximumCurrent": 10.0,
+                "maximumVelocity": 100.0,
+                "maximumDisplacement": 0.01,
+                "initialCurrent": 0.0,
+                "initialVelocity": 0.0,
+                "initialDisplacement": 0.0
+            }
+        }
+    ],
+    "solver": {
+        "method": "modified-nodal-analysis",
+        "integration": "backward-euler",
+        "oversampling": 4,
+        "convergence": {
+            "maxIterations": 128,
+            "absoluteTolerance": 1e-12,
+            "relativeTolerance": 1e-12
+        }
+    }
+}
