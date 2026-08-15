@@ -62,6 +62,7 @@ add_library(solo_rig_core STATIC
     src/dsp/generic_bbd.cpp
     src/dsp/generic_vco.cpp
     src/dsp/generic_vca.cpp
+    src/dsp/generic_envelope.cpp
     src/dsp/coupled_inductor.cpp
     src/dsp/nonlinear_transformer_core.cpp
     src/dsp/mna_solver.cpp
@@ -100,6 +101,7 @@ add_library(solo_rig_core STATIC
     src/content/generic_bbd_binding.cpp
     src/content/generic_vco_binding.cpp
     src/content/generic_vca_binding.cpp
+    src/content/generic_envelope_binding.cpp
     src/content/evidence_chain.cpp
     src/content/wdf_runtime.cpp
     src/content/module_package.cpp
@@ -275,6 +277,9 @@ if(BUILD_TESTING)
         tests/generic_vca_tests.cpp
         tests/generic_vca_binding_tests.cpp
         tests/generic_vca_runtime_tests.cpp
+        tests/generic_envelope_tests.cpp
+        tests/generic_envelope_binding_tests.cpp
+        tests/generic_envelope_runtime_tests.cpp
         tests/coupled_inductor_tests.cpp
         tests/nonlinear_transformer_core_tests.cpp
         tests/nonlinear_amplifier_tests.cpp
