@@ -17,6 +17,7 @@
 - M20-C2 已提交：通用 typed behavior → MNA control binding composite 将 control/resistance 输出经调用方显式范围映射写入预编译 MNA 控制槽，覆盖 envelope/LFO/optocoupler 类跨域组合；未宣称任意多端 MNA 或商业 sidechain。最新验证为核心 `545/545`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `ed44119e36484516814c808b0bbd9d39`。
 - M22-A1 已提交 `b75200d`：MNA 编译/求解器支持固定容量多输入、多输出端口，新增 span 输入和输出快照，旧单输入 `Solve(double)` 保持兼容；双输入双输出电阻网络、输入数量、非有限和 192 kHz 边界通过核心回归。
 - M22-B1 已提交：circuit v2 parser 接受多输入端口；外部 MNA runtime 支持“输入端口数=输出端口数、每端口单声道、按 AudioBuffer 声道序映射”的固定容量闭环，并拒绝空输入、不等数量、超过 8 端口或 descriptor 不匹配。命名端口图、独立 sidechain、不同 I/O 数量和任意多端实时图仍未接入。提交时核心为 `555/555`，构建 manifest MD5 为 `f6de0cfd474ade51bb033e50939f6e53`。
+- M20-C3-A2 已提交：`RigRuntime::PerformanceSnapshot` 将 active graph 节点的最近/峰值 block CPU 与声明延迟暴露给停止音频后的控制线程；独立程序 UI、真实 ASIO 和过载面板仍未完成。
 
 ## M20-C3 产品级审计与白盒完成计划（当前进行中）
 
@@ -25,14 +26,14 @@
 ### 已验证的基础能力
 
 - 图级声明延迟、固定容量实时边界、192 kHz/过采样专项、Reset/非有限/稳定拒绝，以及核心、CTest、VST3 Validator、Windows UI、backend ABI 和 C# contract 回归均有证据；M20-C2 最近一次基线为核心 `545/545`、CTest `5/5`、Validator `47/47`。
-- `RealtimeLoadMeter` 已接入 `AudioGraph::Process`，每个节点在真实图处理时记录最近/峰值 block load，并由控制线程快照读取；当前独立程序 UI 仍展示模块目录静态 `estimated_cpu_percent`，尚未把实测值接入 UI/ASIO 面板。
+- `RealtimeLoadMeter` 已接入 `AudioGraph::Process`，每个节点在真实图处理时记录最近/峰值 block load；`RigRuntime::PerformanceSnapshot` 在宿主停止 `Process` 后把 active graph 的节点快照向控制线程暴露。当前独立程序 UI 仍展示模块目录静态 `estimated_cpu_percent`，尚未把实测值接入 UI/ASIO 面板。
 - ASIO 路由层可以验证任意通道映射、采样率转换和异步时钟需求，但尚无真实 ASIO SDK 后端、设备枚举、打开/关闭、回调和多设备重采样。
 - 外部 Circuit v2 包可以进入受限 MNA 组件运行时；外部数字逻辑的九种声明操作（Gain、Delay、Feedback、Mix、Filter、Waveshaper、Dynamics、PitchShift、Bypass）均已进入固定容量 runtime，但仍是线性操作序列，不等于任意数字图或 sidechain。
 - reference/golden 目前只有 schema、解析器、评估器和“缺少授权资料时拒绝”的测试；仓库没有可授权的 SPICE、golden waveform 或实机测量数据，因此不能标记 `reference-1to1`。
 
 ### 完成白盒的计划目标与验收门禁
 
-1. **M20-C3：产品性能与宿主真实性**。已完成 AudioGraph 节点级实测 block load 与控制线程快照；仍需把快照接入 UI/ASIO 性能面板并提供过载状态。明确区分图级实测与模块目录估算；补齐 VST3/独立程序生命周期、ASIO 设备枚举与真实回调，没有 SDK 或硬件条件时只能保留 `blocked`，不能用模拟路由测试替代。
+1. **M20-C3：产品性能与宿主真实性**。已完成 AudioGraph 节点级实测 block load、`RigRuntime` 控制线程快照出口；仍需把快照接入 UI/ASIO 性能面板并提供过载状态。明确区分图级实测与模块目录估算；补齐 VST3/独立程序生命周期、ASIO 设备枚举与真实回调，没有 SDK 或硬件条件时只能保留 `blocked`，不能用模拟路由测试替代。
 2. **M21：外部模块可运行闭环**。定义并冻结模块包版本、逻辑/电路/皮肤三层契约；已补齐当前九种声明数字操作的受限 runtime。每个外部包必须经过 Parse → Compile/Prepare → Process → Reset，并验证参数、文件、错误和实时线程边界；任意数字图、sidechain 和多端口语义仍属于后续 M22。
 3. **M22：通用白盒拓扑**。M22-A1 已完成并提交；M22-B1 已先把受限多端口契约接入外部 MNA runtime，但仍需把端口数据接入 typed behavior/AudioGraph 的命名端口，扩展经过审计的阶段化接口，覆盖串联、并联、控制、sidechain、反馈和电源/负载组合；每个不支持的拓扑必须稳定拒绝，不能靠固定产品识别或静默数字替代。
 4. **M23：参考与覆盖集**。为选定的失真、滤波/调制、压缩、BBD、混响、电子管前后级和箱头负载建立可授权的网表、元件/模型版本、供电/负载条件和测量基线；预先固定静态、频响、动态、谐波/互调、旋钮扫动误差阈值，逐类生成 golden/SPICE/实机证据。
@@ -204,7 +205,7 @@
 | M20-B2 | Wah/Phaser caller-owned 调制组合 | 已提交：Wah 已通过 `TypedLfoMnaRuntime` 完成 LFO → parameter binding → MNA Solve 的真实组合；M20-B2 时 M19-C 拆分为 16 类后 14 类 RunnableGeneric。 |
 | M20-B3 | Phaser 多级调制组合与 optical hardware 电气边界 | 已提交：固定容量多 binding 驱动两级 R/C dry/wet MNA 网络，Phaser 已提升为 RunnableGeneric；核心 `534/534`、CTest `5/5`、Validator `47/47`、manifest `c99dfc1983874a6aaa2d63d2f4889d33`。 |
 | M20-B4 | optical hardware 电气模型与代表性组合 | 已提交：四端 `Optocoupler` 进入 Circuit v2 parser/Compile/Prepare/Solve/Reset；emitter 电气端驱动 LDR 受光电阻端，代表性 fixture 覆盖 192 kHz/4x 和稳定拒绝；不宣称商业光耦校准、SPICE/golden 或 reference-1to-1。 |
-| M20-C3 | 性能与产品全量回归 | 部分完成：AudioGraph 节点实测 load、192 kHz/过采样、延迟、实时契约、C ABI、VST3、UI 和 Validator 有回归证据；独立程序 UI 仍仅展示静态 CPU 估算，真实 ASIO 和 SPICE/golden/实机证据仍未完成。 |
+| M20-C3 | 性能与产品全量回归 | 部分完成：AudioGraph 节点实测 load、`RigRuntime` active graph 控制线程快照、192 kHz/过采样、延迟、实时契约、C ABI、VST3、UI 和 Validator 有回归证据；独立程序 UI 仍仅展示静态 CPU 估算，真实 ASIO 和 SPICE/golden/实机证据仍未完成。 |
 | M22-A1 | MNA 固定容量多输入/多输出求解边界 | 已提交 `b75200d`：span 输入、多个输出快照、旧单输入兼容和稳定错误边界；不等于 runtime/typed behavior/sidechain 已完成。 |
 | M22-B1 | 外部 MNA 多端口 runtime 第一阶段 | 已提交：等数量单声道端口按 AudioBuffer 声道序映射，最多 8 端口，Parse/Compile/Prepare/Process 和 descriptor 拒绝边界有测试；命名端口图和任意多端拓扑仍未完成。 |
 

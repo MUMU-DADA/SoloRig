@@ -415,6 +415,13 @@ bool RigRuntime::SetParameter(std::string_view instance_id, std::string_view par
     return applied;
 }
 
+std::vector<AudioGraph::NodePerformance> RigRuntime::PerformanceSnapshot() const {
+    if (!prepared_ || current_ == nullptr || current_->runtime_graph == nullptr) {
+        return {};
+    }
+    return current_->runtime_graph->PerformanceSnapshot();
+}
+
 bool RigRuntime::IsPrepared() const noexcept { return prepared_; }
 
 std::uint32_t RigRuntime::TransitionSamples() const noexcept { return transition_total_samples_; }

@@ -100,6 +100,13 @@ TEST_CASE("RigRuntimeBuilder creates a prepared serial graph and parameters affe
     input.ChannelData(0)[0] = 1.0F;
     REQUIRE(runtime.Process(input, output, 1));
     REQUIRE(output.ChannelData(0)[0] == 0.5F);
+    const auto performance = runtime.PerformanceSnapshot();
+    REQUIRE(performance.size() == 1U);
+    REQUIRE(performance.front().node_id == 2U);
+    REQUIRE(performance.front().declared_latency_samples == 0U);
+    REQUIRE(std::isfinite(performance.front().last_cpu_percent));
+    REQUIRE(std::isfinite(performance.front().peak_cpu_percent));
+    REQUIRE(performance.front().peak_cpu_percent >= performance.front().last_cpu_percent);
 }
 
 TEST_CASE("RigRuntimeBuilder instantiates a registered external module package and routes its output") {

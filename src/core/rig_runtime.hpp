@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <variant>
+#include <vector>
 
 namespace solo_rig {
 
@@ -62,6 +63,10 @@ public:
     [[nodiscard]] bool SetParameter(std::string_view instance_id,
                                     std::string_view parameter_id,
                                     float value) noexcept;
+    // Control-thread diagnostic snapshot. Call only while the host has
+    // stopped Process; the snapshot reports the active graph, not a pending
+    // crossfade target, and allocates its returned vector on the caller side.
+    [[nodiscard]] std::vector<AudioGraph::NodePerformance> PerformanceSnapshot() const;
     [[nodiscard]] bool IsPrepared() const noexcept;
     [[nodiscard]] std::uint32_t TransitionSamples() const noexcept;
     [[nodiscard]] bool InTransition() const noexcept;
