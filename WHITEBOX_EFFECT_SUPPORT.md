@@ -17,6 +17,7 @@
 - M20-C2 已提交：通用 typed behavior → MNA control binding composite 将 control/resistance 输出经调用方显式范围映射写入预编译 MNA 控制槽，覆盖 envelope/LFO/optocoupler 类跨域组合；未宣称任意多端 MNA 或商业 sidechain。最新验证为核心 `545/545`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `ed44119e36484516814c808b0bbd9d39`。
 - M22-A1 已提交 `b75200d`：MNA 编译/求解器支持固定容量多输入、多输出端口，新增 span 输入和输出快照，旧单输入 `Solve(double)` 保持兼容；双输入双输出电阻网络、输入数量、非有限和 192 kHz 边界通过核心回归。
 - M22-B1 已提交：circuit v2 parser 接受多输入端口；外部 MNA runtime 支持“输入端口数=输出端口数、每端口单声道、按 AudioBuffer 声道序映射”的固定容量闭环，并拒绝空输入、不等数量、超过 8 端口或 descriptor 不匹配。命名端口图、独立 sidechain、不同 I/O 数量和任意多端实时图仍未接入。提交时核心为 `555/555`，构建 manifest MD5 为 `f6de0cfd474ade51bb033e50939f6e53`。
+- M22-B2 已提交：固定容量 `NamedPortAudioGraph` 将命名端口、域兼容、fan-in/fan-out、采样延迟补偿和显式 block-delay feedback 接入预分配音频块运行时；`TypedBehaviorPortProcessor` 接入 detector sidechain，`TypedBehaviorMnaPortProcessor` 接入控制域到 MNA 的复合。当前 typed/MNA 适配器限定单声道 scalar boundary；任意外部 MNA 命名端口、不同 I/O 数量和多设备 ASIO 仍未完成。
 - M20-C3-A2 已提交：`RigRuntime::PerformanceSnapshot` 将 active graph 节点的最近/峰值 block CPU 与声明延迟暴露给停止音频后的控制线程；独立程序 UI、真实 ASIO 和过载面板仍未完成。
 - M20-C3-B 已提交：性能快照已经贯通 C++ 编辑器场景、C ABI 和 Avalonia 独立程序；节点卡片与顶部状态同时区分静态预计 CPU、实际最近/峰值 CPU、声明延迟和“实测未连接”。性能数据只允许由停止音频后的控制线程写入，preset 不保存诊断值；真实 ASIO 设备后端和过载状态仍未完成。
 
@@ -36,11 +37,11 @@
 
 1. **M20-C3：产品性能与宿主真实性**。已完成 AudioGraph 节点级实测 block load、`RigRuntime` 控制线程快照出口，以及 C++/C ABI/Avalonia 性能面板的数据展示契约；仍需提供过载状态、真实宿主回灌和 ASIO 设备枚举/打开/关闭/回调。明确区分图级实测与模块目录估算，没有 SDK 或硬件条件时只能保留 `blocked`，不能用模拟路由测试替代。
 2. **M21：外部模块可运行闭环**。定义并冻结模块包版本、逻辑/电路/皮肤三层契约；已补齐当前九种声明数字操作的受限 runtime。每个外部包必须经过 Parse → Compile/Prepare → Process → Reset，并验证参数、文件、错误和实时线程边界；任意数字图、sidechain 和多端口语义仍属于后续 M22。
-3. **M22：通用白盒拓扑**。M22-A1 已完成并提交；M22-B1 已先把受限多端口契约接入外部 MNA runtime，但仍需把端口数据接入 typed behavior/AudioGraph 的命名端口，扩展经过审计的阶段化接口，覆盖串联、并联、控制、sidechain、反馈和电源/负载组合；每个不支持的拓扑必须稳定拒绝，不能靠固定产品识别或静默数字替代。
+3. **M22：通用白盒拓扑**。M22-A1、M22-B1 已完成并提交；M22-B2 已把固定容量命名端口图、typed detector sidechain、控制域到 MNA 复合和显式延迟反馈接入块处理运行时。仍需扩展经过审计的外部 MNA 命名端口、不同 I/O 数量、更多电源/负载组合和多设备通道路由；每个不支持的拓扑必须稳定拒绝，不能靠固定产品识别或静默数字替代。
 4. **M23：参考与覆盖集**。为选定的失真、滤波/调制、压缩、BBD、混响、电子管前后级和箱头负载建立可授权的网表、元件/模型版本、供电/负载条件和测量基线；预先固定静态、频响、动态、谐波/互调、旋钮扫动误差阈值，逐类生成 golden/SPICE/实机证据。
 5. **Release 白盒门**。只有在支持矩阵中的每一类同时具备可运行路径、稳定拒绝边界、实时无分配/无锁/无文件证明、独立参考证据和全量回归，且真实宿主/ASIO 条件通过时，才可称为“白盒完成”。generic self-authored 模型仍需明确标注为 generic，不得自动升级为商业型号 `reference-1to1`。
 
-上述目标是完成条件，不是当前完成声明；M20-C3 仍是进行中，M21 已完成第一阶段数字操作闭环但尚未完成完整外部包/拓扑验收，M22-M23 尚未开始验收。
+上述目标是完成条件，不是当前完成声明；M20-C3 仍是进行中，M21 已完成第一阶段数字操作闭环但尚未完成完整外部包/拓扑验收，M22-B2 仅完成命名端口第一阶段，M23 尚未开始验收。
 
 ### M21 第一阶段：外部数字操作 runtime（已提交 `ec21511`）
 
@@ -60,6 +61,14 @@
 - parser 不再把第二个输入端口视为非法；runtime 在 Prepare 预留单个多端 MNA 状态，Process 每个采样以固定 `std::array` 收集端口输入，调用 `Solve(span)` 并按输出端口写回 AudioBuffer 声道。
 - 合同限定输入/输出端口数量相等、最多 8 个、每个端口单声道；descriptor 必须逐端匹配 circuit port，且多端口 descriptor 的 `maxChannels` 必须为 1。旧单输入/单输出模块继续按每音频声道独立电路运行。
 - 双输入双输出外部 package 已通过 192 kHz 运行测试，证明 Parse → Compile → Prepare → Process 的固定容量闭环；不同 I/O 数量、命名端口图、typed behavior、sidechain、反馈和多设备通道路由仍是后续门禁。
+
+### M22-B2 第一阶段：命名端口图与 typed behavior 复合（已提交）
+
+- `NamedPortAudioGraph` 使用固定容量的命名输入/输出端口、节点和连接表；Prepare 阶段完成端口域兼容、fan-in/fan-out、通道数、拓扑、节点延迟和预分配 buffer 校验，Process 阶段只执行已解析的视图、求和、处理器调用和输出复制。
+- 反馈只接受显式 `delayed` route；零延迟环路、延迟边界输入/输出、未知端口、缺失输入路由、方向/域/通道不兼容和容量超限均稳定拒绝。节点间 route 会按声明延迟做固定容量补偿，Reset 清理节点状态和 block-delay buffer。
+- `TypedBehaviorPortProcessor` 已把 audio/detector 输入与 audio 输出接入命名端口图，覆盖 192 kHz、4x oversampling 的 detector sidechain；`TypedBehaviorMnaPortProcessor` 已把 typed control 输出显式绑定到 MNA composite，并保留独立 audio 输入。
+- 本阶段 typed/MNA 适配器的边界端口固定为单声道 scalar；这不是任意多声道 typed runtime，也不是任意外部 MNA 命名端口、不同 I/O 数量、多设备 ASIO 或 power/load 全拓扑完成声明。
+- 新增命名端口图测试覆盖 sidechain、MNA 控制复合、fan-in、显式 block-delay 反馈、零延迟环路拒绝、标量多声道拒绝；最终验证以本提交的最新 build manifest 为准。
 
 ## 当前状态补充：M20-A1
 

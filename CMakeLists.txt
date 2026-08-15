@@ -50,6 +50,7 @@ add_library(solo_rig_core STATIC
     src/core/audio_format.cpp
     src/core/audio_buffer.cpp
     src/core/audio_graph.cpp
+    src/core/named_audio_graph.cpp
     src/core/effect_descriptor.cpp
     src/core/quality_policy.cpp
     src/core/realtime_load_meter.cpp
@@ -119,6 +120,7 @@ add_library(solo_rig_core STATIC
     src/content/behavior_runtime.cpp
     src/content/behavior_ports.cpp
     src/content/behavior_typed_runtime.cpp
+    src/content/behavior_audio_processor.cpp
     src/content/behavior_envelope_runtime.cpp
     src/content/behavior_optocoupler_runtime.cpp
     src/content/behavior_composite.cpp
@@ -282,6 +284,7 @@ if(BUILD_TESTING)
         tests/audio_buffer_tests.cpp
         tests/effect_descriptor_tests.cpp
         tests/audio_graph_tests.cpp
+        tests/named_audio_graph_tests.cpp
         tests/realtime_load_meter_tests.cpp
         tests/realtime_contract_tests.cpp
         tests/wdf_runtime_tests.cpp
