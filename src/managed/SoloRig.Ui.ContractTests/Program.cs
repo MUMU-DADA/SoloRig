@@ -43,6 +43,11 @@ Require(string.IsNullOrEmpty(viewModel.Snapshot.SourcePath) && !viewModel.IsDirt
 Require(viewModel.SetParameter("drive-1.drive", 6.0F), "C ABI parameter edit succeeds");
 Require(viewModel.Nodes.SelectMany(node => node.Parameters).Any(parameter => parameter.Id == "drive" && parameter.Value == 6.0F),
     "edited parameter is visible in the next snapshot");
+Require(viewModel.SelectPreset("SoloRig Default"), "preset selector activates the quick default action");
+Require(viewModel.SelectedPresetName == "SoloRig Default" && !viewModel.IsDirty,
+    "preset selector restores the clean default state");
+Require(!viewModel.SelectPreset("missing-preset"), "preset selector rejects an unavailable preset");
+Require(viewModel.SetParameter("drive-1.drive", 6.0F), "parameter edit after preset selection succeeds");
 Require(viewModel.SelectAt(74.0, 158.0), "C ABI selects a node using editor coordinates");
 Require(viewModel.BeginDrag(74.0, 158.0), "C ABI begins a node drag");
 Require(viewModel.DragTo(210.0, 232.0, true), "C ABI drags and snaps a node");

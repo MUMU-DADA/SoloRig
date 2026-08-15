@@ -47,6 +47,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private IReadOnlyList<ModuleCatalogSnapshot> moduleCatalog = [];
     private string moduleSearchText = string.Empty;
     private ModuleCatalogSnapshot? selectedCatalogModule;
+    private string selectedPresetName = "SoloRig Default";
     private string status = "Starting backend probe...";
     private RealtimeContractSnapshot realtimeContract = EmptyRealtimeContract;
     private WhiteboxStatusSnapshot whiteboxStatus = EmptyWhiteboxStatus;
@@ -139,7 +140,28 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public string WhiteboxStatusText => whiteboxStatus.SchemaVersion == 0
         ? "白盒状态: unavailable"
         : $"白盒: {whiteboxStatus.RuntimeStatus} · 证据: {whiteboxStatus.EvidenceStatus}";
-    public IReadOnlyList<string> PresetNames => ["SoloRig Default", snapshot.PresetName];
+    public IReadOnlyList<string> PresetNames =>
+        string.IsNullOrWhiteSpace(snapshot.PresetName) ||
+        string.Equals(snapshot.PresetName, "SoloRig Default", StringComparison.Ordinal)
+            ? ["SoloRig Default"]
+            : ["SoloRig Default", snapshot.PresetName];
+    public string SelectedPresetName
+    {
+        get => selectedPresetName;
+        set
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+            var previous = selectedPresetName;
+            if (Set(ref selectedPresetName, value) && !SelectPreset(value))
+            {
+                selectedPresetName = previous;
+                OnPropertiesChanged(nameof(SelectedPresetName));
+            }
+        }
+    }
     public string Status { get => status; private set => Set(ref status, value); }
     public ICommand RefreshCommand { get; }
     public ICommand IncreaseDriveCommand { get; }
@@ -164,6 +186,10 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             var nextRealtimeContract = backend.ReadRealtimeContract();
             var nextWhiteboxStatus = backend.ReadWhiteboxStatus();
             snapshot = nextSnapshot;
+            selectedPresetName = string.IsNullOrWhiteSpace(snapshot.SourcePath) ||
+                                 string.IsNullOrWhiteSpace(snapshot.PresetName)
+                ? "SoloRig Default"
+                : snapshot.PresetName;
             realtimeContract = nextRealtimeContract;
             whiteboxStatus = nextWhiteboxStatus;
             RebuildCanvasProjections();
@@ -171,7 +197,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
                 nameof(SelectedNode), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
                 nameof(WindowTitle), nameof(AudioStatus), nameof(MidiStatus), nameof(FileStatus),
-                nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames), nameof(RealtimeContract),
+                nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames), nameof(SelectedPresetName),
+                nameof(RealtimeContract),
                 nameof(RealtimeStatus), nameof(WhiteboxStatus), nameof(WhiteboxStatusText));
         }
         catch (Exception exception)
@@ -397,6 +424,44 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     public void ReportFileDialogCancelled(string operation) => Status = $"{operation} cancelled; current preset unchanged.";
 
+    public bool SelectPreset(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+        if (string.Equals(name, "SoloRig Default", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(snapshot.SourcePath) && !snapshot.Dirty &&
+                string.Equals(snapshot.PresetName, "SoloRig Default", StringComparison.Ordinal))
+            {
+                return true;
+            }
+            if (backend is null)
+            {
+                return false;
+            }
+            try
+            {
+                backend.NewPreset();
+                Refresh();
+                Status = "Quick default preset selected";
+                return true;
+            }
+            catch (Exception exception)
+            {
+                Status = exception.Message;
+                return false;
+            }
+        }
+        if (string.Equals(name, snapshot.PresetName, StringComparison.Ordinal))
+        {
+            return true;
+        }
+        Status = $"Preset is not loaded: {name}";
+        return false;
+    }
+
     public void Dispose()
     {
         backend?.EndDrag();
@@ -417,9 +482,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     private void NewPreset()
     {
-        if (backend is null) return;
-        try { backend.NewPreset(); Refresh(); Status = "New in-memory preset created"; }
-        catch (Exception exception) { Status = exception.Message; }
+        SelectPreset("SoloRig Default");
     }
 
     private void AddSelectedModule()

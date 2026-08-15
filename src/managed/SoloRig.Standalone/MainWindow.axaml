@@ -25,7 +25,8 @@
         <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="0,10,0,0" Text="{Binding Status}" />
         <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="18" Margin="0,6,0,0">
           <TextBlock Text="{Binding FileStatus}" />
-          <ComboBox x:Name="PresetSelector" Width="180" ItemsSource="{Binding PresetNames}" SelectedIndex="0" />
+          <ComboBox x:Name="PresetSelector" Width="180" ItemsSource="{Binding PresetNames}"
+                    SelectedItem="{Binding SelectedPresetName, Mode=TwoWay}" />
           <TextBlock Text="{Binding AudioStatus}" />
           <TextBlock Text="{Binding MidiStatus}" />
           <TextBlock x:Name="PerformanceText" Text="{Binding PerformanceStatus}" />

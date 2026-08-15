@@ -144,6 +144,11 @@ public sealed partial class MainWindow : Window
             _ = OpenAsync();
             args.Handled = true;
         }
+        else if ((args.KeyModifiers & KeyModifiers.Control) != 0 && args.Key == Key.D1)
+        {
+            viewModel?.SelectPreset("SoloRig Default");
+            args.Handled = true;
+        }
     }
 
     private void OpenClick(object? sender, RoutedEventArgs args) => _ = OpenAsync();
