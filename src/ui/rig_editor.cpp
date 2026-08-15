@@ -35,6 +35,61 @@ std::optional<std::string> StringField(const JsonValue::Object& object, std::str
     return value != nullptr && value->AsString() != nullptr ? std::optional<std::string>(*value->AsString()) : std::nullopt;
 }
 
+constexpr std::uintmax_t kMaximumSkinImageBytes = 16U * 1024U * 1024U;
+
+struct SkinControlDefinition {
+    std::string id;
+    std::optional<std::filesystem::path> image;
+};
+
+bool IsSafeSkinImagePath(const std::filesystem::path& path) {
+    if (path.empty() || path.is_absolute() || path.has_root_name() || path.has_root_directory()) {
+        return false;
+    }
+    for (const auto& component : path) {
+        if (component == std::filesystem::path("..")) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::optional<std::filesystem::path> ResolveSkinImage(const std::filesystem::path& skin_file,
+                                                      std::string_view image_name) {
+    const std::filesystem::path relative(image_name);
+    if (!IsSafeSkinImagePath(relative)) {
+        return std::nullopt;
+    }
+    std::error_code file_error;
+    const auto absolute = std::filesystem::absolute(skin_file.parent_path() / relative, file_error).lexically_normal();
+    if (file_error || absolute.empty() || !std::filesystem::is_regular_file(absolute, file_error) || file_error) {
+        return std::nullopt;
+    }
+    const auto size = std::filesystem::file_size(absolute, file_error);
+    if (file_error || size == 0U || size > kMaximumSkinImageBytes) {
+        return std::nullopt;
+    }
+    return absolute;
+}
+
+std::optional<SkinControlDefinition> ReadSkinControl(const JsonValue& value,
+                                                      const std::filesystem::path& skin_file) {
+    if (const auto* id = value.AsString(); id != nullptr) {
+        if (id->empty()) return std::nullopt;
+        return SkinControlDefinition{.id = *id};
+    }
+    const auto* object = value.AsObject();
+    if (object == nullptr) return std::nullopt;
+    const auto id = StringField(*object, "id");
+    if (!id.has_value() || id->empty()) return std::nullopt;
+    std::optional<std::filesystem::path> image;
+    if (const auto image_name = StringField(*object, "image"); image_name.has_value()) {
+        image = ResolveSkinImage(skin_file, *image_name);
+        if (!image.has_value()) return std::nullopt;
+    }
+    return SkinControlDefinition{.id = *id, .image = std::move(image)};
+}
+
 std::optional<PedalSkinDefinition> ReadPedalSkinFile(const std::filesystem::path& source) {
     std::error_code file_error;
     if (!std::filesystem::is_regular_file(source, file_error) || file_error) {
@@ -46,7 +101,7 @@ std::optional<PedalSkinDefinition> ReadPedalSkinFile(const std::filesystem::path
     }
     const std::string contents((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     const auto parsed = ParseJson(contents);
-    if (!parsed.value.has_value() || parsed.value->AsObject() == nullptr) {
+    if (!parsed.value.has_value() || parsed.error.has_value() || parsed.value->AsObject() == nullptr) {
         return std::nullopt;
     }
     const auto& object = *parsed.value->AsObject();
@@ -57,20 +112,31 @@ std::optional<PedalSkinDefinition> ReadPedalSkinFile(const std::filesystem::path
         controls == nullptr || controls->AsObject() == nullptr || id->empty()) {
         return std::nullopt;
     }
-    const auto knob = StringField(*controls->AsObject(), "knob");
-    const auto toggle = StringField(*controls->AsObject(), "toggle");
-    const auto button = StringField(*controls->AsObject(), "button");
-    const auto footswitch = StringField(*controls->AsObject(), "footswitch");
-    if (!knob.has_value() || !toggle.has_value() || !button.has_value() || !footswitch.has_value() ||
-        knob->empty() || toggle->empty() || button->empty() || footswitch->empty()) {
+    const auto knob = Find(*controls->AsObject(), "knob");
+    const auto toggle = Find(*controls->AsObject(), "toggle");
+    const auto button = Find(*controls->AsObject(), "button");
+    const auto footswitch = Find(*controls->AsObject(), "footswitch");
+    if (knob == nullptr || toggle == nullptr || button == nullptr || footswitch == nullptr) {
+        return std::nullopt;
+    }
+    const auto knob_definition = ReadSkinControl(*knob, source);
+    const auto toggle_definition = ReadSkinControl(*toggle, source);
+    const auto button_definition = ReadSkinControl(*button, source);
+    const auto footswitch_definition = ReadSkinControl(*footswitch, source);
+    if (!knob_definition.has_value() || !toggle_definition.has_value() || !button_definition.has_value() ||
+        !footswitch_definition.has_value()) {
         return std::nullopt;
     }
     return PedalSkinDefinition{
         .id = *id,
-        .knob = *knob,
-        .toggle = *toggle,
-        .button = *button,
-        .footswitch = *footswitch,
+        .knob = knob_definition->id,
+        .toggle = toggle_definition->id,
+        .button = button_definition->id,
+        .footswitch = footswitch_definition->id,
+        .knob_image = knob_definition->image,
+        .toggle_image = toggle_definition->image,
+        .button_image = button_definition->image,
+        .footswitch_image = footswitch_definition->image,
     };
 }
 

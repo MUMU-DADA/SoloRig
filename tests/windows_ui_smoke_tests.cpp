@@ -3,6 +3,7 @@
 #include "standalone/windows_rig_window.hpp"
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -55,6 +56,20 @@ public:
     std::size_t poll_count{};
 };
 
+void WriteTestBitmap(const std::filesystem::path& path) {
+    // A 2x2, 24-bit BMP keeps this regression independent of external image
+    // files while exercising the production WIC -> Direct2D decode path.
+    constexpr std::array<unsigned char, 70> bitmap{
+        0x42, 0x4D, 0x46, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x36, 0x00, 0x00, 0x00,
+        0x28, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00,
+        0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x13, 0x0B, 0x00, 0x00,
+        0x13, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0x00,
+    };
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output.write(reinterpret_cast<const char*>(bitmap.data()), static_cast<std::streamsize>(bitmap.size()));
+}
+
 } // namespace
 
 TEST_CASE("Win32 standalone editor registers creates renders resizes and destroys a hidden window") {
@@ -101,6 +116,57 @@ TEST_CASE("Win32 standalone editor registers creates renders resizes and destroy
     REQUIRE(std::wstring(title).find(L"*") != std::wstring::npos);
     window.Destroy();
     REQUIRE(window.Handle() == nullptr);
+}
+
+TEST_CASE("Win32 standalone editor decodes custom skin bitmaps and falls back on invalid assets") {
+    const auto directory = std::filesystem::temp_directory_path() / "solorig-ui-skin-bitmap";
+    std::error_code cleanup;
+    std::filesystem::remove_all(directory, cleanup);
+    std::filesystem::create_directories(directory);
+    WriteTestBitmap(directory / "control.bmp");
+    const auto skin_path = directory / "skin.json";
+    {
+        std::ofstream skin(skin_path, std::ios::binary | std::ios::trunc);
+        skin << R"({
+            "schemaVersion": 1,
+            "id": "solorig.ui-image-skin",
+            "controls": {
+                "knob": {"id":"image-knob","image":"control.bmp"},
+                "toggle": {"id":"image-toggle","image":"control.bmp"},
+                "button": {"id":"image-button","image":"control.bmp"},
+                "footswitch": {"id":"image-footswitch","image":"control.bmp"}
+            }
+        })";
+    }
+    solo_rig::RigEditorViewModel editor;
+    REQUIRE(editor.LoadSkinFile(skin_path));
+    const auto instance = GetModuleHandleW(nullptr);
+    REQUIRE(instance != nullptr);
+    solo_rig::standalone::Win32RigWindow window;
+    REQUIRE(window.Create(instance, editor, false));
+    window.Paint();
+    REQUIRE(window.LastPaintSucceeded());
+    REQUIRE(window.SkinBitmapDrawCount() == 12U);
+    window.Destroy();
+
+    const auto invalid_path = directory / "invalid.json";
+    {
+        std::ofstream skin(invalid_path, std::ios::binary | std::ios::trunc);
+        skin << R"({
+            "schemaVersion": 1,
+            "id": "solorig.ui-invalid-image-skin",
+            "controls": {
+                "knob": {"id":"invalid-knob","image":"missing.bmp"},
+                "toggle": "legacy-toggle",
+                "button": "legacy-button",
+                "footswitch": "legacy-footswitch"
+            }
+        })";
+    }
+    solo_rig::RigEditorViewModel fallback_editor;
+    REQUIRE(!fallback_editor.LoadSkinFile(invalid_path));
+    REQUIRE(fallback_editor.Scene().skin.id == "solorig.default-pedal");
+    std::filesystem::remove_all(directory, cleanup);
 }
 
 TEST_CASE("Win32 standalone editor routes toolbar and shortcut persistence commands with cancel and error recovery") {

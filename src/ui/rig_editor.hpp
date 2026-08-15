@@ -38,6 +38,12 @@ struct PedalSkinDefinition {
     std::string toggle;
     std::string button;
     std::string footswitch;
+    // Optional image assets are resolved relative to the skin JSON file and
+    // remain empty for the built-in geometry skin.
+    std::optional<std::filesystem::path> knob_image;
+    std::optional<std::filesystem::path> toggle_image;
+    std::optional<std::filesystem::path> button_image;
+    std::optional<std::filesystem::path> footswitch_image;
 };
 
 [[nodiscard]] const PedalSkinDefinition& DefaultPedalSkin();

@@ -36,9 +36,9 @@
 | 17 | 外部载入 NAM/NAM A2 文件 | 部分完成 | 编辑器/C ABI 显式导入会真实校验 NAM/NAM A2、生成动态模块目录项并将 `sourceKind=nam`/源路径写入 preset；Standalone runtime 与 VST3 state v3 可按引用重建并进入 Prepare/Process/Reset | 真实模型回归、独立程序音频导入界面、真实宿主回灌和资源错误恢复 |
 | 18 | IR 箱体模拟 | 已验证（runtime 层） | `ImpulseResponseConvolver` 和 IR 处理测试 | 接入完整箱头/功放链与真实宿主，并明确延迟、采样率和通道语义 |
 | 19 | 外部导入 IR | 已验证（受限导入层） | 编辑器/C ABI 显式导入会真实校验 WAV/IR、生成动态模块目录项并将 `sourceKind=ir`/源路径写入 preset；Standalone runtime 与 VST3 state v3 可重建卷积模块，另有格式/长度/采样率适配测试 | 真实宿主回灌、取消/错误恢复、大文件资源限制和完整产品流程 |
-| 20 | 全功能/边界测试 | 部分完成 | 当前核心 `612/612`、CTest `5/5`、VST3 专项 `9/9`、VST3 Validator `47/47` 及 UI/ABI/C# contract；M23-B 增加完整外部管线回归，M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b/C3c 增加十三类数学 golden 的真实 Circuit v2 MNA 对照；M23-D1/D2b2/D3b 增加 ASIO 生命周期、整数边界、同步/异步重采样契约、Standalone 控件、统一 Drive+Delay 图、Tuner 捕获和真实硬件回调；M23-D3c/D3d 增加模块包校验、动态目录、preset 引用、Standalone runtime 和 C ABI 重开回归；M23-D3e 增加直接 NAM/IR 引用持久化、编辑器重开和 direct IR runtime 回归；M23-D3f 增加 VST3 state 外部 IR 重建与模块皮肤绑定回归；M23-D3h 增加 SDK factory 级组件生命周期和 state restore 回归；M23-D3i 增加直接 Circuit v2 文件解析、端口描述、preset 重开和动态目录回归 | 多设备真实硬件、非 192 kHz 硬件实测、授权参考、真实断连恢复、真实 DAW 宿主回灌和覆盖矩阵逐项闭环 |
-| 21 | 默认效果器外观与自定义皮肤 | 部分完成 | 默认皮肤回退、外部皮肤 JSON 校验、ModulePackage `skinFile` 路径生命周期、模块级皮肤绑定和 Win32 默认旋钮/拨档/按钮/踩钉绘制已接通，并有编辑器重开与 UI Paint 回归 | 图像资源加载/沙箱校验、自定义皮肤图像渲染和真实窗口视觉回归 |
-| 22 | 逻辑、元属性、外观三层模块包 | 部分完成 | `ModulePackage` manifest、logic、descriptor/metadata、外部 Circuit/NAM/IR 入口；编辑器动态目录、manifest 包与直接 Circuit/NAM/IR preset 引用、Standalone 注册/处理自测、VST3 state v3 重建和 C ABI 重开回归已接通；模块级自定义皮肤缺失/非法时回退默认皮肤 | 真实 VST3 宿主、多模块皮肤视觉产品绑定、图像资源生命周期/版本迁移和更复杂模拟逻辑与数字逻辑统一运行契约 |
+| 20 | 全功能/边界测试 | 部分完成 | 当前核心 `613/613`、CTest `5/5`、VST3 专项 `9/9`、VST3 Validator `47/47` 及 UI/ABI/C# contract；M23-B 增加完整外部管线回归，M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b/C3c 增加十三类数学 golden 的真实 Circuit v2 MNA 对照；M23-D1/D2b2/D3b 增加 ASIO 生命周期、整数边界、同步/异步重采样契约、Standalone 控件、统一 Drive+Delay 图、Tuner 捕获和真实硬件回调；M23-D3c/D3d 增加模块包校验、动态目录、preset 引用、Standalone runtime 和 C ABI 重开回归；M23-D3e 增加直接 NAM/IR 引用持久化、编辑器重开和 direct IR runtime 回归；M23-D3f 增加 VST3 state 外部 IR 重建与模块皮肤绑定回归；M23-D3h 增加 SDK factory 级组件生命周期和 state restore 回归；M23-D3i 增加直接 Circuit v2 文件解析、端口描述、preset 重开和动态目录回归；M23-D3j 增加皮肤图像相对路径校验、WIC→Direct2D 解码缓存、绘制回归和非法资源回退 | 多设备真实硬件、非 192 kHz 硬件实测、授权参考、真实断连恢复、真实 DAW 宿主回灌和覆盖矩阵逐项闭环 |
+| 21 | 默认效果器外观与自定义皮肤 | 部分完成 | 默认皮肤回退、外部皮肤 JSON 校验、ModulePackage `skinFile` 路径生命周期、模块级皮肤绑定、Win32 默认旋钮/拨档/按钮/踩钉几何绘制，以及可选相对位图资源的 WIC 解码/Direct2D 缓存绘制已接通；有编辑器资源边界、重复 UI Paint 和图像绘制计数回归 | 自定义皮肤矢量/动画资源、真实窗口视觉基线、不同 DPI/显卡驱动下的视觉验收 |
+| 22 | 逻辑、元属性、外观三层模块包 | 部分完成 | `ModulePackage` manifest、logic、descriptor/metadata、外部 Circuit/NAM/IR 入口；编辑器动态目录、manifest 包与直接 Circuit/NAM/IR preset 引用、Standalone 注册/处理自测、VST3 state v3 重建和 C ABI 重开回归已接通；模块级 skin JSON 可声明相对图像资源，非法/缺失时回退默认控件 | 真实 VST3 宿主、多模块皮肤视觉产品绑定、矢量/动画资源生命周期/版本迁移和更复杂模拟逻辑与数字逻辑统一运行契约 |
 | 23 | 多 ASIO 设备与任意 I/O 通道 | 部分完成 | `AsioDeviceCoordinator` 已支持最多四个 ASIO host、固定容量跨设备 ring、任意物理输入/输出路由文本、每设备 buffer 配置、异步时钟离线契约和 Recover 入口；单设备 `Midiplus USB Audio` 真实回调通过 | 至少两个可用 ASIO 设备的真实同步/异步回归、真实断连/重置恢复和更多硬件 |
 
 ## 白盒专用覆盖
@@ -56,7 +56,7 @@
 
 白盒完成不以“代码分支已经存在”为终点，按以下顺序收口：
 
-1. **运行时闭环**：代表性白盒模块均完成 Parse/Compile → Prepare → Process → Reset，固定容量、非有限输入、拓扑/端口错误和实时线程拒绝边界保持稳定；当前 generic 主线与 `612/612` 核心回归已达到这一阶段。
+1. **运行时闭环**：代表性白盒模块均完成 Parse/Compile → Prepare → Process → Reset，固定容量、非有限输入、拓扑/端口错误和实时线程拒绝边界保持稳定；当前 generic 主线与 `613/613` 核心回归已达到这一阶段。
 2. **宿主一致性**：VST3、Standalone 和编辑器共用同一 `RigPreset`/`RigRuntime` 图配置；真实宿主验证 setup、变 block、停止重配、状态恢复和音频输出，不能只依赖单元测试或 Validator。
 3. **音频后端验收**：Standalone 保持内部 192 kHz/Float32；完成至少两个真实 ASIO 设备的任意 I/O、异步时钟、buffer 差异、reset/断连恢复，并保存可复验的探针输出。当前最多四设备协调、离线异步时钟契约和单设备硬件探针已完成，真实多设备证据仍是门禁。
 4. **独立参考证据**：为选定白盒覆盖集补齐授权 SPICE、golden waveform 或实机测量，并记录采样率、激励、容差、版本和授权来源；缺资料的模块继续标为 `受阻`，不得用 generic 或数学自证替代。

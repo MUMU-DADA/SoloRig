@@ -3,6 +3,7 @@
 
 #include <d2d1.h>
 #include <dwrite.h>
+#include <wincodec.h>
 #include <windowsx.h>
 #include <commdlg.h>
 
@@ -15,6 +16,7 @@
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
+#pragma comment(lib, "windowscodecs.lib")
 
 namespace solo_rig::standalone {
 namespace {
@@ -33,6 +35,14 @@ ID2D1HwndRenderTarget* AsRenderTarget(void* value) noexcept {
 
 IDWriteTextFormat* AsTextFormat(void* value) noexcept {
     return static_cast<IDWriteTextFormat*>(value);
+}
+
+IWICImagingFactory* AsWicFactory(void* value) noexcept {
+    return static_cast<IWICImagingFactory*>(value);
+}
+
+ID2D1Bitmap* AsBitmap(void* value) noexcept {
+    return static_cast<ID2D1Bitmap*>(value);
 }
 
 std::wstring Widen(std::string_view text) {
@@ -131,6 +141,13 @@ bool Win32RigWindow::Create(HINSTANCE instance, RigEditorViewModel& editor, bool
     instance_ = instance;
     editor_ = &editor;
     class_registered_ = true;
+    const auto com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (SUCCEEDED(com_result)) {
+        com_initialized_ = true;
+    } else if (com_result != RPC_E_CHANGED_MODE) {
+        editor_ = nullptr;
+        return false;
+    }
     window_ = CreateWindowExW(0,
                              kWindowClassName,
                              L"SoloRig - Guitar Rig Editor",
@@ -145,6 +162,10 @@ bool Win32RigWindow::Create(HINSTANCE instance, RigEditorViewModel& editor, bool
                              this);
     if (window_ == nullptr) {
         editor_ = nullptr;
+        if (com_initialized_) {
+            CoUninitialize();
+            com_initialized_ = false;
+        }
         return false;
     }
     if (!InitializeRenderResources()) {
@@ -207,6 +228,13 @@ bool Win32RigWindow::InitializeRenderResources() {
         d2d_factory->Release();
         return false;
     }
+    IWICImagingFactory* wic_factory = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory,
+                                   nullptr,
+                                   CLSCTX_INPROC_SERVER,
+                                   IID_PPV_ARGS(&wic_factory)))) {
+        wic_factory_ = wic_factory;
+    }
     d2d_factory_ = d2d_factory;
     dwrite_factory_ = dwrite_factory;
     render_target_ = render_target;
@@ -225,6 +253,7 @@ void Win32RigWindow::Resize(std::uint32_t width, std::uint32_t height, float dpi
 
 void Win32RigWindow::Paint() {
     last_paint_succeeded_ = false;
+    skin_bitmap_draw_count_ = 0U;
     auto* target = AsRenderTarget(render_target_);
     if (target == nullptr || editor_ == nullptr) {
         return;
@@ -255,6 +284,23 @@ void Win32RigWindow::Paint() {
     target->Clear(ThemeColor(scene.theme, "background", D2D1::ColorF(D2D1::ColorF::DarkGray)));
     const auto width = static_cast<float>(scene.viewport_width);
     const auto height = static_cast<float>(scene.viewport_height);
+    const auto draw_skin_bitmap = [this, target](const std::optional<std::filesystem::path>& source,
+                                                 const D2D1_RECT_F& destination) {
+        if (!source.has_value()) {
+            return false;
+        }
+        auto* bitmap = AsBitmap(LoadSkinBitmap(*source));
+        if (bitmap == nullptr) {
+            return false;
+        }
+        target->DrawBitmap(bitmap,
+                           &destination,
+                           1.0F,
+                           D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                           nullptr);
+        ++skin_bitmap_draw_count_;
+        return true;
+    };
     target->FillRectangle(D2D1::RectF(0.0F, 0.0F, width, 64.0F), surface);
     target->DrawLine(D2D1::Point2F(0.0F, 64.0F), D2D1::Point2F(width, 64.0F), accent, 1.0F);
     target->FillRectangle(D2D1::RectF(0.0F, std::max(64.0F, height - 42.0F), width, height), surface);
@@ -287,12 +333,18 @@ void Win32RigWindow::Paint() {
             const auto center = D2D1::Point2F(static_cast<float>(node.bounds.x) + (38.0F + 45.0F * index) * scale,
                                               static_cast<float>(node.bounds.y) + 76.0F * scale);
             const auto ellipse = D2D1::Ellipse(center, 13.0F * scale, 13.0F * scale);
-            target->FillEllipse(ellipse, accent);
-            target->DrawEllipse(ellipse, text, std::max(1.0F, scale));
-            target->DrawLine(center,
-                             D2D1::Point2F(center.x + 8.0F * scale, center.y - 8.0F * scale),
-                             text,
-                             std::max(1.0F, scale));
+            const auto image_rect = D2D1::RectF(center.x - 17.0F * scale,
+                                                center.y - 17.0F * scale,
+                                                center.x + 17.0F * scale,
+                                                center.y + 17.0F * scale);
+            if (!draw_skin_bitmap(node.skin.knob_image, image_rect)) {
+                target->FillEllipse(ellipse, accent);
+                target->DrawEllipse(ellipse, text, std::max(1.0F, scale));
+                target->DrawLine(center,
+                                 D2D1::Point2F(center.x + 8.0F * scale, center.y - 8.0F * scale),
+                                 text,
+                                 std::max(1.0F, scale));
+            }
         }
         const auto toggle = D2D1::RoundedRect(
             D2D1::RectF(static_cast<float>(node.bounds.x) + 147.0F * scale,
@@ -301,8 +353,10 @@ void Win32RigWindow::Paint() {
                         static_cast<float>(node.bounds.y) + 81.0F * scale),
             5.0F * scale,
             5.0F * scale);
-        target->FillRoundedRectangle(toggle, accent);
-        target->DrawRoundedRectangle(toggle, text, std::max(1.0F, scale));
+        if (!draw_skin_bitmap(node.skin.toggle_image, toggle.rect)) {
+            target->FillRoundedRectangle(toggle, accent);
+            target->DrawRoundedRectangle(toggle, text, std::max(1.0F, scale));
+        }
         const auto button = D2D1::RoundedRect(
             D2D1::RectF(static_cast<float>(node.bounds.x) + 147.0F * scale,
                         static_cast<float>(node.bounds.y) + 87.0F * scale,
@@ -310,15 +364,23 @@ void Win32RigWindow::Paint() {
                         static_cast<float>(node.bounds.y) + 101.0F * scale),
             3.0F * scale,
             3.0F * scale);
-        target->FillRoundedRectangle(button, surface);
-        target->DrawRoundedRectangle(button, text, std::max(1.0F, scale));
+        if (!draw_skin_bitmap(node.skin.button_image, button.rect)) {
+            target->FillRoundedRectangle(button, surface);
+            target->DrawRoundedRectangle(button, text, std::max(1.0F, scale));
+        }
         const auto footswitch = D2D1::Ellipse(
             D2D1::Point2F(static_cast<float>(node.bounds.x) + 98.0F * scale,
                           static_cast<float>(node.bounds.y) + 108.0F * scale),
             20.0F * scale,
             7.0F * scale);
-        target->FillEllipse(footswitch, accent);
-        target->DrawEllipse(footswitch, text, std::max(1.0F, scale));
+        const auto footswitch_rect = D2D1::RectF(footswitch.point.x - footswitch.radiusX,
+                                                 footswitch.point.y - footswitch.radiusY,
+                                                 footswitch.point.x + footswitch.radiusX,
+                                                 footswitch.point.y + footswitch.radiusY);
+        if (!draw_skin_bitmap(node.skin.footswitch_image, footswitch_rect)) {
+            target->FillEllipse(footswitch, accent);
+            target->DrawEllipse(footswitch, text, std::max(1.0F, scale));
+        }
         const auto skin_label = Widen("skin: " + node.skin.id);
         const auto skin_rect = D2D1::RectF(static_cast<float>(node.bounds.x + 12.0 * scene.dpi_scale),
                                             static_cast<float>(node.bounds.y + 112.0 * scene.dpi_scale),
@@ -471,6 +533,10 @@ void Win32RigWindow::Destroy() noexcept {
         window_ = nullptr;
     }
     editor_ = nullptr;
+    if (com_initialized_) {
+        CoUninitialize();
+        com_initialized_ = false;
+    }
 }
 
 int Win32RigWindow::RunMessageLoop() const {
@@ -492,6 +558,10 @@ bool Win32RigWindow::LastPaintSucceeded() const noexcept {
 
 std::uint64_t Win32RigWindow::PaintCount() const noexcept {
     return paint_count_;
+}
+
+std::size_t Win32RigWindow::SkinBitmapDrawCount() const noexcept {
+    return skin_bitmap_draw_count_;
 }
 
 void Win32RigWindow::SetFileDialogProvider(FileDialogProvider provider) {
@@ -1203,9 +1273,14 @@ void Win32RigWindow::ReleaseRenderResources() noexcept {
         AsTextFormat(text_format_)->Release();
         text_format_ = nullptr;
     }
+    ReleaseSkinBitmaps();
     if (render_target_ != nullptr) {
         AsRenderTarget(render_target_)->Release();
         render_target_ = nullptr;
+    }
+    if (wic_factory_ != nullptr) {
+        AsWicFactory(wic_factory_)->Release();
+        wic_factory_ = nullptr;
     }
     if (dwrite_factory_ != nullptr) {
         AsDWriteFactory(dwrite_factory_)->Release();
@@ -1215,6 +1290,74 @@ void Win32RigWindow::ReleaseRenderResources() noexcept {
         AsD2DFactory(d2d_factory_)->Release();
         d2d_factory_ = nullptr;
     }
+}
+
+void Win32RigWindow::ReleaseSkinBitmaps() noexcept {
+    for (const auto& [path, bitmap] : skin_bitmaps_) {
+        static_cast<void>(path);
+        if (bitmap != nullptr) {
+            AsBitmap(bitmap)->Release();
+        }
+    }
+    skin_bitmaps_.clear();
+}
+
+void* Win32RigWindow::LoadSkinBitmap(const std::filesystem::path& source) {
+    if (source.empty() || wic_factory_ == nullptr || render_target_ == nullptr) {
+        return nullptr;
+    }
+    std::error_code path_error;
+    const auto normalized = std::filesystem::absolute(source, path_error).lexically_normal();
+    if (path_error || normalized.empty()) {
+        return nullptr;
+    }
+    if (const auto existing = skin_bitmaps_.find(normalized); existing != skin_bitmaps_.end()) {
+        return existing->second;
+    }
+    skin_bitmaps_.emplace(normalized, nullptr);
+
+    auto* factory = AsWicFactory(wic_factory_);
+    auto* target = AsRenderTarget(render_target_);
+    IWICBitmapDecoder* decoder = nullptr;
+    IWICBitmapFrameDecode* frame = nullptr;
+    IWICFormatConverter* converter = nullptr;
+    ID2D1Bitmap* bitmap = nullptr;
+    const auto fail = [&]() -> void* {
+        if (bitmap != nullptr) bitmap->Release();
+        if (converter != nullptr) converter->Release();
+        if (frame != nullptr) frame->Release();
+        if (decoder != nullptr) decoder->Release();
+        return nullptr;
+    };
+    if (FAILED(factory->CreateDecoderFromFilename(normalized.c_str(),
+                                                  nullptr,
+                                                  GENERIC_READ,
+                                                  WICDecodeMetadataCacheOnLoad,
+                                                  &decoder)) ||
+        FAILED(decoder->GetFrame(0U, &frame))) {
+        return fail();
+    }
+    UINT width = 0U;
+    UINT height = 0U;
+    if (FAILED(frame->GetSize(&width, &height)) || width == 0U || height == 0U || width > 4096U || height > 4096U ||
+        static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) > 16U * 1024U * 1024U) {
+        return fail();
+    }
+    if (FAILED(factory->CreateFormatConverter(&converter)) ||
+        FAILED(converter->Initialize(frame,
+                                     GUID_WICPixelFormat32bppPBGRA,
+                                     WICBitmapDitherTypeNone,
+                                     nullptr,
+                                     0.0,
+                                     WICBitmapPaletteTypeCustom)) ||
+        FAILED(target->CreateBitmapFromWicBitmap(converter, nullptr, &bitmap))) {
+        return fail();
+    }
+    converter->Release();
+    frame->Release();
+    decoder->Release();
+    skin_bitmaps_[normalized] = bitmap;
+    return bitmap;
 }
 
 void Win32RigWindow::UpdateEditorViewport() {

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -41,6 +42,7 @@ public:
     [[nodiscard]] HWND Handle() const noexcept;
     [[nodiscard]] bool LastPaintSucceeded() const noexcept;
     [[nodiscard]] std::uint64_t PaintCount() const noexcept;
+    [[nodiscard]] std::size_t SkinBitmapDrawCount() const noexcept;
     void SetFileDialogProvider(FileDialogProvider provider);
     [[nodiscard]] bool TriggerSave();
     [[nodiscard]] bool TriggerSaveAs();
@@ -76,6 +78,8 @@ private:
     static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
     LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param);
     void ReleaseRenderResources() noexcept;
+    void ReleaseSkinBitmaps() noexcept;
+    [[nodiscard]] void* LoadSkinBitmap(const std::filesystem::path& source);
     void UpdateEditorViewport();
     void CreateToolbarButtons();
     void LayoutToolbarButtons();
@@ -94,12 +98,16 @@ private:
     RigEditorViewModel* editor_{};
     void* d2d_factory_{};
     void* dwrite_factory_{};
+    void* wic_factory_{};
     void* render_target_{};
     void* text_format_{};
     float dpi_scale_{1.0F};
     bool class_registered_{};
+    bool com_initialized_{};
     bool last_paint_succeeded_{};
     std::uint64_t paint_count_{};
+    std::size_t skin_bitmap_draw_count_{};
+    std::map<std::filesystem::path, void*> skin_bitmaps_;
     HWND save_button_{};
     HWND save_as_button_{};
     HWND open_button_{};

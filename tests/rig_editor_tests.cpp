@@ -79,6 +79,58 @@ TEST_CASE("RigEditor toggles themes without losing layout and falls back on bad 
     REQUIRE(editor.Scene().skin.footswitch == "standard-footswitch");
 }
 
+TEST_CASE("RigEditor validates relative skin image assets and preserves legacy control strings") {
+    const auto directory = std::filesystem::temp_directory_path() / "solorig-skin-image-contract";
+    std::error_code cleanup;
+    std::filesystem::remove_all(directory, cleanup);
+    std::filesystem::create_directories(directory / "images");
+    {
+        std::ofstream image(directory / "images" / "control.bmp", std::ios::binary | std::ios::trunc);
+        image << "test-image";
+    }
+    const auto skin_path = directory / "custom.json";
+    {
+        std::ofstream skin(skin_path, std::ios::binary | std::ios::trunc);
+        skin << R"({
+            "schemaVersion": 1,
+            "id": "solorig.image-skin",
+            "controls": {
+                "knob": {"id":"image-knob","image":"images/control.bmp"},
+                "toggle": "legacy-toggle",
+                "button": {"id":"image-button","image":"images/control.bmp"},
+                "footswitch": "legacy-footswitch"
+            }
+        })";
+    }
+    solo_rig::RigEditorViewModel editor;
+    REQUIRE(editor.LoadSkinFile(skin_path));
+    REQUIRE(editor.Scene().skin.id == "solorig.image-skin");
+    REQUIRE(editor.Scene().skin.knob == "image-knob");
+    REQUIRE(editor.Scene().skin.toggle == "legacy-toggle");
+    REQUIRE(editor.Scene().skin.knob_image.has_value());
+    REQUIRE(editor.Scene().skin.knob_image->filename() == "control.bmp");
+    REQUIRE(editor.Scene().skin.button_image.has_value());
+    REQUIRE(!editor.Scene().skin.footswitch_image.has_value());
+
+    const auto unsafe_path = directory / "unsafe.json";
+    {
+        std::ofstream skin(unsafe_path, std::ios::binary | std::ios::trunc);
+        skin << R"({
+            "schemaVersion": 1,
+            "id": "solorig.unsafe-image-skin",
+            "controls": {
+                "knob": {"id":"unsafe-knob","image":"../outside.bmp"},
+                "toggle": "legacy-toggle",
+                "button": "legacy-button",
+                "footswitch": "legacy-footswitch"
+            }
+        })";
+    }
+    REQUIRE(!editor.LoadSkinFile(unsafe_path));
+    REQUIRE(editor.Scene().skin.id == "solorig.image-skin");
+    std::filesystem::remove_all(directory, cleanup);
+}
+
 TEST_CASE("RigEditor exports a layout that round-trips through the preset schema") {
     solo_rig::RigEditorViewModel editor;
     REQUIRE(editor.BeginDrag({.x = 70.0, .y = 160.0}));
