@@ -2,11 +2,17 @@
 
 > 状态日期：2026-08-15。本文描述通用白盒电路路径的真实能力边界，不包含 NAM/NAM A2 黑盒覆盖，也不把原生数字 DSP 误记为元件级白盒。
 
-## 结论
+## 结论（当前白盒主线）
 
 当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 generic dynamic diode/Zener、BJT、JFET、MOSFET、dynamic opamp、bounded OTA、triode、pentode、beam tetrode、vari-mu、lossy-linear coupled-inductor 和 saturating-hysteretic transformer/core 模型。C8b-C9e 已由 `9b06c70` 提交；C10a/C10b、D1a/D1b1/D1b2/D1b3 和 D2a generic clocked BBD/delay 已由 `9dc9368` 提交，D2b1 VCO、D2b2 VCA、D2c1 envelope follower、D2c2 generic LFO、D2d1 optocoupler/LDR response 已分别由 `4774d79`、`4a4bfa1`、`dc2f1b6`、`ebd2438`、`f4c5b14` 提交。D2d2 generic modal spring response、D2e1-D2e7 behavior graph Compile/lowering、固定容量 runtime、typed port/route、控制域 runtime 和 envelope + VCA composite 已随 M19-A1 提交 `2e6a8bf`；M18-D3a 动态 BBD 时钟链为未提交本地候选，M18-D3b/M19-A2 单延迟反馈链也为未提交本地候选。这些仍只构成 self-authored clean-room generic 能力，不构成商业器件或 1:1 证据。
 
 当前仍不能宣称覆盖“绝大多数单块效果器和箱头”。主要阻塞不只是元件数量，还包括实时旋钮/开关、行为模块、复杂拓扑编译、器件高阶物理、功放与电源/负载交互，以及 SPICE/golden/实机误差验证。
+
+### 当前状态覆盖说明（2026-08-15）
+
+- `a321a0f` 已提交 M18-D3a、M18-D3b/M19-A2 和 M19-B1 阶段 2b/3b；历史计划表中这些阶段的“未提交本地候选”文字为历史记录，不覆盖当前提交状态。
+- M19-C 当前为未提交本地候选：15 个代表性类别中 12 类具有可运行 generic 证据，Wah/Phaser、Chorus/Flanger 和真实 optical hardware 三类保持 stable refusal。
+- M19-C 最新验证为核心 `520/520`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `91a189c4eca94c8bae2439643f2a97ae`。
 
 ## 状态口径
 
@@ -134,6 +140,14 @@
 | M19-B1 阶段 1 | generic 箱头前后级闭环接口审计 | 已完成静态审计：circuit v2 与 MNA 底层可以在同一实例中容纳 triode/pentode/beam tetrode、C10a Sag、C8b transformer/core 和 C10b speaker，但当前只有单 input/单 output 的 netlist 端口和组件 pins，没有前级/功放/电源/变压器/负载的阶段化 typed route contract。阶段 2 先实现显式 Compile-only contract 与 stable refusal；不在 content 层固定拓扑、控制值或隐藏状态。 |
 | M19-B1 阶段 2b/3b | generic 箱头真实 pin/net contract 与 MNA lowering/runtime | 未提交本地候选：2b 使用真实 triode/pentode/beam、C10a、transformer 四端和 speaker 两端；secondary return 保留真实 pin 名但显式接到 `ground`，并将 terminal 合并进 ground net，output 仍复用真实 `secondary_dot`。3b 已证明 caller-owned netlist 可 Compile/Prepare/Solve，48/96/192 kHz、1x/4x、Reset 和有限确定性序列通过；浮动 secondary 回归稳定拒绝。 |
 | M20 | 性能与产品全量回归 | 192 kHz/过采样、CPU、延迟、无分配、稳定性、C ABI、VST3、UI 和 Validator 全量通过。 |
+
+## 本地候选：M19-C 代表性 generic 单块/箱头覆盖审计
+
+### 范围与证据
+
+- `fixtures/whitebox/m19c_representative_pedal_fixtures.*` 提供被动音色、二极管过载、BJT/JFET/MOSFET boost/fuzz 和 dynamic opamp 的 caller-owned MNA fixture；M19-A1/M19-A2/M19-B1 提供其余已授权 generic behavior、反馈和 tube-amp 代表链路。
+- `tests/m19c_validation_harness.*` 对 15 类统一检查 Compile、Prepare、有限非平凡输出、Reset、192 kHz/过采样和拒绝边界；当前 12 类为 RunnableGeneric，3 类为带明确原因的 StableRefusal。
+- M19-C 只证明代表性 generic 结构和拒绝边界，不证明完整效果器产品、商业硬件、SPICE/golden 或 `reference-1to-1`。三类 StableRefusal 必须在后续通用拓扑/行为图阶段实现，或经正式范围审查移出 Generic Whitebox v1。
 
 ## M19-B1 阶段 1 审计结论
 

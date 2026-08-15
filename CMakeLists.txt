@@ -327,9 +327,12 @@ if(BUILD_TESTING)
         fixtures/whitebox/m19a1_behavior_chain_fixtures.cpp
         fixtures/whitebox/m19a2_feedback_fixtures.cpp
         fixtures/whitebox/m19b1_generic_tube_amp_compile_fixture.cpp
+        fixtures/whitebox/m19c_representative_pedal_fixtures.cpp
         tests/m19a1_validation_harness.cpp
         tests/m19a1_behavior_validation_tests.cpp
         tests/m19a2_feedback_validation_tests.cpp
+        tests/m19c_validation_harness.cpp
+        tests/m19c_representative_validation_tests.cpp
         tests/generic_tube_amp_compile_tests.cpp
         tests/generic_tube_amp_mna_lowering_tests.cpp
         tests/coupled_inductor_tests.cpp
