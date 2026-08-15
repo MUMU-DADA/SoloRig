@@ -172,6 +172,31 @@ void StampDynamicSpeakerLoad(std::vector<double>& matrix,
         evaluation.voltage_derivative_current;
 }
 
+void StampOptocoupler(std::vector<double>& matrix,
+                      std::vector<double>& rhs,
+                      std::uint32_t size,
+                      const MnaPreparedCircuit::Element& element,
+                      const std::vector<double>& guess,
+                      double previous_illumination,
+                      double timestep_seconds) noexcept {
+    const double emitter_positive = element.positive_node >= 0
+        ? guess[static_cast<std::size_t>(element.positive_node)] : 0.0;
+    const double emitter_negative = element.negative_node >= 0
+        ? guess[static_cast<std::size_t>(element.negative_node)] : 0.0;
+    GenericOptocouplerMnaEvaluation evaluation{};
+    const auto error = EvaluateGenericOptocouplerMna(
+        element.optocoupler_mna_model, emitter_positive - emitter_negative,
+        previous_illumination, timestep_seconds, evaluation);
+    if (error != GenericOptocouplerError::None) {
+        rhs.front() = std::numeric_limits<double>::quiet_NaN();
+        return;
+    }
+    StampConductance(matrix, size, element.positive_node, element.negative_node,
+                     1.0 / element.optocoupler_mna_model.emitter_resistance_ohms);
+    StampConductance(matrix, size, element.secondary_positive_node,
+                     element.secondary_negative_node, 1.0 / evaluation.ldr_resistance_ohms);
+}
+
 // Backward-Euler inductor companion in branch-current MNA form:
 // v(+) - v(-) - (L/dt)i = -(L/dt)i_previous.
 void StampInductor(std::vector<double>& matrix,
@@ -900,6 +925,7 @@ void MnaPreparedCircuit::Reset() noexcept {
     std::fill(dynamic_speaker_load_states_.begin(), dynamic_speaker_load_states_.end(),
               DynamicSpeakerLoadState{});
     std::fill(dynamic_relay_states_.begin(), dynamic_relay_states_.end(), DynamicRelayState{});
+    std::fill(optocoupler_illumination_states_.begin(), optocoupler_illumination_states_.end(), 0.0);
     for (const auto& element : elements_) {
         if (element.history_index != kNoIndex) {
             capacitor_history_[element.history_index] = element.initial;
@@ -952,6 +978,9 @@ void MnaPreparedCircuit::Reset() noexcept {
         }
         if (element.dynamic_relay_state_index != kNoIndex) {
             dynamic_relay_states_[element.dynamic_relay_state_index] = element.dynamic_relay_initial_state;
+        }
+        if (element.optocoupler_state_index != kNoIndex) {
+            optocoupler_illumination_states_[element.optocoupler_state_index] = element.initial;
         }
     }
     std::fill(matrix_.begin(), matrix_.end(), 0.0);
@@ -1014,6 +1043,7 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                    element.dynamic_power_supply_state_index != kNoIndex ||
                    element.dynamic_speaker_load_state_index != kNoIndex ||
                    element.dynamic_relay_state_index != kNoIndex ||
+                   element.optocoupler_state_index != kNoIndex ||
                    element.controlled_has_limits;
         });
         bool converged = !has_nonlinearity;
@@ -1049,6 +1079,11 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                 case CircuitComponentType::Relay:
                     StampDynamicRelay(matrix_, rhs_, matrix_size_, element, solution_,
                         dynamic_relay_states_[element.dynamic_relay_state_index],
+                        1.0 / conductance_scale);
+                    break;
+                case CircuitComponentType::Optocoupler:
+                    StampOptocoupler(matrix_, rhs_, matrix_size_, element, solution_,
+                        optocoupler_illumination_states_[element.optocoupler_state_index],
                         1.0 / conductance_scale);
                     break;
                 case CircuitComponentType::CoupledInductor: {
@@ -1449,6 +1484,22 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                 if (!state.Succeeded()) return {.error = MnaSolveError::NonFinite};
                 dynamic_relay_states_[element.dynamic_relay_state_index] = state.next_state;
             }
+            if (element.optocoupler_state_index != kNoIndex) {
+                const double emitter_positive = element.positive_node >= 0
+                    ? solution_[static_cast<std::size_t>(element.positive_node)] : 0.0;
+                const double emitter_negative = element.negative_node >= 0
+                    ? solution_[static_cast<std::size_t>(element.negative_node)] : 0.0;
+                GenericOptocouplerMnaEvaluation state{};
+                const auto error = EvaluateGenericOptocouplerMna(
+                    element.optocoupler_mna_model, emitter_positive - emitter_negative,
+                    optocoupler_illumination_states_[element.optocoupler_state_index],
+                    1.0 / conductance_scale, state);
+                if (error != GenericOptocouplerError::None) {
+                    return {.error = MnaSolveError::NonFinite};
+                }
+                optocoupler_illumination_states_[element.optocoupler_state_index] =
+                    state.next_illumination;
+            }
         }
         result.output_voltage = output_node_ >= 0 ? solution_[output_node_] : 0.0;
     }
@@ -1518,6 +1569,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             (component.speaker_load_model.has_value() &&
              component.type != CircuitComponentType::SpeakerLoad) ||
             (component.relay_model.has_value() && component.type != CircuitComponentType::Relay) ||
+            (component.optocoupler_model.has_value() && component.type != CircuitComponentType::Optocoupler) ||
             ((component.primary_initial_current.has_value() || component.secondary_initial_current.has_value()) &&
              component.type != CircuitComponentType::CoupledInductor)) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
@@ -1533,7 +1585,7 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             component.type != CircuitComponentType::BeamTetrode && component.type != CircuitComponentType::VariMu &&
             component.type != CircuitComponentType::CoupledInductor &&
             component.type != CircuitComponentType::SpeakerLoad && component.type != CircuitComponentType::Switch &&
-            component.type != CircuitComponentType::Relay) {
+            component.type != CircuitComponentType::Relay && component.type != CircuitComponentType::Optocoupler) {
             return {.circuit = std::nullopt, .error = MnaCompileError::UnsupportedComponent};
         }
         if (component.type == CircuitComponentType::Switch) {
@@ -1594,6 +1646,37 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                                 ValidateDynamicRelayRoutingModel(
                                     {.pole_count = item.pole_count, .contact_gap = item.contact_gap});
             if ((!legacy && !routed) || !ValidateDynamicRelayModel(model)) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
+            }
+        }
+        if (component.type == CircuitComponentType::Optocoupler) {
+            if (component.pins.size() != 4U || !component.optocoupler_model.has_value() ||
+                component.value.has_value() || component.tolerance.has_value() ||
+                component.initial.has_value() || component.model.has_value() ||
+                component.diode_model.has_value() || component.potentiometer.has_value() ||
+                component.controlled_source.has_value() || component.bjt_model.has_value() ||
+                component.jfet_model.has_value() || component.mosfet_model.has_value() ||
+                component.amplifier_model.has_value() || component.triode_model.has_value() ||
+                component.pentode_model.has_value() || component.beam_tetrode_model.has_value() ||
+                component.vari_mu_model.has_value() || component.coupled_inductor_model.has_value() ||
+                component.speaker_load_model.has_value() || component.relay_model.has_value() ||
+                component.switch_spec.has_value()) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidModel};
+            }
+            const auto& item = *component.optocoupler_model;
+            const GenericOptocouplerMnaModel model{
+                .optical = {.dark_resistance_ohms = item.dark_resistance_ohms,
+                    .lit_resistance_ohms = item.lit_resistance_ohms,
+                    .emitter_threshold_volts = item.emitter_threshold_volts,
+                    .emitter_scale_volts = item.emitter_scale_volts,
+                    .response_exponent = item.response_exponent,
+                    .attack_seconds = item.attack_seconds,
+                    .release_seconds = item.release_seconds,
+                    .maximum_drive_volts = item.maximum_drive_volts,
+                    .initial_illumination = item.initial_illumination},
+                .emitter_resistance_ohms = item.emitter_resistance_ohms};
+            if (item.kind != "generic-electrical" || item.model_version != 1U ||
+                !ValidateGenericOptocouplerMnaModel(model)) {
                 return {.circuit = std::nullopt, .error = MnaCompileError::InvalidValue};
             }
         }
@@ -2140,6 +2223,39 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
             element.dynamic_relay_state_index =
                 static_cast<std::uint32_t>(prepared.dynamic_relay_states_.size());
             prepared.dynamic_relay_states_.push_back(element.dynamic_relay_initial_state);
+            prepared.elements_.push_back(element);
+            continue;
+        }
+        if (component.type == CircuitComponentType::Optocoupler) {
+            const auto detector_positive = FindNode(circuit, component.pins[2]);
+            const auto detector_negative = FindNode(circuit, component.pins[3]);
+            if (detector_positive == -2 || detector_negative == -2 ||
+                detector_positive == detector_negative) {
+                return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+            }
+            const auto& item = *component.optocoupler_model;
+            MnaPreparedCircuit::Element element{};
+            element.type = CircuitComponentType::Optocoupler;
+            element.positive_node = positive;
+            element.negative_node = negative;
+            element.secondary_positive_node = detector_positive;
+            element.secondary_negative_node = detector_negative;
+            element.value = item.emitter_resistance_ohms;
+            element.initial = item.initial_illumination;
+            element.optocoupler_mna_model = {
+                .optical = {.dark_resistance_ohms = item.dark_resistance_ohms,
+                    .lit_resistance_ohms = item.lit_resistance_ohms,
+                    .emitter_threshold_volts = item.emitter_threshold_volts,
+                    .emitter_scale_volts = item.emitter_scale_volts,
+                    .response_exponent = item.response_exponent,
+                    .attack_seconds = item.attack_seconds,
+                    .release_seconds = item.release_seconds,
+                    .maximum_drive_volts = item.maximum_drive_volts,
+                    .initial_illumination = item.initial_illumination},
+                .emitter_resistance_ohms = item.emitter_resistance_ohms};
+            element.optocoupler_state_index = static_cast<std::uint32_t>(
+                prepared.optocoupler_illumination_states_.size());
+            prepared.optocoupler_illumination_states_.push_back(item.initial_illumination);
             prepared.elements_.push_back(element);
             continue;
         }

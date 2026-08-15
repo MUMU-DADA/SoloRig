@@ -8,6 +8,7 @@
 #include "dsp/dynamic_speaker_load.hpp"
 #include "dsp/dynamic_relay.hpp"
 #include "dsp/dynamic_relay_routing.hpp"
+#include "dsp/generic_optocoupler_mna.hpp"
 #include "dsp/nonlinear_device.hpp"
 #include "dsp/nonlinear_diode_dynamic.hpp"
 #include "dsp/nonlinear_bjt_dynamic.hpp"
@@ -138,6 +139,8 @@ public:
         std::array<std::int32_t, 4> relay_common_nodes{-1, -1, -1, -1};
         std::array<std::int32_t, 4> relay_normally_closed_nodes{-1, -1, -1, -1};
         std::array<std::int32_t, 4> relay_normally_open_nodes{-1, -1, -1, -1};
+        GenericOptocouplerMnaModel optocoupler_mna_model{};
+        std::uint32_t optocoupler_state_index{UINT32_MAX};
     };
 
 private:
@@ -181,6 +184,7 @@ private:
     std::vector<DynamicPowerSupplyState> dynamic_power_supply_states_;
     std::vector<DynamicSpeakerLoadState> dynamic_speaker_load_states_;
     std::vector<DynamicRelayState> dynamic_relay_states_;
+    std::vector<double> optocoupler_illumination_states_;
     std::vector<Control> controls_;
     std::vector<double> matrix_;
     std::vector<double> rhs_;

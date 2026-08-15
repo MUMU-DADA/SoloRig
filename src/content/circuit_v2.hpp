@@ -35,6 +35,7 @@ enum class CircuitComponentType {
     CoupledInductor,
     SpeakerLoad,
     Relay,
+    Optocoupler,
 };
 
 struct CircuitPotentiometerSpec {
@@ -287,6 +288,21 @@ struct CircuitRelayModel {
     double contact_gap{};
 };
 
+struct CircuitOptocouplerModel {
+    std::string kind{"generic-electrical"};
+    std::uint32_t model_version{1};
+    double dark_resistance_ohms{1.0e6};
+    double lit_resistance_ohms{100.0};
+    double emitter_threshold_volts{1.0};
+    double emitter_scale_volts{4.0};
+    double response_exponent{1.0};
+    double attack_seconds{0.01};
+    double release_seconds{0.1};
+    double maximum_drive_volts{5.0};
+    double initial_illumination{};
+    double emitter_resistance_ohms{220.0};
+};
+
 struct CircuitComponent {
     std::string id;
     CircuitComponentType type{CircuitComponentType::Resistor};
@@ -309,6 +325,7 @@ struct CircuitComponent {
     std::optional<CircuitCoupledInductorModel> coupled_inductor_model;
     std::optional<CircuitSpeakerLoadModel> speaker_load_model;
     std::optional<CircuitRelayModel> relay_model;
+    std::optional<CircuitOptocouplerModel> optocoupler_model;
     std::optional<double> primary_initial_current;
     std::optional<double> secondary_initial_current;
     std::optional<CircuitSwitchSpec> switch_spec;

@@ -190,4 +190,25 @@ CircuitNetlist PhaserTone(std::uint32_t oversampling) {
     return circuit;
 }
 
+CircuitNetlist OpticalHardware(std::uint32_t oversampling) {
+    auto circuit = Base({"emitter", "ldr", "out", "vcc", "0"}, "emitter", "out", oversampling);
+    circuit.supplies = {{.id = "detector-vcc", .positive_node = "vcc", .negative_node = "0",
+        .voltage = 5.0}};
+    CircuitComponent optocoupler{};
+    optocoupler.id = "opto";
+    optocoupler.type = CircuitComponentType::Optocoupler;
+    optocoupler.pins = {"emitter", "0", "ldr", "0"};
+    optocoupler.optocoupler_model = CircuitOptocouplerModel{
+        .kind = "generic-electrical", .model_version = 1U,
+        .dark_resistance_ohms = 1.0e6, .lit_resistance_ohms = 100.0,
+        .emitter_threshold_volts = 1.0, .emitter_scale_volts = 4.0,
+        .response_exponent = 1.0, .attack_seconds = 0.001,
+        .release_seconds = 0.01, .maximum_drive_volts = 5.0,
+        .initial_illumination = 0.0, .emitter_resistance_ohms = 220.0};
+    circuit.components = {optocoupler, Resistor("ldr_load", "ldr", "out", 1000.0),
+        Resistor("detector_feed", "vcc", "out", 1000.0),
+        Resistor("out_return", "out", "0", 10000.0)};
+    return circuit;
+}
+
 } // namespace solo_rig::m19c_fixtures

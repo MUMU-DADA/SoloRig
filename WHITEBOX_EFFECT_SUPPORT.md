@@ -11,8 +11,8 @@
 ### 当前状态覆盖说明（2026-08-15）
 
 - `a321a0f` 已提交 M18-D3a、M18-D3b/M19-A2 和 M19-B1 阶段 2b/3b；历史计划表中这些阶段的“未提交本地候选”文字为历史记录，不覆盖当前提交状态。
-- M19-C 当前为未提交本地候选：15 个代表性类别中 12 类具有可运行 generic 证据，Wah/Phaser、Chorus/Flanger 和真实 optical hardware 三类保持 stable refusal。
-- M19-C 最新验证为核心 `520/520`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `91a189c4eca94c8bae2439643f2a97ae`。
+- M19-C/M20-B4 当前已提交：16 个代表性类别全部具有可运行 generic 证据，包含 Wah、Phaser、Chorus/Flanger 和 caller-owned optical hardware 电气组合；这不等于商业型号或任意拓扑覆盖。
+- M20-B4 最新验证为核心 `538/538`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `ba897feda5a24b1782ae2da3901a6ec9`。
 
 ## 当前状态补充：M20-A1
 
@@ -24,6 +24,7 @@
 - M20-B1 已提交：`TypedVcoBbdClockedModel` 支持 caller-owned VCO/clocked BBD 模型与有界内部延迟反馈；最新验证为核心 `531/531`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过，manifest `7d64aa3710da46eca439c98450c6107d`。
 - M20-B2 已提交：`TypedLfoMnaRuntime` 支持 caller-owned generic LFO 通过 parameter binding 调制真实 MNA 电位器网络；最新验证为核心 `533/533`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过，manifest `6ad672c7e6824178b344d23ccea13a85`。
 - M20-B3 已提交：`TypedLfoMnaRuntime` 支持固定容量多 parameter binding，并驱动两级 caller-owned R/C Phaser MNA 网络；Phaser 已从 StableRefusal 提升为 RunnableGeneric；最新验证为核心 `534/534`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过，manifest `c99dfc1983874a6aaa2d63d2f4889d33`。
+- M20-B4 已提交：新增四端 caller-owned optical hardware 电气组件，emitter 电阻、LDR 受光电阻、attack/release 状态和 MNA 联合求解均进入同一 Circuit v2/MNA 契约；核心 `538/538`、CTest `5/5`、Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过，manifest `ba897feda5a24b1782ae2da3901a6ec9`。
 - 通用 fan-out、延迟反馈、JSON 和自动 MNA 绑定仍排除；D3b/M19-A2 单延迟反馈继续由专用路径承担。
 
 ## 状态口径
@@ -157,7 +158,7 @@
 | M20-B1 | caller-owned 动态时钟 BBD 与有界反馈组合 | 已提交：显式 VCO/BBD model payload、动态 clock、内部延迟 feedback、Reset 和非法模型拒绝；M19-C Chorus/Flanger 代表类提升为 RunnableGeneric；核心 `531/531`、CTest `5/5`、Validator `47/47`、manifest `7d64aa3710da46eca439c98450c6107d`。 |
 | M20-B2 | Wah/Phaser caller-owned 调制组合 | 已提交：Wah 已通过 `TypedLfoMnaRuntime` 完成 LFO → parameter binding → MNA Solve 的真实组合；M20-B2 时 M19-C 拆分为 16 类后 14 类 RunnableGeneric。 |
 | M20-B3 | Phaser 多级调制组合与 optical hardware 电气边界 | 已提交：固定容量多 binding 驱动两级 R/C dry/wet MNA 网络，Phaser 已提升为 RunnableGeneric；核心 `534/534`、CTest `5/5`、Validator `47/47`、manifest `c99dfc1983874a6aaa2d63d2f4889d33`。 |
-| M20-B4 | optical hardware 电气模型与代表性组合 | 准备开工：需要 emitter 电气端、LDR 受光电阻端和 MNA 联合求解的独立契约，不能复用单独 resistance 输出作为完成证据。 |
+| M20-B4 | optical hardware 电气模型与代表性组合 | 已提交：四端 `Optocoupler` 进入 Circuit v2 parser/Compile/Prepare/Solve/Reset；emitter 电气端驱动 LDR 受光电阻端，代表性 fixture 覆盖 192 kHz/4x 和稳定拒绝；不宣称商业光耦校准、SPICE/golden 或 reference-1to-1。 |
 | M20 | 性能与产品全量回归 | 192 kHz/过采样、CPU、延迟、无分配、稳定性、C ABI、VST3、UI 和 Validator 全量通过。 |
 
 ## 本地候选：M19-C 代表性 generic 单块/箱头覆盖审计
@@ -165,8 +166,8 @@
 ### 范围与证据
 
 - `fixtures/whitebox/m19c_representative_pedal_fixtures.*` 提供被动音色、二极管过载、BJT/JFET/MOSFET boost/fuzz 和 dynamic opamp 的 caller-owned MNA fixture；M19-A1/M19-A2/M19-B1 提供其余已授权 generic behavior、反馈和 tube-amp 代表链路。
-- `tests/m19c_validation_harness.*` 对 15 类统一检查 Compile、Prepare、有限非平凡输出、Reset、192 kHz/过采样和拒绝边界；当前 12 类为 RunnableGeneric，3 类为带明确原因的 StableRefusal。
-- M19-C 只证明代表性 generic 结构和拒绝边界，不证明完整效果器产品、商业硬件、SPICE/golden 或 `reference-1to-1`。三类 StableRefusal 必须在后续通用拓扑/行为图阶段实现，或经正式范围审查移出 Generic Whitebox v1。
+- `tests/m19c_validation_harness.*` 对代表性类别统一检查 Compile、Prepare、有限非平凡输出、Reset、192 kHz/过采样和拒绝边界；M20-B4 后当前 16 类均为 RunnableGeneric，剩余风险转为通用拓扑、商业模型与外部参考证据，而非把代表性 fixture 当成完整产品覆盖。
+- M19-C/M20-B4 只证明代表性 generic 结构和拒绝边界，不证明完整效果器产品、商业硬件、SPICE/golden 或 `reference-1to-1`；原先三类 StableRefusal 已通过 M20-B2/B3/B4 的代表性组合处理，通用拓扑与产品级外部证据仍未完成。
 
 ## M19-B1 阶段 1 审计结论
 

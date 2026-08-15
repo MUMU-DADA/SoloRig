@@ -302,6 +302,44 @@ RepresentativeEvidence ValidatePhaser() {
     return evidence;
 }
 
+RepresentativeEvidence ValidateOpticalHardware() {
+    RepresentativeEvidence evidence{.category = RepresentativeCategory::OpticalHardware,
+        .status = RepresentativeStatus::RunnableGeneric};
+    auto compiled = CompileMnaCircuit(m19c_fixtures::OpticalHardware(1U));
+    evidence.compiled = compiled.circuit.has_value();
+    if (!evidence.compiled) return evidence;
+    evidence.prepared = compiled.circuit->Prepare(48000.0);
+    if (!evidence.prepared) return evidence;
+    std::array<double, 32U> first{};
+    bool finite = true;
+    for (std::size_t index = 0U; index < first.size(); ++index) {
+        const auto result = compiled.circuit->Solve(index == 0U ? 0.0 : 5.0);
+        finite = finite && result.Succeeded() && std::isfinite(result.output_voltage);
+        first[index] = result.output_voltage;
+    }
+    evidence.finite_nontrivial = finite && first[0] != first[1];
+    compiled.circuit->Reset();
+    evidence.reset_deterministic = true;
+    for (std::size_t index = 0U; index < first.size(); ++index) {
+        const auto result = compiled.circuit->Solve(index == 0U ? 0.0 : 5.0);
+        if (!result.Succeeded() || result.output_voltage != first[index]) {
+            evidence.reset_deterministic = false;
+            break;
+        }
+    }
+    auto high_rate = CompileMnaCircuit(m19c_fixtures::OpticalHardware(4U));
+    evidence.sample_rate_and_oversampling = high_rate.circuit.has_value() &&
+        high_rate.circuit->Prepare(192000.0) && high_rate.circuit->Solve(5.0).Succeeded();
+    evidence.rejection_boundary = compiled.circuit->Solve(
+        std::numeric_limits<double>::quiet_NaN()).error == MnaSolveError::NonFinite;
+    if (!(evidence.finite_nontrivial && evidence.reset_deterministic &&
+          evidence.sample_rate_and_oversampling && evidence.rejection_boundary)) {
+        evidence.status = RepresentativeStatus::StableRefusal;
+        evidence.refusal_reason = "optical emitter/LDR MNA evidence refused";
+    }
+    return evidence;
+}
+
 RepresentativeEvidence ValidateTubeAmp() {
     RepresentativeEvidence evidence{.category = RepresentativeCategory::TubeAmp,
         .status = RepresentativeStatus::RunnableGeneric};
@@ -350,9 +388,7 @@ ValidateRepresentativeCoverage() {
         FromChain(RepresentativeCategory::OptocouplerResistance,
                   m19a1_validation::ValidateOptocouplerResistance()),
         ValidateFeedback(), ValidateTubeAmp(), ValidateWah(), ValidatePhaser(),
-        ValidateClocked(),
-        Refusal(RepresentativeCategory::OpticalHardware,
-                "no real optical electrical hardware model contract")};
+        ValidateClocked(), ValidateOpticalHardware()};
 }
 
 } // namespace solo_rig::m19c_validation

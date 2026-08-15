@@ -67,6 +67,7 @@ add_library(solo_rig_core STATIC
     src/dsp/generic_envelope.cpp
     src/dsp/generic_lfo.cpp
     src/dsp/generic_optocoupler.cpp
+    src/dsp/generic_optocoupler_mna.cpp
     src/dsp/generic_spring.cpp
     src/dsp/coupled_inductor.cpp
     src/dsp/nonlinear_transformer_core.cpp
@@ -314,6 +315,8 @@ if(BUILD_TESTING)
         tests/generic_optocoupler_tests.cpp
         tests/generic_optocoupler_binding_tests.cpp
         tests/generic_optocoupler_runtime_tests.cpp
+        tests/generic_optocoupler_mna_tests.cpp
+        tests/optocoupler_circuit_tests.cpp
         tests/generic_spring_tests.cpp
         tests/generic_spring_binding_tests.cpp
         tests/generic_spring_runtime_tests.cpp

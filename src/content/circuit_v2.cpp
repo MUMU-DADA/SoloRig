@@ -8,6 +8,7 @@
 #include "dsp/dynamic_speaker_load.hpp"
 #include "dsp/dynamic_relay.hpp"
 #include "dsp/dynamic_relay_routing.hpp"
+#include "dsp/generic_optocoupler_mna.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -120,6 +121,9 @@ std::optional<CircuitComponentType> ComponentType(std::string_view text) {
     }
     if (text == "relay") {
         return CircuitComponentType::Relay;
+    }
+    if (text == "optocoupler") {
+        return CircuitComponentType::Optocoupler;
     }
     if (text == "switch") {
         return CircuitComponentType::Switch;
@@ -364,6 +368,7 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         const bool is_coupled_inductor = *type == CircuitComponentType::CoupledInductor;
         const bool is_speaker_load = *type == CircuitComponentType::SpeakerLoad;
         const bool is_relay = *type == CircuitComponentType::Relay;
+        const bool is_optocoupler = *type == CircuitComponentType::Optocoupler;
         if ((Find(*component, "bjtModel") != nullptr && !is_bjt) ||
             (Find(*component, "jfetModel") != nullptr && !is_jfet) ||
             (Find(*component, "mosfetModel") != nullptr && !is_mosfet) ||
@@ -375,6 +380,7 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             (Find(*component, "coupledInductorModel") != nullptr && !is_coupled_inductor) ||
             (Find(*component, "speakerModel") != nullptr && !is_speaker_load) ||
             (Find(*component, "relayModel") != nullptr && !is_relay) ||
+            (Find(*component, "optocouplerModel") != nullptr && !is_optocoupler) ||
             (Find(*component, "primaryInitialCurrent") != nullptr && !is_coupled_inductor) ||
             (Find(*component, "secondaryInitialCurrent") != nullptr && !is_coupled_inductor) ||
             (Find(*component, "controlledSource") != nullptr && !is_controlled_source)) {
@@ -385,7 +391,8 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
             !((is_bjt || is_jfet || is_mosfet || is_triode || is_vari_mu) && pins->size() == 3U) &&
             !((is_pentode || is_beam_tetrode || is_coupled_inductor) && pins->size() == 4U) &&
             !(is_relay && (pins->size() == 4U || pins->size() == 5U || pins->size() == 8U ||
-                           pins->size() == 11U || pins->size() == 14U))) {
+                           pins->size() == 11U || pins->size() == 14U)) &&
+            !(is_optocoupler && pins->size() == 4U)) {
             return Failure(CircuitLoadError::InvalidPin);
         }
         for (const auto& pin : *pins) {
@@ -1226,6 +1233,57 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
                     .initial_velocity = *initial_velocity,
                     .initial_displacement = *initial_displacement};
             }
+        }
+        if (is_optocoupler) {
+            const auto* value = Find(*component, "optocouplerModel");
+            const auto* model = value == nullptr ? nullptr : value->AsObject();
+            const auto string = [model](std::string_view key) {
+                return model == nullptr ? std::nullopt : StringValue(Find(*model, key));
+            };
+            const auto number = [model](std::string_view key) {
+                return model == nullptr ? std::nullopt : NumberValue(Find(*model, key));
+            };
+            const auto kind = string("kind");
+            const auto model_version = model == nullptr ? std::nullopt :
+                UnsignedValue(Find(*model, "modelVersion"));
+            const auto dark_resistance = number("darkResistance");
+            const auto lit_resistance = number("litResistance");
+            const auto threshold = number("emitterThreshold");
+            const auto scale = number("emitterScale");
+            const auto exponent = number("responseExponent");
+            const auto attack = number("attackSeconds");
+            const auto release = number("releaseSeconds");
+            const auto maximum_drive = number("maximumDrive");
+            const auto initial_illumination = number("initialIllumination");
+            const auto emitter_resistance = number("emitterResistance");
+            const bool complete = model != nullptr && kind.has_value() && model_version.has_value() &&
+                dark_resistance.has_value() && lit_resistance.has_value() && threshold.has_value() &&
+                scale.has_value() && exponent.has_value() && attack.has_value() && release.has_value() &&
+                maximum_drive.has_value() && initial_illumination.has_value() && emitter_resistance.has_value();
+            const GenericOptocouplerMnaModel runtime_model{
+                .optical = {.dark_resistance_ohms = dark_resistance.value_or(0.0),
+                    .lit_resistance_ohms = lit_resistance.value_or(0.0),
+                    .emitter_threshold_volts = threshold.value_or(0.0),
+                    .emitter_scale_volts = scale.value_or(0.0),
+                    .response_exponent = exponent.value_or(0.0),
+                    .attack_seconds = attack.value_or(0.0), .release_seconds = release.value_or(0.0),
+                    .maximum_drive_volts = maximum_drive.value_or(0.0),
+                    .initial_illumination = initial_illumination.value_or(0.0)},
+                .emitter_resistance_ohms = emitter_resistance.value_or(0.0)};
+            if (!complete || *kind != "generic-electrical" || *model_version != 1U ||
+                parsed_component.model.has_value() || parsed_component.value.has_value() ||
+                parsed_component.tolerance.has_value() || parsed_component.initial.has_value() ||
+                !ValidateGenericOptocouplerMnaModel(runtime_model)) {
+                return Failure(CircuitLoadError::InvalidValue);
+            }
+            parsed_component.optocoupler_model = {
+                .kind = *kind, .model_version = *model_version,
+                .dark_resistance_ohms = *dark_resistance, .lit_resistance_ohms = *lit_resistance,
+                .emitter_threshold_volts = *threshold, .emitter_scale_volts = *scale,
+                .response_exponent = *exponent, .attack_seconds = *attack,
+                .release_seconds = *release, .maximum_drive_volts = *maximum_drive,
+                .initial_illumination = *initial_illumination,
+                .emitter_resistance_ohms = *emitter_resistance};
         }
         if (is_relay) {
             const auto* value = Find(*component, "relayModel");
