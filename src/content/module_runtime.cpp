@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -367,6 +368,7 @@ public:
     };
 
     static constexpr std::size_t kMaximumBindings = 64U;
+    static constexpr std::size_t kMaximumAudioPorts = 8U;
 
     MnaCircuitRuntime(std::uint32_t declared_latency_samples,
                       MnaPreparedCircuit blueprint,
@@ -374,6 +376,8 @@ public:
                       const std::vector<EffectParameter>& parameters)
         : declared_latency_samples_(declared_latency_samples), blueprint_(std::move(blueprint)),
           bindings_(std::move(bindings)) {
+        input_port_count_ = blueprint_.InputCount();
+        output_port_count_ = blueprint_.OutputCount();
         for (std::size_t index = 0; index < bindings_.size(); ++index) {
             const auto parameter = std::find_if(parameters.begin(), parameters.end(),
                 [this, index](const EffectParameter& item) {
@@ -387,7 +391,29 @@ public:
         if (!format.Validate().empty()) {
             return false;
         }
+        multi_port_circuit_.reset();
         channel_circuits_.clear();
+
+        if (input_port_count_ != output_port_count_ || input_port_count_ == 0U ||
+            input_port_count_ > kMaximumAudioPorts) {
+            prepared_ = false;
+            return false;
+        }
+        if (input_port_count_ > 1U) {
+            if (format.channel_count != input_port_count_) {
+                prepared_ = false;
+                return false;
+            }
+            multi_port_circuit_.emplace(blueprint_);
+            if (!multi_port_circuit_->Prepare(format.sample_rate_hz)) {
+                multi_port_circuit_.reset();
+                prepared_ = false;
+                return false;
+            }
+            prepared_ = true;
+            return true;
+        }
+
         channel_circuits_.reserve(format.channel_count);
         for (std::uint32_t channel = 0; channel < format.channel_count; ++channel) {
             channel_circuits_.push_back(blueprint_);
@@ -402,6 +428,10 @@ public:
     }
 
     void Process(const AudioBuffer& input, AudioBuffer& output, std::uint32_t sample_count) noexcept override {
+        if (multi_port_circuit_.has_value()) {
+            ProcessMultiPort(input, output, sample_count);
+            return;
+        }
         if (!prepared_ || sample_count > input.Capacity() || sample_count > output.Capacity() ||
             input.ChannelCount() != channel_circuits_.size() || output.ChannelCount() != channel_circuits_.size()) {
             return;
@@ -457,8 +487,56 @@ public:
     }
 
 private:
+    void ProcessMultiPort(const AudioBuffer& input, AudioBuffer& output, std::uint32_t sample_count) noexcept {
+        if (!prepared_ || !multi_port_circuit_.has_value() || sample_count > input.Capacity() ||
+            sample_count > output.Capacity() || input.ChannelCount() != input_port_count_ ||
+            output.ChannelCount() != output_port_count_) {
+            return;
+        }
+
+        std::array<float, kMaximumBindings> targets{};
+        std::array<double, kMaximumAudioPorts> inputs{};
+        for (std::uint32_t sample = 0; sample < sample_count; ++sample) {
+            for (std::size_t binding = 0; binding < bindings_.size(); ++binding) {
+                targets[binding] = targets_[binding].load(std::memory_order_acquire);
+            }
+            bool controls_valid = true;
+            for (std::size_t binding = 0; binding < bindings_.size(); ++binding) {
+                if (!multi_port_circuit_->SetControlTarget(bindings_[binding].control_index, targets[binding])) {
+                    controls_valid = false;
+                    break;
+                }
+            }
+            if (!controls_valid) {
+                for (std::size_t port = 0; port < output_port_count_; ++port) {
+                    output.ChannelData(static_cast<std::uint32_t>(port))[sample] = 0.0F;
+                }
+                continue;
+            }
+            for (std::size_t port = 0; port < input_port_count_; ++port) {
+                inputs[port] = input.ChannelData(static_cast<std::uint32_t>(port))[sample];
+            }
+            const auto solved = multi_port_circuit_->Solve(
+                std::span<const double>(inputs.data(), input_port_count_));
+            if (!solved.Succeeded()) {
+                for (std::size_t port = 0; port < output_port_count_; ++port) {
+                    output.ChannelData(static_cast<std::uint32_t>(port))[sample] = 0.0F;
+                }
+                continue;
+            }
+            for (std::size_t port = 0; port < output_port_count_; ++port) {
+                const auto value = multi_port_circuit_->OutputValue(port);
+                output.ChannelData(static_cast<std::uint32_t>(port))[sample] =
+                    value.has_value() && std::isfinite(*value) ? static_cast<float>(*value) : 0.0F;
+            }
+        }
+    }
+
     std::uint32_t declared_latency_samples_{};
     MnaPreparedCircuit blueprint_;
+    std::size_t input_port_count_{};
+    std::size_t output_port_count_{};
+    std::optional<MnaPreparedCircuit> multi_port_circuit_;
     std::vector<MnaPreparedCircuit> channel_circuits_;
     std::vector<Binding> bindings_;
     std::array<std::atomic<float>, kMaximumBindings> targets_{};
@@ -597,6 +675,34 @@ std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> Create
     if (!compiled.circuit.has_value()) {
         return compiled.error == MnaCompileError::UnsupportedComponent ? ModuleRuntimeError::UnsupportedCircuit
                                                                         : ModuleRuntimeError::UnsupportedAnalogTopology;
+    }
+    if (compiled.circuit->InputCount() == 0U ||
+        compiled.circuit->InputCount() != compiled.circuit->OutputCount() ||
+        compiled.circuit->InputCount() > MnaCircuitRuntime::kMaximumAudioPorts) {
+        return ModuleRuntimeError::UnsupportedPortLayout;
+    }
+    if (compiled.circuit->InputCount() > 1U) {
+        const auto descriptor_input_count = static_cast<std::size_t>(std::count_if(
+            package.descriptor.ports.begin(), package.descriptor.ports.end(),
+            [](const EffectPort& port) { return port.direction == PortDirection::Input; }));
+        const auto descriptor_output_count = static_cast<std::size_t>(std::count_if(
+            package.descriptor.ports.begin(), package.descriptor.ports.end(),
+            [](const EffectPort& port) { return port.direction == PortDirection::Output; }));
+        if (descriptor_input_count != compiled.circuit->InputCount() ||
+            descriptor_output_count != compiled.circuit->OutputCount()) {
+            return ModuleRuntimeError::UnsupportedPortLayout;
+        }
+        for (const auto& circuit_port : circuit.ports) {
+            const auto descriptor_port = std::find_if(package.descriptor.ports.begin(), package.descriptor.ports.end(),
+                [&circuit_port](const EffectPort& port) {
+                    const auto direction = circuit_port.direction == CircuitPortDirection::Input
+                        ? PortDirection::Input : PortDirection::Output;
+                    return port.id == circuit_port.id && port.direction == direction;
+                });
+            if (descriptor_port == package.descriptor.ports.end() || descriptor_port->max_channels != 1U) {
+                return ModuleRuntimeError::UnsupportedPortLayout;
+            }
+        }
     }
     if (circuit.parameter_bindings.size() > MnaCircuitRuntime::kMaximumBindings) {
         return ModuleRuntimeError::InvalidInitialParameterValue;

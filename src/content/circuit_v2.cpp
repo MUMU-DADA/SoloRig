@@ -252,9 +252,7 @@ CircuitLoadResult ParseCircuitV2Json(std::string_view source) {
         has_output = has_output || *direction == CircuitPortDirection::Output;
         circuit.ports.push_back({.id = *id, .direction = *direction, .node = *node});
     }
-    if (!has_output || std::count_if(circuit.ports.begin(), circuit.ports.end(), [](const CircuitPort& port) {
-            return port.direction == CircuitPortDirection::Input;
-        }) > 1) {
+    if (!has_output) {
         return Failure(CircuitLoadError::InvalidField);
     }
     static_cast<void>(has_input);

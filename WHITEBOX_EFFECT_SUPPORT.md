@@ -15,7 +15,8 @@
 - M20-B4 已提交时的验证为核心 `538/538`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `ba897feda5a24b1782ae2da3901a6ec9`。
 - M20-C1 已提交：typed behavior graph 的 signal 端口支持固定容量多连接；同域 fan-in 在 runtime 求和，fan-out 复制到多个下游/边界输出；编译阶段仍拒绝非法域、循环、缺端口和容量超限。最新验证为核心 `540/540`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `a179267303ca48b196fa93a57e806bc7`。
 - M20-C2 已提交：通用 typed behavior → MNA control binding composite 将 control/resistance 输出经调用方显式范围映射写入预编译 MNA 控制槽，覆盖 envelope/LFO/optocoupler 类跨域组合；未宣称任意多端 MNA 或商业 sidechain。最新验证为核心 `545/545`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `ed44119e36484516814c808b0bbd9d39`。
-- M22-A1 已形成待提交候选：MNA 编译/求解器支持固定容量多输入、多输出端口，新增 span 输入和输出快照，旧单输入 `Solve(double)` 保持兼容；双输入双输出电阻网络、输入数量、非有限和 192 kHz 边界通过核心回归。外部 module runtime、typed behavior composite 和任意多端口 sidechain 尚未接入。
+- M22-A1 已提交 `b75200d`：MNA 编译/求解器支持固定容量多输入、多输出端口，新增 span 输入和输出快照，旧单输入 `Solve(double)` 保持兼容；双输入双输出电阻网络、输入数量、非有限和 192 kHz 边界通过核心回归。
+- M22-B1 已提交：circuit v2 parser 接受多输入端口；外部 MNA runtime 支持“输入端口数=输出端口数、每端口单声道、按 AudioBuffer 声道序映射”的固定容量闭环，并拒绝空输入、不等数量、超过 8 端口或 descriptor 不匹配。命名端口图、独立 sidechain、不同 I/O 数量和任意多端实时图仍未接入。提交时核心为 `555/555`，构建 manifest MD5 为 `f6de0cfd474ade51bb033e50939f6e53`。
 
 ## M20-C3 产品级审计与白盒完成计划（当前进行中）
 
@@ -33,24 +34,30 @@
 
 1. **M20-C3：产品性能与宿主真实性**。已完成 AudioGraph 节点级实测 block load 与控制线程快照；仍需把快照接入 UI/ASIO 性能面板并提供过载状态。明确区分图级实测与模块目录估算；补齐 VST3/独立程序生命周期、ASIO 设备枚举与真实回调，没有 SDK 或硬件条件时只能保留 `blocked`，不能用模拟路由测试替代。
 2. **M21：外部模块可运行闭环**。定义并冻结模块包版本、逻辑/电路/皮肤三层契约；已补齐当前九种声明数字操作的受限 runtime。每个外部包必须经过 Parse → Compile/Prepare → Process → Reset，并验证参数、文件、错误和实时线程边界；任意数字图、sidechain 和多端口语义仍属于后续 M22。
-3. **M22：通用白盒拓扑**。M22-A1 已先完成 MNA 固定容量多输入/多输出边界；后续仍需把端口数据接入 runtime/typed behavior，扩展经过审计的阶段化接口，覆盖串联、并联、控制、sidechain、反馈和电源/负载组合；每个不支持的拓扑必须稳定拒绝，不能靠固定产品识别或静默数字替代。
+3. **M22：通用白盒拓扑**。M22-A1 已完成并提交；M22-B1 已先把受限多端口契约接入外部 MNA runtime，但仍需把端口数据接入 typed behavior/AudioGraph 的命名端口，扩展经过审计的阶段化接口，覆盖串联、并联、控制、sidechain、反馈和电源/负载组合；每个不支持的拓扑必须稳定拒绝，不能靠固定产品识别或静默数字替代。
 4. **M23：参考与覆盖集**。为选定的失真、滤波/调制、压缩、BBD、混响、电子管前后级和箱头负载建立可授权的网表、元件/模型版本、供电/负载条件和测量基线；预先固定静态、频响、动态、谐波/互调、旋钮扫动误差阈值，逐类生成 golden/SPICE/实机证据。
 5. **Release 白盒门**。只有在支持矩阵中的每一类同时具备可运行路径、稳定拒绝边界、实时无分配/无锁/无文件证明、独立参考证据和全量回归，且真实宿主/ASIO 条件通过时，才可称为“白盒完成”。generic self-authored 模型仍需明确标注为 generic，不得自动升级为商业型号 `reference-1to1`。
 
 上述目标是完成条件，不是当前完成声明；M20-C3 仍是进行中，M21 已完成第一阶段数字操作闭环但尚未完成完整外部包/拓扑验收，M22-M23 尚未开始验收。
 
-### M21 第一阶段：外部数字操作 runtime（已实现，待里程碑提交）
+### M21 第一阶段：外部数字操作 runtime（已提交 `ec21511`）
 
 - `DigitalFilter` 是预分配的一阶低通，操作参数按 Hz 解释并在 Prepare 时严格限制到 Nyquist 内。
 - `DigitalDynamics` 是有界 envelope compressor/limiter，操作参数为 `[0, 1]` 的 amount；零值透明，满值为高比例限制。
 - `DigitalPitchShift` 是固定容量双 grain 处理器，操作参数为 `[-24, 24]` 半音；grain/ring 状态在 Prepare 分配，Process 不分配、不读文件、不解析 JSON。
-- M21 新增独立 DSP 测试、外部 package 集成测试和参数拒绝测试；当前增量核心测试为 `552/552`，CTest `5/5`，VST3 Validator `47/47`。这些测试证明 self-authored generic 算法的运行边界，不证明商业算法、音质 1:1 或任意数字拓扑。
+- M21-A1 已提交 `ec21511`：新增独立 DSP 测试、外部 package 集成测试和参数拒绝测试；提交时核心测试为 `552/552`，CTest `5/5`，VST3 Validator `47/47`。这些测试证明 self-authored generic 算法的运行边界，不证明商业算法、音质 1:1 或任意数字拓扑。
 
-### M22-A1 第一阶段：MNA 固定容量多端口边界（已实现，待里程碑提交）
+### M22-A1 第一阶段：MNA 固定容量多端口边界（已提交 `b75200d`）
 
 - `MnaPreparedCircuit` 预分配多个输入端口电压源分支和多个输出测量节点；`Solve(std::span<const double>)` 不在实时路径分配，`OutputValue(index)` 返回最近一次已求解端口值。
 - 旧单输入电路继续使用 `Solve(double)`；多输入电路通过错误 `InvalidInputCount` 拒绝错误调用，非有限输入仍返回 `NonFinite`。
 - 当前证据是双输入双输出 passive fixture，不宣称外部 package、typed behavior、sidechain 或任意多端网络已经消费该接口。
+
+### M22-B1 第一阶段：外部 MNA 多端口 runtime（已提交）
+
+- parser 不再把第二个输入端口视为非法；runtime 在 Prepare 预留单个多端 MNA 状态，Process 每个采样以固定 `std::array` 收集端口输入，调用 `Solve(span)` 并按输出端口写回 AudioBuffer 声道。
+- 合同限定输入/输出端口数量相等、最多 8 个、每个端口单声道；descriptor 必须逐端匹配 circuit port，且多端口 descriptor 的 `maxChannels` 必须为 1。旧单输入/单输出模块继续按每音频声道独立电路运行。
+- 双输入双输出外部 package 已通过 192 kHz 运行测试，证明 Parse → Compile → Prepare → Process 的固定容量闭环；不同 I/O 数量、命名端口图、typed behavior、sidechain、反馈和多设备通道路由仍是后续门禁。
 
 ## 当前状态补充：M20-A1
 
@@ -198,6 +205,8 @@
 | M20-B3 | Phaser 多级调制组合与 optical hardware 电气边界 | 已提交：固定容量多 binding 驱动两级 R/C dry/wet MNA 网络，Phaser 已提升为 RunnableGeneric；核心 `534/534`、CTest `5/5`、Validator `47/47`、manifest `c99dfc1983874a6aaa2d63d2f4889d33`。 |
 | M20-B4 | optical hardware 电气模型与代表性组合 | 已提交：四端 `Optocoupler` 进入 Circuit v2 parser/Compile/Prepare/Solve/Reset；emitter 电气端驱动 LDR 受光电阻端，代表性 fixture 覆盖 192 kHz/4x 和稳定拒绝；不宣称商业光耦校准、SPICE/golden 或 reference-1to-1。 |
 | M20-C3 | 性能与产品全量回归 | 部分完成：AudioGraph 节点实测 load、192 kHz/过采样、延迟、实时契约、C ABI、VST3、UI 和 Validator 有回归证据；独立程序 UI 仍仅展示静态 CPU 估算，真实 ASIO 和 SPICE/golden/实机证据仍未完成。 |
+| M22-A1 | MNA 固定容量多输入/多输出求解边界 | 已提交 `b75200d`：span 输入、多个输出快照、旧单输入兼容和稳定错误边界；不等于 runtime/typed behavior/sidechain 已完成。 |
+| M22-B1 | 外部 MNA 多端口 runtime 第一阶段 | 已提交：等数量单声道端口按 AudioBuffer 声道序映射，最多 8 端口，Parse/Compile/Prepare/Process 和 descriptor 拒绝边界有测试；命名端口图和任意多端拓扑仍未完成。 |
 
 ## 本地候选：M19-C 代表性 generic 单块/箱头覆盖审计
 
@@ -209,7 +218,7 @@
 
 ## M19-B1 阶段 1 审计结论
 
-- `circuit.json v2` 的真实表达是一个版本化 netlist：`nodes`/`ports`/`supplies`/`components`/`parameter_bindings` 和 solver 配置。`CompileMnaCircuit` 当前只接受至多一个 input port 和一个 output port；器件之间通过共享 node 名称连接，没有独立的前级、功放、输出变压器或 speaker stage/route 类型。
+- `circuit.json v2` 的真实表达是一个版本化 netlist：`nodes`/`ports`/`supplies`/`components`/`parameter_bindings` 和 solver 配置。M22-A1/B1 已解除单 input 的 parser/求解/runtime 限制，但仍没有独立的前级、功放、输出变压器或 speaker stage/route 类型，也没有 named-port AudioGraph contract。
 - generic triode 使用 `[plate, grid, cathode]` 三节点 KCL/Jacobian，无 branch unknown 或持久动态 history；pentode 与 beam tetrode 使用 `[plate, screen, grid, cathode]` 四节点 KCL/Jacobian，同样没有独立 branch。Compile 会拒绝控制节点复用、缺 pin、错误模型或未授权 model reference。
 - C10a `rectified-reservoir` supply 是 `[positive, negative]` 两端电压源 branch unknown，Newton stamp 读取 branch current 并维护 Sag/ripple phase；Prepare 预分配 state，Reset 恢复 `initialSag`，失败稳定返回 `NonFinite`、`SingularMatrix` 或 `NonConvergent`。
 - C8b `saturating-hysteretic` coupled-inductor/core 使用四个绕组节点、primary/secondary 两个 branch unknown，以及独立 flux/hysteresis history；C10b electrodynamic speaker 使用两节点动态 branch unknown 和 current/velocity/displacement history。两者均在同一 MNA Newton/BE/oversampling 路径中 Prepare/Reset，并遵守 Solve 的无分配、无锁、无文件边界。

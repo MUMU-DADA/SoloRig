@@ -157,6 +157,59 @@ TEST_CASE("External analog v2 module uses the unified linear MNA runtime") {
     REQUIRE(std::fabs(output.ChannelData(0)[0] - 0.5F) < 1.0e-6F);
 }
 
+TEST_CASE("External analog v2 module maps fixed multiple ports to AudioBuffer channels") {
+    const auto directory = CreateRuntimePackage(R"({
+        "schemaVersion":1,
+        "moduleId":"org.mumu-dada.solorig.external-multi-port-divider",
+        "displayName":"External Multi Port Divider",
+        "category":"analog-circuit",
+        "logicFile":"logic/main.json",
+        "ports":[
+          {"id":"input-a","direction":"input","maxChannels":1},
+          {"id":"input-b","direction":"input","maxChannels":1},
+          {"id":"output-a","direction":"output","maxChannels":1},
+          {"id":"output-b","direction":"output","maxChannels":1}]
+    })",
+                                                R"({
+        "version":2,"schema":"circuit","referenceGround":"0",
+        "nodes":["in1","in2","out1","out2","0"],
+        "ports":[
+          {"id":"input-a","direction":"input","node":"in1"},
+          {"id":"input-b","direction":"input","node":"in2"},
+          {"id":"output-a","direction":"output","node":"out1"},
+          {"id":"output-b","direction":"output","node":"out2"}],
+        "components":[
+          {"id":"r1","type":"resistor","pins":["in1","out1"],"value":1000},
+          {"id":"r2","type":"resistor","pins":["in2","out2"],"value":1000},
+          {"id":"load1","type":"resistor","pins":["out1","0"],"value":1000},
+          {"id":"load2","type":"resistor","pins":["out2","0"],"value":1000}],
+        "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    const auto package = solo_rig::LoadModulePackage(directory);
+    RemoveRuntimePackage(directory);
+    REQUIRE(package.package.has_value());
+    auto invalid_descriptor_package = *package.package;
+    invalid_descriptor_package.descriptor.ports.back().max_channels = 2U;
+    const auto invalid_runtime = solo_rig::CreateModuleRuntime(invalid_descriptor_package);
+    REQUIRE(std::holds_alternative<solo_rig::ModuleRuntimeError>(invalid_runtime));
+    REQUIRE(std::get<solo_rig::ModuleRuntimeError>(invalid_runtime) ==
+            solo_rig::ModuleRuntimeError::UnsupportedPortLayout);
+    auto runtime = solo_rig::CreateModuleRuntime(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    solo_rig::AudioBuffer input(2, 8);
+    solo_rig::AudioBuffer output(2, 8);
+    input.ChannelData(0)[0] = 1.0F;
+    input.ChannelData(1)[0] = 0.5F;
+    REQUIRE(!processor->Prepare(TestFormat()));
+    auto multi_port_format = TestFormat();
+    multi_port_format.channel_count = 2U;
+    REQUIRE(processor->Prepare(multi_port_format));
+    processor->Process(input, output, 1);
+    REQUIRE(std::fabs(output.ChannelData(0)[0] - 0.5F) < 1.0e-6F);
+    REQUIRE(std::fabs(output.ChannelData(1)[0] - 0.25F) < 1.0e-6F);
+}
+
 TEST_CASE("External analog v2 module uses the prepared nonlinear diode MNA runtime") {
     const auto directory = CreateRuntimePackage(R"({
         "schemaVersion":1,

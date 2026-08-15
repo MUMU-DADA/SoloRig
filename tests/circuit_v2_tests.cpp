@@ -78,6 +78,29 @@ TEST_CASE("circuit v2 parses the versioned contract and tolerates unknown metada
     REQUIRE(result.circuit->solver.convergence.max_iterations == 8U);
 }
 
+TEST_CASE("circuit v2 accepts multiple input and output ports") {
+    const auto result = solo_rig::ParseCircuitV2Json(R"({
+      "version":2,"schema":"circuit","referenceGround":"0",
+      "nodes":["in1","in2","out1","out2","0"],
+      "ports":[
+        {"id":"input-a","direction":"input","node":"in1"},
+        {"id":"input-b","direction":"input","node":"in2"},
+        {"id":"output-a","direction":"output","node":"out1"},
+        {"id":"output-b","direction":"output","node":"out2"}],
+      "components":[
+        {"id":"r1","type":"resistor","pins":["in1","out1"],"value":1000},
+        {"id":"r2","type":"resistor","pins":["in2","out2"],"value":1000},
+        {"id":"l1","type":"resistor","pins":["out1","0"],"value":1000},
+        {"id":"l2","type":"resistor","pins":["out2","0"],"value":1000}],
+      "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}
+    })");
+    REQUIRE(result.errors.empty());
+    REQUIRE(result.circuit.has_value());
+    REQUIRE(std::count_if(result.circuit->ports.begin(), result.circuit->ports.end(), [](const auto& port) {
+        return port.direction == solo_rig::CircuitPortDirection::Input;
+    }) == 2U);
+}
+
 TEST_CASE("circuit v2 parses supplies controls and measurement metadata") {
     const auto result = solo_rig::ParseCircuitV2Json(R"({
       "version":2,"schema":"circuit","referenceGround":"0","nodes":["a","b","0"],

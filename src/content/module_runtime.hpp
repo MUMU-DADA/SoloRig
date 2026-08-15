@@ -19,6 +19,7 @@ enum class ModuleRuntimeError {
     UnsupportedDigitalOperation,
     InvalidDigitalTopology,
     InvalidInitialParameterValue,
+    UnsupportedPortLayout,
     UnsupportedCircuit,
 };
 
