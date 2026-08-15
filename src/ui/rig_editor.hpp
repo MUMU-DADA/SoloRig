@@ -45,6 +45,7 @@ struct PedalSkinDefinition {
 struct RigEditorNode {
     std::string instance_id;
     std::string module_id;
+    PedalSkinDefinition skin;
     EditorRect bounds;
     bool selected{};
     bool unresolved{};
@@ -176,6 +177,7 @@ public:
 
 private:
     void RebuildScene();
+    void RebuildImportedSkins();
     void ApplyPreset(RigPreset preset,
                      std::optional<std::filesystem::path> source,
                      bool dirty,
@@ -211,6 +213,7 @@ private:
     std::string audio_status_{"ASIO backend not configured/available"};
     std::string resource_status_{"No external resource imported"};
     std::map<std::string, ModulePackage, std::less<>> imported_packages_;
+    std::map<std::string, PedalSkinDefinition, std::less<>> imported_skins_;
     std::vector<ModuleCatalogEntry> catalog_;
     std::vector<std::string> unresolved_nodes_;
     struct MeasuredNodePerformance {

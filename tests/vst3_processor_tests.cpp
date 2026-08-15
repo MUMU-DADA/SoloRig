@@ -3,6 +3,7 @@
 #include "vst3/solo_rig_processor.h"
 #include "vst3/solo_rig_ids.h"
 #include "core/realtime_contract.hpp"
+#include "content/preset.hpp"
 
 #include "base/source/fstreamer.h"
 #include "public.sdk/source/common/memorystream.h"
@@ -11,6 +12,11 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <string_view>
 #include <thread>
 
 namespace {
@@ -43,7 +49,8 @@ void StateStream(Steinberg::MemoryStream& stream,
                  float output_gain,
                  Steinberg::int32 bypass,
                  float drive,
-                 Steinberg::int32 version = 2) {
+                 Steinberg::int32 version = 2,
+                 std::string_view preset_json = {}) {
     Steinberg::IBStreamer writer(&stream, kLittleEndian);
     REQUIRE(writer.writeInt32u(solo_rig::vst3::kStateMagic));
     REQUIRE(writer.writeInt32(version));
@@ -52,8 +59,46 @@ void StateStream(Steinberg::MemoryStream& stream,
     if (version >= 2) {
         REQUIRE(writer.writeFloat(drive));
     }
+    if (version >= 3) {
+        REQUIRE(writer.writeInt32u(static_cast<Steinberg::uint32>(preset_json.size())));
+        if (!preset_json.empty()) {
+            REQUIRE(writer.writeRaw(preset_json.data(), preset_json.size()) == preset_json.size());
+        }
+    }
     Steinberg::int64 position = 0;
     REQUIRE(stream.seek(0, Steinberg::IBStream::kIBSeekSet, &position) == Steinberg::kResultTrue);
+}
+
+std::filesystem::path WriteTestImpulseResponse() {
+    const auto path = std::filesystem::temp_directory_path() / "solorig-vst3-state-ir.wav";
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    const auto write_u16 = [&output](std::uint16_t value) {
+        const std::uint8_t bytes[] = {static_cast<std::uint8_t>(value & 0xFFU),
+                                      static_cast<std::uint8_t>((value >> 8U) & 0xFFU)};
+        output.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+    };
+    const auto write_u32 = [&output](std::uint32_t value) {
+        const std::uint8_t bytes[] = {static_cast<std::uint8_t>(value & 0xFFU),
+                                      static_cast<std::uint8_t>((value >> 8U) & 0xFFU),
+                                      static_cast<std::uint8_t>((value >> 16U) & 0xFFU),
+                                      static_cast<std::uint8_t>((value >> 24U) & 0xFFU)};
+        output.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+    };
+    output.write("RIFF", 4);
+    write_u32(40U);
+    output.write("WAVEfmt ", 8);
+    write_u32(16U);
+    write_u16(1U);
+    write_u16(1U);
+    write_u32(48000U);
+    write_u32(96000U);
+    write_u16(2U);
+    write_u16(16U);
+    output.write("data", 4);
+    write_u32(4U);
+    write_u16(32767U);
+    write_u16(0U);
+    return path;
 }
 
 std::array<float, 8> ProcessBlock(SoloRigProcessor& processor,
@@ -231,6 +276,35 @@ TEST_CASE("VST3 state publication is race-safe while processing continues") {
     for (std::size_t index = 0; index < final_output.size(); ++index) {
         REQUIRE(std::fabs(final_output[index] - expected_output[index]) < 1.0e-6F);
     }
+}
+
+TEST_CASE("VST3 state restores a direct external IR preset before setup") {
+    const auto ir_path = WriteTestImpulseResponse();
+    solo_rig::RigPreset preset{
+        .preset_id = "vst3-ir-state",
+        .name = "VST3 IR State",
+        .nodes = {{.instance_id = "ir-1",
+                   .module_id = "org.mumu-dada.solorig.imported.state-ir",
+                   .layout_x = 0.0,
+                   .layout_y = 0.0}},
+        .external_module_packages = {{.module_id = "org.mumu-dada.solorig.imported.state-ir",
+                                      .root_directory = ir_path.parent_path(),
+                                      .source_kind = solo_rig::ExternalModuleSourceKind::ImpulseResponse,
+                                      .asset_path = ir_path}},
+    };
+    const auto serialized = solo_rig::SerializePreset(preset);
+
+    SoloRigProcessor processor;
+    Steinberg::MemoryStream state;
+    StateStream(state, 0.5F, 0, 0.0F, 3, serialized);
+    REQUIRE(processor.setState(&state) == Steinberg::kResultOk);
+    Configure(processor);
+    const auto output = ProcessBlock(processor, 0.25F);
+    REQUIRE(std::isfinite(output.front()));
+    REQUIRE(output.front() > 0.20F);
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(ir_path, cleanup_error);
 }
 
 TEST_CASE("VST3 processing keeps the shared C++ realtime contract") {

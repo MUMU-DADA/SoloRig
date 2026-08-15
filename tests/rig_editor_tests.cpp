@@ -153,11 +153,24 @@ TEST_CASE("RigEditor explicitly validates an external module package resource") 
             "displayName": "Editor Package",
             "category": "analog-circuit",
             "logicFile": "logic/circuit.json",
+            "skinFile": "ui/pedal.json",
             "ports": [
                 {"id":"input","direction":"input","maxChannels":1},
                 {"id":"output","direction":"output","maxChannels":1}
             ],
             "parameters": []
+        })";
+        std::filesystem::create_directories(directory / "ui");
+        std::ofstream skin(directory / "ui/pedal.json", std::ios::binary | std::ios::trunc);
+        skin << R"({
+            "schemaVersion": 1,
+            "id": "editor.package.skin",
+            "controls": {
+                "knob": "package-knob",
+                "toggle": "package-toggle",
+                "button": "package-button",
+                "footswitch": "package-footswitch"
+            }
         })";
         std::ofstream logic(directory / "logic/circuit.json", std::ios::binary | std::ios::trunc);
         logic << R"({
@@ -194,6 +207,8 @@ TEST_CASE("RigEditor explicitly validates an external module package resource") 
     REQUIRE(restored.Catalog().size() == 3U);
     REQUIRE(restored.AddNode("org.mumu-dada.solorig.editor-package", "editor-package-1", 600.0, 160.0));
     REQUIRE(!restored.Scene().nodes.back().unresolved);
+    REQUIRE(restored.Scene().nodes.back().skin.id == "editor.package.skin");
+    REQUIRE(restored.Scene().nodes.back().skin.footswitch == "package-footswitch");
     std::filesystem::remove(preset_path, cleanup);
     std::filesystem::remove_all(directory, cleanup);
 }

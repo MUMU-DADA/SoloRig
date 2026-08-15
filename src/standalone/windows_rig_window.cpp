@@ -282,7 +282,8 @@ void Win32RigWindow::Paint() {
                                             static_cast<float>(node.bounds.x + node.bounds.width - 16.0 * scene.dpi_scale),
                                             static_cast<float>(node.bounds.y + 48.0 * scene.dpi_scale));
         target->DrawTextW(title.c_str(), static_cast<UINT32>(title.size()), AsTextFormat(text_format_), title_rect, text);
-        const auto controls = Widen("  knob   knob   knob\n  footswitch");
+        const auto controls = Widen("knob: " + node.skin.knob + "   toggle: " + node.skin.toggle +
+                                    "\nbutton: " + node.skin.button + "   footswitch: " + node.skin.footswitch);
         const auto control_rect = D2D1::RectF(static_cast<float>(node.bounds.x + 16.0 * scene.dpi_scale),
                                               static_cast<float>(node.bounds.y + 64.0 * scene.dpi_scale),
                                               static_cast<float>(node.bounds.x + node.bounds.width - 16.0 * scene.dpi_scale),

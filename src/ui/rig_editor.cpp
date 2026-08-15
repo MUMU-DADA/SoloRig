@@ -35,6 +35,45 @@ std::optional<std::string> StringField(const JsonValue::Object& object, std::str
     return value != nullptr && value->AsString() != nullptr ? std::optional<std::string>(*value->AsString()) : std::nullopt;
 }
 
+std::optional<PedalSkinDefinition> ReadPedalSkinFile(const std::filesystem::path& source) {
+    std::error_code file_error;
+    if (!std::filesystem::is_regular_file(source, file_error) || file_error) {
+        return std::nullopt;
+    }
+    std::ifstream input(source, std::ios::binary);
+    if (!input) {
+        return std::nullopt;
+    }
+    const std::string contents((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    const auto parsed = ParseJson(contents);
+    if (!parsed.value.has_value() || parsed.value->AsObject() == nullptr) {
+        return std::nullopt;
+    }
+    const auto& object = *parsed.value->AsObject();
+    const auto schema = Find(object, "schemaVersion");
+    const auto id = StringField(object, "id");
+    const auto* controls = Find(object, "controls");
+    if (schema == nullptr || schema->AsNumber() == nullptr || *schema->AsNumber() != 1.0 || !id.has_value() ||
+        controls == nullptr || controls->AsObject() == nullptr || id->empty()) {
+        return std::nullopt;
+    }
+    const auto knob = StringField(*controls->AsObject(), "knob");
+    const auto toggle = StringField(*controls->AsObject(), "toggle");
+    const auto button = StringField(*controls->AsObject(), "button");
+    const auto footswitch = StringField(*controls->AsObject(), "footswitch");
+    if (!knob.has_value() || !toggle.has_value() || !button.has_value() || !footswitch.has_value() ||
+        knob->empty() || toggle->empty() || button->empty() || footswitch->empty()) {
+        return std::nullopt;
+    }
+    return PedalSkinDefinition{
+        .id = *id,
+        .knob = *knob,
+        .toggle = *toggle,
+        .button = *button,
+        .footswitch = *footswitch,
+    };
+}
+
 std::vector<ModuleCatalogEntry> BuiltinCatalog() {
     return {
         {.module_id = "org.mumu-dada.solorig.drive",
@@ -147,6 +186,7 @@ void RigEditorViewModel::ApplyPreset(RigPreset preset,
     preset_ = std::move(preset);
     imported_packages_ = std::move(packages);
     RebuildCatalog();
+    RebuildImportedSkins();
     if (preset_.theme.has_value()) {
         theme_ = *preset_.theme;
         dark_theme_ = theme_.id.find("dark") != std::string::npos;
@@ -370,31 +410,11 @@ bool RigEditorViewModel::IsDarkTheme() const noexcept {
 }
 
 bool RigEditorViewModel::LoadSkinFile(const std::filesystem::path& source) {
-    std::ifstream input(source, std::ios::binary);
-    if (!input) {
+    const auto skin = ReadPedalSkinFile(source);
+    if (!skin.has_value()) {
         return false;
     }
-    const std::string contents((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-    const auto parsed = ParseJson(contents);
-    if (!parsed.value.has_value() || parsed.value->AsObject() == nullptr) {
-        return false;
-    }
-    const auto& object = *parsed.value->AsObject();
-    const auto schema = Find(object, "schemaVersion");
-    const auto id = StringField(object, "id");
-    const auto* controls = Find(object, "controls");
-    if (schema == nullptr || schema->AsNumber() == nullptr || *schema->AsNumber() != 1.0 || !id.has_value() ||
-        controls == nullptr || controls->AsObject() == nullptr) {
-        return false;
-    }
-    const auto knob = StringField(*controls->AsObject(), "knob");
-    const auto toggle = StringField(*controls->AsObject(), "toggle");
-    const auto button = StringField(*controls->AsObject(), "button");
-    const auto footswitch = StringField(*controls->AsObject(), "footswitch");
-    if (!knob.has_value() || !toggle.has_value() || !button.has_value() || !footswitch.has_value() || id->empty()) {
-        return false;
-    }
-    skin_ = {.id = *id, .knob = *knob, .toggle = *toggle, .button = *button, .footswitch = *footswitch};
+    skin_ = *skin;
     RebuildScene();
     return true;
 }
@@ -593,6 +613,7 @@ EditorFileResult RigEditorViewModel::ImportResource(const std::filesystem::path&
         imported_packages_.emplace(module_id, std::move(package));
         preset_ = std::move(candidate);
         RebuildCatalog();
+        RebuildImportedSkins();
         resource_status_ = "Imported module package: " + display_name;
         dirty_ = true;
         SetFileStatus("Unsaved changes");
@@ -651,6 +672,7 @@ EditorFileResult RigEditorViewModel::ImportResource(const std::filesystem::path&
         imported_packages_.emplace(module_id, std::move(*loaded.package));
         preset_ = std::move(candidate);
         RebuildCatalog();
+        RebuildImportedSkins();
         resource_status_ = "Imported " + label + " module: " + module_id;
     } else {
         resource_status_ = "Imported " + label + ": " + source.filename().string();
@@ -841,9 +863,12 @@ void RigEditorViewModel::RebuildScene() {
     for (const auto& node : preset_.nodes) {
         const auto position = layout_.Find(node.instance_id).value_or(PedalPosition{});
         const auto* entry = FindCatalogEntry(node.module_id);
+        const auto imported_skin = imported_skins_.find(node.module_id);
+        const auto& node_skin = imported_skin == imported_skins_.end() ? skin_ : imported_skin->second;
         const auto measured = measured_performance_.find(node.instance_id);
         scene_.nodes.push_back({.instance_id = node.instance_id,
                                 .module_id = node.module_id,
+                                .skin = node_skin,
                                 .bounds = {.x = position.x * dpi_scale_,
                                            .y = position.y * dpi_scale_,
                                            .width = kNodeWidth * dpi_scale_,
@@ -871,6 +896,18 @@ void RigEditorViewModel::RebuildScene() {
                                                       .y = source->bounds.y + source->bounds.height * 0.5},
                                           .destination = {.x = destination->bounds.x,
                                                           .y = destination->bounds.y + destination->bounds.height * 0.5}});
+        }
+    }
+}
+
+void RigEditorViewModel::RebuildImportedSkins() {
+    imported_skins_.clear();
+    for (const auto& [module_id, package] : imported_packages_) {
+        if (!package.custom_skin_path.has_value()) {
+            continue;
+        }
+        if (const auto skin = ReadPedalSkinFile(*package.custom_skin_path); skin.has_value()) {
+            imported_skins_.emplace(module_id, *skin);
         }
     }
 }

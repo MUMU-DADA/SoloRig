@@ -50,7 +50,8 @@ Steinberg::tresult PLUGIN_API SoloRigController::setComponentState(Steinberg::IB
     Steinberg::int32 bypass = 0;
     float drive = 0.0F;
     if (!stream.readInt32u(magic) || !stream.readInt32(version) || !stream.readFloat(output_gain) ||
-        !stream.readInt32(bypass) || magic != kStateMagic || (version != 1 && version != kStateVersion)) {
+        !stream.readInt32(bypass) || magic != kStateMagic ||
+        (version != 1 && version != 2 && version != kStateVersion)) {
         return Steinberg::kResultFalse;
     }
     if (version >= 2 && !stream.readFloat(drive)) {

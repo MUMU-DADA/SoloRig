@@ -8,14 +8,18 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <limits>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace solo_rig::vst3 {
 namespace {
 
 constexpr double kMinimumOutputGainDb = -24.0;
 constexpr double kMaximumOutputGainDb = 24.0;
+constexpr Steinberg::uint32 kMaximumPresetStateBytes = 16U * 1024U * 1024U;
 
 template <typename Sample>
 void ProcessAudio(
@@ -199,11 +203,31 @@ Steinberg::tresult PLUGIN_API SoloRigProcessor::setState(Steinberg::IBStream* st
     Steinberg::int32 bypass = 0;
     float drive = 0.0F;
     if (!stream.readInt32u(magic) || !stream.readInt32(version) || !stream.readFloat(output_gain) ||
-        !stream.readInt32(bypass) || magic != kStateMagic || (version != 1 && version != kStateVersion)) {
+        !stream.readInt32(bypass) || magic != kStateMagic ||
+        (version != 1 && version != 2 && version != kStateVersion)) {
         return Steinberg::kResultFalse;
     }
     if (version >= 2 && !stream.readFloat(drive)) {
         return Steinberg::kResultFalse;
+    }
+
+    std::optional<RigPreset> configured_preset;
+    if (version >= 3) {
+        Steinberg::uint32 preset_bytes = 0U;
+        if (!stream.readInt32u(preset_bytes) || preset_bytes > kMaximumPresetStateBytes) {
+            return Steinberg::kResultFalse;
+        }
+        if (preset_bytes > 0U) {
+            std::vector<char> serialized(preset_bytes);
+            if (stream.readRaw(serialized.data(), preset_bytes) != preset_bytes) {
+                return Steinberg::kResultFalse;
+            }
+            const auto parsed = DeserializePreset(std::string_view(serialized.data(), serialized.size()));
+            if (!parsed.has_value() || !ValidatePreset(*parsed).empty()) {
+                return Steinberg::kResultFalse;
+            }
+            configured_preset = *parsed;
+        }
     }
 
     // Both setState and the audio automation publisher acquire the odd
@@ -228,6 +252,7 @@ Steinberg::tresult PLUGIN_API SoloRigProcessor::setState(Steinberg::IBStream* st
     drive_bits_.store(EncodeParam(std::clamp(static_cast<Steinberg::Vst::ParamValue>(drive), 0.0, 1.0)),
                       std::memory_order_relaxed);
     state_generation_.fetch_add(1, std::memory_order_release);
+    configured_preset_ = std::move(configured_preset);
     // State restoration may run on a non-audio thread. The even generation is
     // the hand-off; the audio callback applies it to current/target/pending
     // graphs at its control point without rebuilding or allocating.
@@ -240,11 +265,20 @@ Steinberg::tresult PLUGIN_API SoloRigProcessor::getState(Steinberg::IBStream* st
     }
 
     const auto snapshot = ReadStateSnapshot();
+    const auto serialized_preset = configured_preset_.has_value() ? SerializePreset(*configured_preset_) : std::string{};
+    if (serialized_preset.size() > kMaximumPresetStateBytes) {
+        return Steinberg::kResultFalse;
+    }
     Steinberg::IBStreamer stream(state, kLittleEndian);
     if (!stream.writeInt32u(kStateMagic) || !stream.writeInt32(kStateVersion) ||
         !stream.writeFloat(static_cast<float>(snapshot.output_gain)) ||
         !stream.writeInt32(snapshot.bypass ? 1 : 0) ||
-        !stream.writeFloat(static_cast<float>(snapshot.drive))) {
+        !stream.writeFloat(static_cast<float>(snapshot.drive)) ||
+        !stream.writeInt32u(static_cast<Steinberg::uint32>(serialized_preset.size()))) {
+        return Steinberg::kResultFalse;
+    }
+    if (!serialized_preset.empty() &&
+        stream.writeRaw(serialized_preset.data(), serialized_preset.size()) != serialized_preset.size()) {
         return Steinberg::kResultFalse;
     }
     return Steinberg::kResultOk;
@@ -353,16 +387,43 @@ void SoloRigProcessor::ReleaseRuntime() noexcept {
 bool SoloRigProcessor::BuildRuntime(const AudioFormat& format) noexcept {
     try {
         const auto drive = ReadStateSnapshot().drive;
-        auto preset = DefaultRigPreset();
-        preset.preset_id = "vst3-default";
-        preset.name = "VST3 Default";
+        auto preset = configured_preset_.value_or(DefaultRigPreset());
+        preset.preset_id = preset.preset_id.empty() ? "vst3-state" : preset.preset_id;
+        preset.name = preset.name.empty() ? "VST3 State" : preset.name;
+        module_registry_.ClearExternalPackages();
+        std::error_code current_path_error;
+        const auto base_directory = std::filesystem::current_path(current_path_error);
+        if (current_path_error) {
+            return false;
+        }
+        for (const auto& reference : preset.external_module_packages) {
+            if (reference.module_id.empty() || reference.root_directory.empty()) {
+                return false;
+            }
+            auto root = reference.root_directory;
+            auto asset = reference.asset_path;
+            if (root.is_relative()) {
+                root = base_directory / root;
+            }
+            if (asset.is_relative()) {
+                asset = base_directory / asset;
+            }
+            const auto loaded = reference.source_kind == ExternalModuleSourceKind::PackageDirectory
+                ? LoadModulePackage(root)
+                : LoadExternalModuleAsset(asset, reference.source_kind, reference.module_id, {});
+            if (!loaded.package.has_value() || !loaded.errors.empty() ||
+                loaded.package->descriptor.module_id != reference.module_id ||
+                module_registry_.RegisterPackage(*loaded.package).has_value()) {
+                module_registry_.ClearExternalPackages();
+                return false;
+            }
+        }
         auto drive_node = std::find_if(preset.nodes.begin(), preset.nodes.end(), [](const PresetNode& node) {
             return node.instance_id == "drive-1";
         });
-        if (drive_node == preset.nodes.end()) {
-            return false;
+        if (drive_node != preset.nodes.end()) {
+            drive_node->parameter_values["drive"] = 1.0F + static_cast<float>(drive) * 15.0F;
         }
-        drive_node->parameter_values["drive"] = 1.0F + static_cast<float>(drive) * 15.0F;
         PreparedPreset prepared{.preset_id = preset.preset_id, .preset = std::move(preset)};
         const auto built = RigRuntimeBuilder{}.Build(prepared, module_registry_, format);
         if (std::holds_alternative<RigBuildError>(built)) {

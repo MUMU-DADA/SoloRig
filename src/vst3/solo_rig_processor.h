@@ -2,6 +2,7 @@
 
 #include "core/audio_buffer.hpp"
 #include "core/rig_runtime.hpp"
+#include "content/preset.hpp"
 #include "public.sdk/source/vst/vstaudioeffect.h"
 
 #include <atomic>
@@ -62,6 +63,7 @@ private:
     std::atomic<std::uint64_t> state_generation_ {0};
     Steinberg::int32 channel_count_ {2};
     RigModuleRegistry module_registry_;
+    std::optional<RigPreset> configured_preset_;
     RealtimePresetMailbox mailbox_;
     std::optional<PreparedPreset> prepared_runtime_;
     std::optional<RigRuntime> rig_runtime_;
