@@ -137,6 +137,8 @@ bool Win32RigWindow::Create(HINSTANCE instance, RigEditorViewModel& editor, bool
         return false;
     }
     CreateToolbarButtons();
+    RefreshAsioControls();
+    UpdateAudioStatus();
     UpdateEditorViewport();
     UpdateWindowTitle();
     if (show) {
@@ -307,6 +309,30 @@ void Win32RigWindow::Paint() {
 }
 
 void Win32RigWindow::Destroy() noexcept {
+    if (audio_engine_ != nullptr) {
+        audio_engine_->Close();
+    }
+    if (asio_close_button_ != nullptr) {
+        DestroyWindow(asio_close_button_);
+        asio_close_button_ = nullptr;
+    }
+    if (asio_start_button_ != nullptr) {
+        DestroyWindow(asio_start_button_);
+        asio_start_button_ = nullptr;
+    }
+    if (asio_open_button_ != nullptr) {
+        DestroyWindow(asio_open_button_);
+        asio_open_button_ = nullptr;
+    }
+    if (asio_refresh_button_ != nullptr) {
+        DestroyWindow(asio_refresh_button_);
+        asio_refresh_button_ = nullptr;
+    }
+    if (asio_driver_combo_ != nullptr) {
+        DestroyWindow(asio_driver_combo_);
+        asio_driver_combo_ = nullptr;
+    }
+    asio_driver_ids_.clear();
     if (midi_close_button_ != nullptr) {
         DestroyWindow(midi_close_button_);
         midi_close_button_ = nullptr;
@@ -413,6 +439,60 @@ void Win32RigWindow::SetMidiControlSession(StandaloneMidiControlSession* session
         InvalidateRect(window_, nullptr, FALSE);
     }
     RefreshMidiMappingControls();
+}
+
+void Win32RigWindow::SetAudioEngine(StandaloneAudioEngine* engine) {
+    if (audio_engine_ != nullptr && audio_engine_ != engine) {
+        audio_engine_->Close();
+    }
+    audio_engine_ = engine;
+    RefreshAsioControls();
+    UpdateAudioStatus();
+}
+
+bool Win32RigWindow::TriggerAsioRefresh() {
+    if (audio_engine_ == nullptr) {
+        return false;
+    }
+    const auto refreshed = audio_engine_->RefreshDrivers();
+    RefreshAsioControls();
+    UpdateAudioStatus();
+    InvalidateRect(window_, nullptr, FALSE);
+    return refreshed;
+}
+
+bool Win32RigWindow::TriggerAsioOpen() {
+    if (audio_engine_ == nullptr || editor_ == nullptr) {
+        return false;
+    }
+    const auto selected = SelectedAsioDriverIndex();
+    if (!selected.has_value() || *selected >= audio_engine_->Drivers().size()) {
+        return false;
+    }
+    const auto opened = audio_engine_->Open(audio_engine_->Drivers()[*selected], window_, editor_->ExportPreset());
+    UpdateAudioStatus();
+    InvalidateRect(window_, nullptr, FALSE);
+    return opened;
+}
+
+bool Win32RigWindow::TriggerAsioStart() {
+    if (audio_engine_ == nullptr) {
+        return false;
+    }
+    const auto started = audio_engine_->Start();
+    UpdateAudioStatus();
+    InvalidateRect(window_, nullptr, FALSE);
+    return started;
+}
+
+bool Win32RigWindow::TriggerAsioClose() {
+    if (audio_engine_ == nullptr) {
+        return false;
+    }
+    audio_engine_->Close();
+    UpdateAudioStatus();
+    InvalidateRect(window_, nullptr, FALSE);
+    return true;
 }
 
 bool Win32RigWindow::TriggerMidiRefresh() {
@@ -577,6 +657,10 @@ bool Win32RigWindow::TriggerOpen() {
         static_cast<void>(midi_session_->SyncFromEditor());
         RefreshMidiMappingControls();
     }
+    if (result.success && audio_engine_ != nullptr && audio_engine_->IsOpen()) {
+        static_cast<void>(audio_engine_->ReloadPreset(editor_->ExportPreset()));
+        UpdateAudioStatus();
+    }
     UpdateWindowTitle();
     InvalidateRect(window_, nullptr, FALSE);
     return result.success;
@@ -694,7 +778,8 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
         return 1;
     case WM_COMMAND:
         if (HIWORD(w_param) == BN_CLICKED ||
-            (LOWORD(w_param) == 1007 && HIWORD(w_param) == CBN_SELCHANGE)) {
+            (LOWORD(w_param) == 1007 && HIWORD(w_param) == CBN_SELCHANGE) ||
+            (LOWORD(w_param) == 1018 && HIWORD(w_param) == CBN_SELCHANGE)) {
             if (LOWORD(w_param) == 1001) {
                 static_cast<void>(TriggerSave());
             } else if (LOWORD(w_param) == 1002) {
@@ -715,6 +800,14 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
                 static_cast<void>(TriggerMidiDeleteBinding());
             } else if (LOWORD(w_param) == 1011) {
                 static_cast<void>(TriggerMidiClearBindings());
+            } else if (LOWORD(w_param) == 1014) {
+                static_cast<void>(TriggerAsioRefresh());
+            } else if (LOWORD(w_param) == 1015) {
+                static_cast<void>(TriggerAsioOpen());
+            } else if (LOWORD(w_param) == 1016) {
+                static_cast<void>(TriggerAsioStart());
+            } else if (LOWORD(w_param) == 1017) {
+                static_cast<void>(TriggerAsioClose());
             }
             if (LOWORD(w_param) == 1007) {
                 InvalidateRect(window_, nullptr, FALSE);
@@ -734,6 +827,17 @@ void Win32RigWindow::CreateToolbarButtons() {
                                       92, 16, 80, 30, window_, reinterpret_cast<HMENU>(1002), instance_, nullptr);
     open_button_ = CreateWindowExW(0, L"BUTTON", L"Open", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                    178, 16, 70, 30, window_, reinterpret_cast<HMENU>(1003), instance_, nullptr);
+    asio_refresh_button_ = CreateWindowExW(0, L"BUTTON", L"ASIO Refresh", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                           16, 50, 96, 30, window_, reinterpret_cast<HMENU>(1014), instance_, nullptr);
+    asio_driver_combo_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", nullptr,
+                                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+                                         118, 50, 210, 220, window_, reinterpret_cast<HMENU>(1018), instance_, nullptr);
+    asio_open_button_ = CreateWindowExW(0, L"BUTTON", L"ASIO Open", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                        334, 50, 84, 30, window_, reinterpret_cast<HMENU>(1015), instance_, nullptr);
+    asio_start_button_ = CreateWindowExW(0, L"BUTTON", L"ASIO Start", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                         424, 50, 84, 30, window_, reinterpret_cast<HMENU>(1016), instance_, nullptr);
+    asio_close_button_ = CreateWindowExW(0, L"BUTTON", L"ASIO Close", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                         514, 50, 84, 30, window_, reinterpret_cast<HMENU>(1017), instance_, nullptr);
     midi_refresh_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Refresh", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                            256, 16, 98, 30, window_, reinterpret_cast<HMENU>(1004), instance_, nullptr);
     midi_open_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Open", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
@@ -774,6 +878,11 @@ void Win32RigWindow::LayoutToolbarButtons() {
     move(save_button_, 16, 16, 70, 30);
     move(save_as_button_, 92, 16, 80, 30);
     move(open_button_, 178, 16, 70, 30);
+    move(asio_refresh_button_, 16, 50, 96, 30);
+    move(asio_driver_combo_, 118, 50, 210, 220);
+    move(asio_open_button_, 334, 50, 84, 30);
+    move(asio_start_button_, 424, 50, 84, 30);
+    move(asio_close_button_, 514, 50, 84, 30);
     move(midi_refresh_button_, 256, 16, 98, 30);
     move(midi_open_button_, 360, 16, 88, 30);
     move(midi_close_button_, 454, 16, 92, 30);
@@ -788,6 +897,54 @@ void Win32RigWindow::LayoutToolbarButtons() {
     move(midi_clear_button_, panel_left + 338, 50, 70, 30);
     move(midi_mapping_list_, panel_left, 50, 330, 120);
     move(midi_hint_label_, panel_left, 174, 410, 36);
+}
+
+void Win32RigWindow::RefreshAsioControls() {
+    if (asio_driver_combo_ == nullptr) {
+        return;
+    }
+    std::string previous_driver;
+    const auto previous_index = SendMessageW(asio_driver_combo_, CB_GETCURSEL, 0, 0);
+    if (previous_index >= 0 && static_cast<std::size_t>(previous_index) < asio_driver_ids_.size()) {
+        previous_driver = asio_driver_ids_[static_cast<std::size_t>(previous_index)];
+    }
+    SendMessageW(asio_driver_combo_, CB_RESETCONTENT, 0, 0);
+    asio_driver_ids_.clear();
+    if (audio_engine_ != nullptr) {
+        for (const auto& driver : audio_engine_->Drivers()) {
+            asio_driver_ids_.push_back(driver.driver_id);
+            const auto label = Widen(driver.display_name);
+            SendMessageW(asio_driver_combo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        }
+    }
+    auto selected = 0L;
+    if (!previous_driver.empty()) {
+        const auto found = std::find(asio_driver_ids_.begin(), asio_driver_ids_.end(), previous_driver);
+        if (found != asio_driver_ids_.end()) {
+            selected = static_cast<LONG>(std::distance(asio_driver_ids_.begin(), found));
+        }
+    }
+    if (!asio_driver_ids_.empty()) {
+        SendMessageW(asio_driver_combo_, CB_SETCURSEL, static_cast<WPARAM>(selected), 0);
+    }
+}
+
+std::optional<std::size_t> Win32RigWindow::SelectedAsioDriverIndex() const {
+    if (asio_driver_combo_ == nullptr) {
+        return std::nullopt;
+    }
+    const auto selected = SendMessageW(asio_driver_combo_, CB_GETCURSEL, 0, 0);
+    if (selected < 0 || static_cast<std::size_t>(selected) >= asio_driver_ids_.size()) {
+        return std::nullopt;
+    }
+    return static_cast<std::size_t>(selected);
+}
+
+void Win32RigWindow::UpdateAudioStatus() {
+    if (editor_ == nullptr || audio_engine_ == nullptr) {
+        return;
+    }
+    editor_->SetAudioStatus(audio_engine_->StatusText());
 }
 
 void Win32RigWindow::RefreshMidiMappingControls() {

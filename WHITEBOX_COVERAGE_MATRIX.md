@@ -17,13 +17,13 @@
 
 | 编号 | 需求摘要 | 当前状态 | 当前证据 | 完成前的主要门禁 |
 | --- | --- | --- | --- | --- |
-| 1 | VST3 插件与独立程序 | 部分完成 | `src/vst3/`、`src/managed/`、VST3 Validator、Windows UI 和 C# contract 回归 | 独立程序真实音频后端；VST3/Standalone 均需接入同一完整效果器图，而非仅基础演示链 |
-| 2 | 独立程序连接 ASIO | 部分完成 | `src/standalone/asio_host.*` 已实现 Windows 注册驱动发现、COM 打开/探测、Float32/Int16/Int24/Int32 LSB 边界转换、双缓冲回调和安全停止；本机 `Midiplus USB Audio` 实测 192 kHz、8 入/8 出、约 3001 个 64-sample 回调，reset/dropout 均为 0 | 接入 Standalone UI 的设备选择与完整效果图；补齐非 192 kHz 设备的异步/同步重采样、重置/断连恢复和更多硬件回归 |
+| 1 | VST3 插件与独立程序 | 部分完成 | `src/vst3/`、`src/managed/`、VST3 Validator、Windows UI 和 C# contract 回归；Standalone 新增 `StandaloneAudioEngine` 将当前编辑器 preset 构建为 `RigRuntime` 并接入 ASIO | VST3/Standalone 均需接入同一完整效果器图，而非仅基础演示链；补齐真实宿主回灌 |
+| 2 | 独立程序连接 ASIO | 部分完成 | `src/standalone/asio_host.*` 已实现 Windows 注册驱动发现、COM 打开/探测、Float32/Int16/Int24/Int32 LSB 边界转换、双缓冲回调和安全停止；Standalone UI 已提供 Refresh/Open/Start/Close；内部固定 192 kHz 与设备原生采样率之间已有同步线性重采样；本机 `Midiplus USB Audio` 经 Drive+Delay 图实测 192 kHz、8 入/8 出、3000 个 64-sample 回调，reset/dropout 均为 0 | 多设备异步时钟/重采样、重置/断连恢复和更多硬件回归 |
 | 3 | 内置调音表 | 部分完成 | `src/dsp/tuner.*`、`tests/tuner_tests.cpp` 已验证干净音高和静音/非法输入 | 将分析器接入独立程序/VST3 可用的音频输入与 UI 状态，并补充噪声、低音、失锁和刷新节流测试 |
 | 4 | 模拟单块的电路元件仿真 | 部分完成 | Circuit v2/MNA、无源/电源/二极管/BJT/JFET/MOSFET/运放/电子管/变压器/扬声器等族测试；M23-B 已将 generic triode → pentode → supply → transformer → speaker 作为外部 Circuit v2 包接入命名图 | 具体器件/功放组合的独立参考校准、复杂拓扑和商业型号证据 |
 | 5 | 数字单块算法模拟 | 部分完成 | `src/content/module_package.*`、`src/content/module_runtime.cpp`、`src/dsp/digital_*` 与九种操作的 parser/runtime 测试 | 任意数字图、sidechain、反馈和更完整参数语义；当前是受限 generic 操作序列 |
 | 6 | 模块化、串联/并联/任意拓扑 | 部分完成 | `NamedPortAudioGraph` 已支持固定容量命名端口、fan-in/fan-out、延迟补偿和显式延迟反馈；M23-B 已验证完整 generic 外部 MNA 包的命名图接入 | 将更多复杂白盒 MNA、UI 编辑拓扑和任意图结构统一到同一图编译/运行时，并覆盖更多拒绝边界 |
-| 7 | 全程 192 kHz、32-bit | 部分完成 | `AudioFormat`、Standalone 路由验证、M22 192 kHz/Float32/4x 测试，以及真实 ASIO 主机在 192 kHz 下的整数样本→Float32 边界回调 | 非 192 kHz 设备的实时重采样、设备时钟策略和完整效果图数据链路；不能只用静态格式检查代替 |
+| 7 | 全程 192 kHz、32-bit | 部分完成 | `AudioFormat`、Standalone 路由验证、M22 192 kHz/Float32/4x 测试；真实 ASIO 设备经整数样本→Float32 边界进入 Drive+Delay `RigRuntime` 图，单设备原生采样率同步重采样已具备 | 非 192 kHz 硬件实测、设备时钟策略和更多通道图验证；不能只用静态格式检查代替 |
 | 8 | NAM 与 NAM A2 | 部分完成 | `third_party/NeuralAmpModelerCore`、NAM/NAM A2 runtime 和外部包测试 | 产品端到端导入、错误恢复、真实模型回归及明确的黑盒精度口径；不计入白盒元件证据 |
 | 9 | 拖动效果器改变位置 | 已验证（编辑器层） | C ABI/Windows UI/C# contract 覆盖选择、拖动、网格吸附和脏状态 | 与任意拓扑图编辑、撤销/重做和保存恢复联合验收 |
 | 10 | 每个效果器预期延迟与性能占用 | 部分完成 | 静态估算、声明延迟、`RealtimeLoadMeter`、`PerformanceSnapshot` 和 C#/C ABI 面板 | 真实宿主回灌、过载状态和可复验基准；“实测未连接”不得升级为实测 |
@@ -36,10 +36,10 @@
 | 17 | 外部载入 NAM/NAM A2 文件 | 部分完成 | 外部 NAM/NAM A2 asset load、路径校验和 runtime Prepare/Process/Reset 测试 | 独立程序导入 UI、真实模型回归和资源错误恢复 |
 | 18 | IR 箱体模拟 | 已验证（runtime 层） | `ImpulseResponseConvolver` 和 IR 处理测试 | 接入完整箱头/功放链与真实宿主，并明确延迟、采样率和通道语义 |
 | 19 | 外部导入 IR | 已验证（受限导入层） | WAV/IR 外部包导入、长度/扩展名/采样率适配测试 | 产品导入 UI、取消/错误恢复和大文件资源限制 |
-| 20 | 全功能/边界测试 | 部分完成 | 当前核心 `600/600`、CTest `5/5`、VST3 Validator `47/47` 及 UI/ABI/C# contract；M23-B 增加完整外部管线回归，M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b/C3c 增加十三类数学 golden 的真实 Circuit v2 MNA 对照；M23-D1 增加 ASIO 驱动发现、生命周期与真实硬件回调探针 | 多设备、非 192 kHz 重采样、授权参考、完整产品流程和覆盖矩阵逐项闭环 |
+| 20 | 全功能/边界测试 | 部分完成 | 当前核心 `602/602`、CTest `5/5`、VST3 Validator `47/47` 及 UI/ABI/C# contract；M23-B 增加完整外部管线回归，M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b/C3c 增加十三类数学 golden 的真实 Circuit v2 MNA 对照；M23-D1/D2 增加 ASIO 生命周期、整数边界、同步重采样、Standalone 控件、完整 Drive+Delay 图和真实硬件回调 | 多设备异步时钟、非 192 kHz 硬件实测、授权参考、断连恢复、完整产品流程和覆盖矩阵逐项闭环 |
 | 21 | 默认效果器外观与自定义皮肤 | 部分完成 | 模块元数据/主题/编辑器基础资源路径已有实现 | 默认旋钮/拨档/踩钉组件、模块自定义皮肤包、资源安全校验和视觉回归 |
 | 22 | 逻辑、元属性、外观三层模块包 | 部分完成 | `ModulePackage` manifest、logic、descriptor/metadata 和外部 Circuit/NAM/IR 入口 | 三层独立版本/校验、默认皮肤回退、模拟逻辑与数字逻辑统一运行契约 |
-| 23 | 多 ASIO 设备与任意 I/O 通道 | 受阻 | 单设备真实 ASIO 主机已支持已验证物理通道映射；`AsioDeviceDescriptor`、通道映射和异步时钟分析器仍覆盖多设备路由契约 | 多实例 ASIO 驱动、多设备时钟/重采样、任意输入输出选择、Standalone 设备 UI 和故障恢复 |
+| 23 | 多 ASIO 设备与任意 I/O 通道 | 受阻 | 单设备真实 ASIO 主机、2x2 Standalone 图和设备选择 UI 已闭环；`AsioDeviceDescriptor`、通道映射和异步时钟分析器仍覆盖多设备路由契约 | 多实例 ASIO 驱动、多设备时钟/重采样、任意输入输出选择、断连/重置恢复和更多硬件 |
 
 ## 白盒专用覆盖
 
@@ -87,7 +87,7 @@ M23-A 只有在以下证据同时存在时才算完成：
 - 受阻项记录了缺失的外部前置条件，但不把受阻状态隐藏为已完成；
 - 后续提交只允许依据新的实现、测试或外部证据更新状态。
 
-本矩阵是收口门禁，不是白盒完成声明。M23-B 已完成首个完整 generic 组合样例，M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b/C3c 已完成 self-authored mathematical golden 的可复验门禁，M23-D1 已完成单设备真实 ASIO 主机与硬件回调探针；白盒完成仍需通过 M23-C 的授权/实测参考证据、M23-D2（多设备/重采样/宿主完整效果图）和最终 Release gate。
+本矩阵是收口门禁，不是白盒完成声明。M23-B 已完成首个完整 generic 组合样例，M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b/C3c 已完成 self-authored mathematical golden 的可复验门禁，M23-D1/D2 已完成单设备真实 ASIO 主机、Standalone 设备控制和 Drive+Delay 图回调探针；白盒完成仍需通过 M23-C 的授权/实测参考证据、M23-D2 的多设备/重采样/故障恢复子门禁和最终 Release gate。
 
 ## M23-B 首个完整外部 generic 管线
 
@@ -112,11 +112,18 @@ M23-A 只有在以下证据同时存在时才算完成：
 - M23-C3a 新增带栅极 RC 历史、屏极供电与阳极负载的 space-charge pentode 动态网表、独立 2x2 backward-Euler/Newton golden 和证据包；测试逐个重算每个 oversampling 子步的栅极历史、屏极/阳极耦合工作点，再对照真实 MNA 动态输出。SPICE comparison 仍为 `blocked`，不把 self-authored pentode 动态方程当作具体功率管校准。
 - M23-C3b 新增 pentode → lossy-linear coupled-inductor → electrodynamic speaker 的动态组合网表、独立 7 元素 backward-Euler/Newton golden 和证据包；测试逐个重算栅极、屏极/阳极、变压器一次/二次电流与扬声器机械状态，并验证真实 MNA 输出和 Reset 重放。该组合仍是 self-authored generic 模型，SPICE comparison 保持 `blocked`。
 - M23-C3c 新增动态 rectified-reservoir 供电、space-charge pentode、saturating-hysteretic transformer 和二次侧负载的组合网表、独立 8 元素 backward-Euler/Newton golden 和证据包；测试逐个重算栅极、屏极/阳极、供电 Sag、磁芯磁通/磁滞及变压器一次/二次电流，并验证真实 MNA 输出和 Reset 重放。该组合仍是 self-authored generic 模型，SPICE comparison 保持 `blocked`。
-- 本轮独立复验：CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI、C# contract 全通过；M23-D1 的 ASIO 主机契约和 Int16/Int24/Int32 转换用例已纳入核心，当前核心 `600/600`；本轮 build manifest MD5 `8453AF46941B44E27078ADC75E94FC6B`。真实 `Midiplus USB Audio` 探针在 192 kHz 下完成约 3000 个 64-sample 回调，reset/dropout 均为 0。下一步是补齐授权/实测参考、非 192 kHz 重采样、多设备和完整 Standalone 效果图接入。
+- 本轮独立复验：CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI、C# contract 全通过；M23-D1/D2 的 ASIO 主机、Int16/Int24/Int32 转换和同步重采样用例已纳入核心，当前核心 `602/602`；本轮 build manifest MD5 `D145FB117E95A563C7A49E5FCC0BBC81`。真实 `Midiplus USB Audio` 探针在 192 kHz 下经 Drive+Delay 图完成约 3000 个 64-sample 回调，reset/dropout 均为 0。下一步是补齐非 192 kHz 硬件实测、多设备异步时钟、任意 I/O、故障恢复和授权/实测参考。
 
 ## M23-D1 单设备真实 ASIO 主机（已完成）
 
 - `src/standalone/asio_host.*` 读取 Windows ASIO 注册表并通过驱动 COM 类发现/打开设备；控制线程完成 `init → getChannels/getBufferSize/getLatencies/getChannelInfo → createBuffers`，显式 `Start/Stop/Close` 生命周期不进入 C ABI UI 创建路径。
 - 真实回调使用固定容量指针数组；Float32 LSB 直接映射，Int16/Int24/Int32 LSB 在预分配 scratch 中转换为内部 Float32，输出在回调尾部转换回驱动格式。Process 回调不分配、不加锁、不读文件、不解析 JSON。
-- `tools/asio_probe.cpp` 只在显式 `--stream <driver>` 时启动硬件；默认仅探测并报告设备。当前机器 `Midiplus USB Audio` 实测 8 入/8 出、192 kHz、缓冲范围 32..8192、preferred 64，并运行 1000 ms 得到约 3001 次回调；`KATANA` 因未连接设备被明确拒绝。
-- 该里程碑不宣称多 ASIO 实例、异步时钟/重采样、Standalone 设备选择 UI、完整 RigRuntime 效果图接入或硬件过载恢复；这些进入 M23-D2。没有授权参考数据时，M23-C 的 SPICE gate 仍保持 `blocked`。
+- `StandaloneAudioEngine` 在控制线程按实际 preferred block size 构建当前编辑器 `RigPreset` 的 `RigRuntime`，再通过预分配 `AudioBuffer` 把 ASIO 2x2 Float32 边界接入 Drive+Delay 图；`tools/asio_probe.cpp --stream <driver>` 现在验证该完整图而不是旧直通回调。当前机器 `Midiplus USB Audio` 实测 8 入/8 出、192 kHz、缓冲范围 32..8192、preferred 64，并运行 1000 ms 得到 3000 次 64-sample 图回调；`KATANA` 因未连接设备被明确拒绝。
+- 该里程碑仍不宣称多 ASIO 实例、异步时钟、任意物理 I/O、断连/重置恢复或硬件过载恢复。没有授权参考数据时，M23-C 的 SPICE gate 仍保持 `blocked`。
+
+## M23-D2：Standalone 完整效果图接入（第一阶段已完成）
+
+- 新增 `src/standalone/standalone_audio_engine.*`，控制线程完成驱动探测、192 kHz/Float32 `AudioFormat`、当前编辑器 preset 的 `RigRuntimeBuilder → RigRuntime::Prepare`，再创建 ASIO buffers；ASIO callback 只复制预分配缓冲并调用无分配 `RigRuntime::Process`。
+- Win32 Standalone 工具栏新增 ASIO Refresh/Open/Start/Close 与设备选择；显式 Open 才访问驱动，关闭窗口按 `Stop → Close → RigRuntime::Shutdown` 顺序释放，打开新 preset 后会在停机边界重建效果图。
+- 真实验证：`SoloRigAsioProbe.exe --stream "Midiplus USB Audio"` 经 Drive+Delay 图运行 1000 ms，`callbacks=3000`、`samplesPerCallback=64`、`reset=0`、`dropout=0`；核心 `602/602`、CTest `5/5`、VST3 Validator `47/47`、Windows UI/backend ABI/C# contract 全通过；同步重采样与 block-size 计算另有单元测试，但当前硬件为 192 kHz，尚无非 192 kHz 硬件实测。
+- 剩余边界：多设备异步时钟、任意物理 I/O 选择、设备断连/ASIO reset 恢复、VST3 与 Standalone 图配置统一，以及授权 SPICE/golden/实机参考仍未完成；单设备原生采样率同步重采样已接入，但尚未有非 192 kHz 硬件实测。

@@ -376,26 +376,24 @@ bool AsioHost::Open(const AsioDriverInfo& driver,
             return SetError(AsioHostError::InvalidRouting, "ASIO host processing format must remain 192 kHz");
         }
         auto* asio = static_cast<IASIO*>(driver_);
-        const auto can_192k_error = asio->canSampleRate(192000.0);
-        if (can_192k_error != asio_abi::kOk) {
-            const auto message = AsioDriverError(asio, "ASIO 192 kHz capability query", can_192k_error);
-            Close();
-            return SetError(AsioHostError::UnsupportedSampleRate, message);
-        }
-        if (std::fabs(device_.native_sample_rate_hz - 192000.0) > 0.001 &&
-            asio->setSampleRate(192000.0) != asio_abi::kOk) {
-            const auto message = AsioDriverError(asio, "ASIO set 192 kHz", -1);
+        const auto device_rate = device_.native_sample_rate_hz;
+        const auto can_device_rate_error = asio->canSampleRate(device_rate);
+        if (can_device_rate_error != asio_abi::kOk) {
+            const auto message = AsioDriverError(asio, "ASIO native sample-rate capability query", can_device_rate_error);
             Close();
             return SetError(AsioHostError::UnsupportedSampleRate, message);
         }
         ASIOSampleRate configured_rate = 0.0;
         if (asio->getSampleRate(&configured_rate) != asio_abi::kOk ||
-            std::fabs(configured_rate - 192000.0) > 0.001) {
+            std::fabs(configured_rate - device_rate) > 0.001) {
             Close();
             return SetError(AsioHostError::UnsupportedSampleRate,
-                            "ASIO driver did not hold the required 192 kHz sample rate");
+                            "ASIO driver sample rate changed while preparing the native-rate callback");
         }
-        if (!ValidateBufferSize(routing.processing_format.max_block_size)) {
+        const auto requested_buffer_size = routing.device_buffer_size == 0U
+            ? routing.processing_format.max_block_size
+            : routing.device_buffer_size;
+        if (!ValidateBufferSize(requested_buffer_size)) {
             Close();
             return SetError(AsioHostError::UnsupportedBufferSize,
                             "requested ASIO block size is outside the driver's supported granularity");
@@ -436,7 +434,7 @@ bool AsioHost::Open(const AsioDriverInfo& driver,
                                         .sample_type = sample_type});
         }
 
-        buffer_size_ = routing.processing_format.max_block_size;
+        buffer_size_ = requested_buffer_size;
         callbacks_ = {.bufferSwitch = &AsioHost::BufferSwitch,
                        .sampleRateDidChange = &AsioHost::SampleRateDidChange,
                        .asioMessage = &AsioHost::AsioMessage,
@@ -650,10 +648,12 @@ void AsioHost::HandleBufferSwitch(long double_buffer_index) noexcept {
             input_pointers_[binding.processing_channel] = static_cast<const float*>(source);
         } else {
             auto* converted = input_conversion_scratch_.data() + binding.scratch_offset;
-            static_cast<void>(ConvertAsioInputToFloat32(source,
-                                                         converted,
-                                                         binding.sample_type,
-                                                         buffer_size_));
+            if (!ConvertAsioInputToFloat32(source,
+                                           converted,
+                                           binding.sample_type,
+                                           buffer_size_)) {
+                std::fill_n(converted, buffer_size_, 0.0F);
+            }
             input_pointers_[binding.processing_channel] = converted;
         }
     }
@@ -702,12 +702,18 @@ void AsioHost::HandleBufferSwitch(long double_buffer_index) noexcept {
 }
 
 void AsioHost::ClearOutputBuffers() noexcept {
-    for (auto& buffer_info : buffer_infos_) {
-        if (buffer_info.is_input == asio_abi::kFalse) {
-            for (void* buffer : buffer_info.buffers) {
-                if (buffer != nullptr) {
-                    std::fill_n(static_cast<float*>(buffer), buffer_size_, 0.0F);
-                }
+    for (const auto& binding : output_bindings_) {
+        for (void* raw_buffer : buffer_infos_[binding.buffer_index].buffers) {
+            if (raw_buffer == nullptr) {
+                continue;
+            }
+            if (binding.sample_type == asio_abi::kFloat32Lsb) {
+                std::fill_n(static_cast<float*>(raw_buffer), buffer_size_, 0.0F);
+            } else {
+                static_cast<void>(ConvertFloat32ToAsioOutput(zero_buffer_.data(),
+                                                             raw_buffer,
+                                                             binding.sample_type,
+                                                             buffer_size_));
             }
         }
     }

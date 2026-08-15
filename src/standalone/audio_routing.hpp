@@ -32,6 +32,9 @@ struct StandaloneAudioRouting {
                                   .max_block_size = 256,
                                   .channel_count = 2,
                                   .sample_representation = SampleRepresentation::Float32};
+    // Optional physical-device block size. When zero, the host uses the
+    // processing block size for backwards-compatible single-rate routes.
+    std::uint32_t device_buffer_size{};
     std::vector<PhysicalChannelRoute> inputs;
     std::vector<PhysicalChannelRoute> outputs;
 };

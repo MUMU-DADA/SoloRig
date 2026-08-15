@@ -1,6 +1,7 @@
 #pragma once
 
 #include "standalone/midi_control_session.hpp"
+#include "standalone/standalone_audio_engine.hpp"
 #include "ui/rig_editor.hpp"
 
 #include <windows.h>
@@ -58,6 +59,11 @@ public:
     [[nodiscard]] bool TriggerMidiClearBindings();
     [[nodiscard]] bool MidiLearnArmed() const noexcept;
     [[nodiscard]] bool MidiDrainTimerEnabled() const noexcept;
+    void SetAudioEngine(StandaloneAudioEngine* engine);
+    [[nodiscard]] bool TriggerAsioRefresh();
+    [[nodiscard]] bool TriggerAsioOpen();
+    [[nodiscard]] bool TriggerAsioStart();
+    [[nodiscard]] bool TriggerAsioClose();
 
     [[nodiscard]] static bool RunSmokeTest(HINSTANCE instance);
 
@@ -72,6 +78,9 @@ private:
     void CreateToolbarButtons();
     void LayoutToolbarButtons();
     void RefreshMidiMappingControls();
+    void RefreshAsioControls();
+    [[nodiscard]] std::optional<std::size_t> SelectedAsioDriverIndex() const;
+    void UpdateAudioStatus();
     [[nodiscard]] std::optional<std::string> SelectedMidiTarget() const;
     [[nodiscard]] bool HandleFileAction(FileDialogAction action);
     [[nodiscard]] std::optional<std::filesystem::path> ShowNativeFileDialog(FileDialogAction action) const;
@@ -91,6 +100,11 @@ private:
     HWND save_button_{};
     HWND save_as_button_{};
     HWND open_button_{};
+    HWND asio_refresh_button_{};
+    HWND asio_open_button_{};
+    HWND asio_start_button_{};
+    HWND asio_close_button_{};
+    HWND asio_driver_combo_{};
     HWND midi_refresh_button_{};
     HWND midi_open_button_{};
     HWND midi_close_button_{};
@@ -102,6 +116,8 @@ private:
     HWND midi_clear_button_{};
     HWND midi_hint_label_{};
     std::vector<std::string> midi_target_ids_;
+    StandaloneAudioEngine* audio_engine_{};
+    std::vector<std::string> asio_driver_ids_;
     FileDialogProvider file_dialog_provider_;
     StandaloneMidiControlSession* midi_session_{};
     bool midi_timer_enabled_{};

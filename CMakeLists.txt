@@ -145,6 +145,7 @@ add_library(solo_rig_core STATIC
     src/control/preset_controller.cpp
     src/control/shortcut_registry.cpp
     src/standalone/audio_routing.cpp
+    src/standalone/audio_resampler.cpp
     src/ui/pedal_layout.cpp
     src/ui/rig_editor.cpp
 )
@@ -179,6 +180,7 @@ if(WIN32 AND SOLO_RIG_BUILD_STANDALONE)
         src/standalone/main.cpp
         src/standalone/windows_rig_window.cpp
         src/standalone/midi_control_session.cpp
+        src/standalone/standalone_audio_engine.cpp
     )
     target_include_directories(SoloRigStandalone PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(SoloRigStandalone PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -195,6 +197,7 @@ if(WIN32 AND SOLO_RIG_BUILD_STANDALONE)
 
     add_executable(solo_rig_asio_probe
         tools/asio_probe.cpp
+        src/standalone/standalone_audio_engine.cpp
     )
     target_include_directories(solo_rig_asio_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(solo_rig_asio_probe PRIVATE solo_rig_core user32)
@@ -210,6 +213,7 @@ if(WIN32 AND SOLO_RIG_BUILD_STANDALONE)
             tests/windows_ui_smoke_tests.cpp
             src/standalone/windows_rig_window.cpp
             src/standalone/midi_control_session.cpp
+            src/standalone/standalone_audio_engine.cpp
         )
         target_include_directories(solo_rig_windows_ui_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         target_compile_definitions(solo_rig_windows_ui_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -437,6 +441,7 @@ if(BUILD_TESTING)
         tests/midi_mapping_tests.cpp
         tests/shortcut_registry_tests.cpp
         tests/audio_routing_tests.cpp
+        tests/audio_resampler_tests.cpp
         tests/pedal_layout_tests.cpp
         tests/rig_editor_tests.cpp
         tests/midi_control_session_tests.cpp

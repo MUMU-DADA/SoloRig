@@ -167,6 +167,7 @@ public:
     void ToggleTheme() noexcept;
     [[nodiscard]] bool IsDragging() const noexcept;
     [[nodiscard]] std::string_view AudioStatus() const noexcept;
+    void SetAudioStatus(std::string status);
 
 private:
     void RebuildScene();
@@ -193,6 +194,7 @@ private:
     std::optional<std::filesystem::path> source_path_;
     bool dirty_{};
     std::string file_status_;
+    std::string audio_status_{"ASIO backend not configured/available"};
     std::string resource_status_{"No external resource imported"};
     std::vector<std::string> unresolved_nodes_;
     struct MeasuredNodePerformance {

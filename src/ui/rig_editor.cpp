@@ -596,13 +596,18 @@ std::string_view RigEditorViewModel::AudioStatus() const noexcept {
     return scene_.audio_status;
 }
 
+void RigEditorViewModel::SetAudioStatus(std::string status) {
+    audio_status_ = std::move(status);
+    scene_.audio_status = audio_status_;
+}
+
 void RigEditorViewModel::RebuildScene() {
     scene_.viewport_width = viewport_width_;
     scene_.viewport_height = viewport_height_;
     scene_.dpi_scale = dpi_scale_;
     scene_.theme = theme_;
     scene_.skin = skin_;
-    scene_.audio_status = "ASIO backend not configured/available";
+    scene_.audio_status = audio_status_;
     scene_.file_status = file_status_;
     scene_.source_path = source_path_.has_value() ? source_path_->string() : std::string{};
     scene_.resource_status = resource_status_;
