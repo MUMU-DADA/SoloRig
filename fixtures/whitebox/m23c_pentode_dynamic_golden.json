@@ -1,0 +1,34 @@
+{
+    "schemaVersion": 1,
+    "kind": "self-authored-dynamic-mathematical-golden",
+    "caseId": "solorig.m23c.pentode-dynamic.v1",
+    "circuitSourceRef": "fixtures/whitebox/m23c_pentode_dynamic_circuit.json",
+    "inputHash": "sha256:solorig-m23c-pentode-dynamic-v1",
+    "formula": {
+        "type": "backward-euler-grid-coupling-space-charge-pentode",
+        "screenAmplificationFactor": 20.0,
+        "perveance": 0.001,
+        "kneeVoltage": 2.0,
+        "screenCurrentFraction": 0.1,
+        "maxCurrent": 0.01,
+        "inputOhms": 1000.0,
+        "gridCapacitanceFarads": 1e-9,
+        "initialGridVoltage": -1.0,
+        "plateSupply": 24.0,
+        "plateOhms": 10000.0,
+        "screenOhms": 10000.0
+    },
+    "run": {"sampleRateHz": 192000.0, "oversampling": 4, "randomSeed": 0},
+    "inputs": [-1.4, -0.6, 0.0, 0.3, -0.2, 0.7, 1.1],
+    "expectedOutputs": [
+        24.0,
+        20.313671852745063,
+        13.367144325474738,
+        9.161453356959024,
+        15.410435247480548,
+        4.910925322369694,
+        2.829877516620443
+    ],
+    "absoluteTolerance": 1e-9,
+    "referenceStatus": "self-authored-mathematical-only"
+}
