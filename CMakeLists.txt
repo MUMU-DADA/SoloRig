@@ -406,6 +406,7 @@ if(BUILD_TESTING)
     tests/m23c_diode_reference_tests.cpp
     tests/m23c_frequency_reference_tests.cpp
     tests/m23c_dynamic_diode_reference_tests.cpp
+    tests/m23c_bjt_reference_tests.cpp
         tests/module_package_tests.cpp
         tests/module_runtime_tests.cpp
         tests/rig_runtime_tests.cpp

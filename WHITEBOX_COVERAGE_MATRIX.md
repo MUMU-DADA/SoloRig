@@ -1,6 +1,6 @@
 # SoloRig 白盒与产品需求覆盖矩阵
 
-> 状态日期：2026-08-15。本文将用户原始需求按编号映射到当前代码、测试和剩余验收门禁。原始需求文件 `项目最初预期的需求.txt` 保持用户提供的原样，始终不纳入 Git 提交。
+> 状态日期：2026-08-16。本文将用户原始需求按编号映射到当前代码、测试和剩余验收门禁。原始需求文件 `项目最初预期的需求.txt` 保持用户提供的原样，始终不纳入 Git 提交。
 
 ## 状态定义
 
@@ -36,7 +36,7 @@
 | 17 | 外部载入 NAM/NAM A2 文件 | 部分完成 | 外部 NAM/NAM A2 asset load、路径校验和 runtime Prepare/Process/Reset 测试 | 独立程序导入 UI、真实模型回归和资源错误恢复 |
 | 18 | IR 箱体模拟 | 已验证（runtime 层） | `ImpulseResponseConvolver` 和 IR 处理测试 | 接入完整箱头/功放链与真实宿主，并明确延迟、采样率和通道语义 |
 | 19 | 外部导入 IR | 已验证（受限导入层） | WAV/IR 外部包导入、长度/扩展名/采样率适配测试 | 产品导入 UI、取消/错误恢复和大文件资源限制 |
-| 20 | 全功能/边界测试 | 部分完成 | 当前核心 `579/579`、CTest `5/5`、VST3 Validator `47/47` 及 UI/ABI/C# contract；M23-B 增加完整外部管线回归，M23-C1/C2a/C2b/C2c 增加无源、Shockley、RC 离散频响和动态结电容数学 golden 的真实 Circuit v2 MNA 对照 | 真实 ASIO、多设备、授权参考、完整产品流程和覆盖矩阵逐项闭环 |
+| 20 | 全功能/边界测试 | 部分完成 | 当前核心 `581/581`、CTest `5/5`、VST3 Validator `47/47` 及 UI/ABI/C# contract；M23-B 增加完整外部管线回归，M23-C1/C2a/C2b/C2c/C2d 增加无源、Shockley、RC 离散频响、动态结电容和 Ebers–Moll BJT 数学 golden 的真实 Circuit v2 MNA 对照 | 真实 ASIO、多设备、授权参考、完整产品流程和覆盖矩阵逐项闭环 |
 | 21 | 默认效果器外观与自定义皮肤 | 部分完成 | 模块元数据/主题/编辑器基础资源路径已有实现 | 默认旋钮/拨档/踩钉组件、模块自定义皮肤包、资源安全校验和视觉回归 |
 | 22 | 逻辑、元属性、外观三层模块包 | 部分完成 | `ModulePackage` manifest、logic、descriptor/metadata 和外部 Circuit/NAM/IR 入口 | 三层独立版本/校验、默认皮肤回退、模拟逻辑与数字逻辑统一运行契约 |
 | 23 | 多 ASIO 设备与任意 I/O 通道 | 受阻 | `AsioDeviceDescriptor`、通道映射和异步时钟分析器 | 真实 ASIO 后端、多设备时钟/重采样、任意输入输出选择和故障恢复 |
@@ -50,7 +50,7 @@
 3. **拓扑层**：命名端口图、串并联、fan-in/fan-out、延迟补偿、显式延迟反馈和多声道独立电路。
 4. **证据/宿主层**：实时边界、性能计量、SPICE/golden/实机参考以及 VST3/Standalone/ASIO。
 
-当前第 1～3 层已经有较强的 generic 运行基础，M22-B5 已锁定命名 MNA 的实时拒绝边界，M23-B 已完成一个完整外部 generic 管线的端到端组合，M23-C1 已把两类自有数学 golden 绑定到真实 Circuit v2 MNA 求解路径；第 4 层仍未闭环。因此当前状态应写作“generic whitebox runtime substantially implemented, whitebox Release not complete”。
+当前第 1～3 层已经有较强的 generic 运行基础，M22-B5 已锁定命名 MNA 的实时拒绝边界，M23-B 已完成一个完整外部 generic 管线的端到端组合，M23-C1/C2a/C2b/C2c/C2d 已把六类自有数学 golden 绑定到真实 Circuit v2 MNA 求解路径；第 4 层仍未闭环。因此当前状态应写作“generic whitebox runtime substantially implemented, whitebox Release not complete”。
 
 ## M23 代表性白盒覆盖集
 
@@ -87,7 +87,7 @@ M23-A 只有在以下证据同时存在时才算完成：
 - 受阻项记录了缺失的外部前置条件，但不把受阻状态隐藏为已完成；
 - 后续提交只允许依据新的实现、测试或外部证据更新状态。
 
-本矩阵是收口门禁，不是白盒完成声明。M23-B 已完成首个完整 generic 组合样例，M23-C1 仅完成 self-authored mathematical golden 的第一道可复验门禁；白盒完成仍需通过 M23-C 的授权/实测参考证据、M23-D（真实 ASIO/宿主）和最终 Release gate。
+本矩阵是收口门禁，不是白盒完成声明。M23-B 已完成首个完整 generic 组合样例，M23-C1/C2a/C2b/C2c/C2d 已完成 self-authored mathematical golden 的可复验门禁；白盒完成仍需通过 M23-C 的授权/实测参考证据、M23-D（真实 ASIO/宿主）和最终 Release gate。
 
 ## M23-B 首个完整外部 generic 管线
 
@@ -100,8 +100,9 @@ M23-A 只有在以下证据同时存在时才算完成：
 - `fixtures/whitebox/m23c_passive_divider_*` 固定无源分压网表、公式和 192 kHz/4x 输入输出样本；测试通过 `PrepareWhiteboxMnaV2Json` 进入真实 Circuit v2 → MNA Compile/Prepare/Solve 路径，并以 `CompareEvidenceSamples` 校验误差。
 - `fixtures/whitebox/m23c_rc_step_*` 固定串联电阻/对地电容低通网表；测试独立重算每个 backward-Euler oversampled 子步，再与实际 MNA 输出逐样本比较，避免只验证 fixture JSON 或只验证解析器。
 - `fixtures/whitebox/m23c_passive_evidence.json` 将 golden comparison 标为 `passed`，同时保留 SPICE comparison 为 `blocked`；`EvaluateEvidencePackage` 因此仍返回 `blocked`，不会把自有数学回归冒充授权 SPICE、实机或 `reference-1to-1`。
-- 本轮独立复验：核心 `573/573`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI、C# contract 全通过；build manifest MD5 `02D133DBFE9629C2BA85599A6BDE86F1`。下一步是为代表性 generic 类别接入可审计的授权 SPICE/golden/实机数据，并继续保持缺失资料时的阻塞状态。
+- M23-C1 本轮独立复验：核心 `573/573`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI、C# contract 全通过；build manifest MD5 `02D133DBFE9629C2BA85599A6BDE86F1`。
 - M23-C2a 新增 Shockley 二极管静态曲线网表、独立方程 golden 和证据包；测试按每个输入点用独立 Newton 方程求解，再对照真实 Circuit v2 MNA 的静态输出。SPICE comparison 仍为 `blocked`，不把 self-authored 数学结果升级为器件校准。
 - M23-C2b 新增 RC 离散频响 golden 和证据包；测试按独立 backward-Euler 离散传递函数生成幅度/相位参考，再用真实 MNA 运行 512 点预热与 1024 点测量逐频率比较。SPICE comparison 仍为 `blocked`，频响结果只代表自有数学模型。
 - M23-C2c 新增带结电容的 Shockley 动态网表、独立 backward-Euler/Newton golden 和证据包；测试逐个重算 192 kHz/4x 的每个历史子步，再对照真实 MNA 的动态输出。SPICE comparison 仍为 `blocked`，不把自有动态模型当作商业结电容校准。
-- 本轮独立复验：核心 `579/579`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI、C# contract 全通过；build manifest MD5 `F329CF2FCCB2C2628030FBE3DA51B0E7`。下一步是扩展更多代表性类别的 DC/动态证据，并继续保持缺失资料时的阻塞状态。
+- M23-C2d 新增带 5 V 集电极供电的 Ebers–Moll NPN BJT 静态网表、独立 2x2 Newton golden 和证据包；测试逐个重算基极偏置下的集电极/发射极工作点，再对照真实 MNA 输出。SPICE comparison 仍为 `blocked`，不把 self-authored BJT 方程当作晶体管型号校准。
+- 本轮独立复验：核心 `581/581`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI、C# contract 全通过；build manifest MD5 `F849973D1726664AB3A8B6060A0A1E48`。下一步是继续扩展 JFET/MOSFET/电子管等代表性参考证据，并保持缺失资料时的阻塞状态。

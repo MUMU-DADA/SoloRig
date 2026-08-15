@@ -1,0 +1,29 @@
+{
+    "schemaVersion": 1,
+    "kind": "self-authored-mathematical-golden",
+    "caseId": "solorig.m23c.bjt-static.v1",
+    "circuitSourceRef": "fixtures/whitebox/m23c_bjt_static_circuit.json",
+    "inputHash": "sha256:solorig-m23c-bjt-static-v1",
+    "formula": {
+        "type": "ebers-moll-npn-common-emitter",
+        "saturationCurrent": 1e-12,
+        "forwardBeta": 100.0,
+        "reverseBeta": 1.0,
+        "thermalVoltage": 0.02585,
+        "collectorSupply": 5.0,
+        "collectorOhms": 1000.0,
+        "emitterOhms": 1000.0
+    },
+    "run": {"sampleRateHz": 192000.0, "oversampling": 1, "randomSeed": 0},
+    "inputs": [0.0, 0.5, 0.6, 0.7, 0.8, 1.0],
+    "expectedOutputs": [
+        4.999999999,
+        4.9557803721639235,
+        4.881910788991477,
+        4.796792959508152,
+        4.707137150893634,
+        4.52167351581589
+    ],
+    "absoluteTolerance": 1e-9,
+    "referenceStatus": "self-authored-mathematical-only"
+}

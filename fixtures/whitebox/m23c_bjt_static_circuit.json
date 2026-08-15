@@ -1,0 +1,43 @@
+{
+    "version": 2,
+    "schema": "circuit",
+    "referenceGround": "0",
+    "nodes": ["c", "b", "e", "vcc", "0"],
+    "ports": [
+        {"id": "input", "direction": "input", "node": "b"},
+        {"id": "output", "direction": "output", "node": "c"}
+    ],
+    "supplies": [
+        {"id": "vcc", "positive": "vcc", "negative": "0", "voltage": 5.0}
+    ],
+    "components": [
+        {
+            "id": "q",
+            "type": "bjt",
+            "pins": ["c", "b", "e"],
+            "bjtModel": {
+                "kind": "ebers-moll",
+                "modelVersion": 1,
+                "polarity": "npn",
+                "saturationCurrent": 1e-12,
+                "forwardBeta": 100,
+                "reverseBeta": 1,
+                "thermalVoltage": 0.02585,
+                "maxCurrent": 0.01,
+                "maxStep": 0.5
+            }
+        },
+        {"id": "rc", "type": "resistor", "pins": ["vcc", "c"], "value": 1000.0},
+        {"id": "re", "type": "resistor", "pins": ["e", "0"], "value": 1000.0}
+    ],
+    "solver": {
+        "method": "modified-nodal-analysis",
+        "integration": "backward-euler",
+        "oversampling": 1,
+        "convergence": {
+            "maxIterations": 64,
+            "absoluteTolerance": 1e-12,
+            "relativeTolerance": 1e-12
+        }
+    }
+}
