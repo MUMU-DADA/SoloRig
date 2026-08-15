@@ -36,7 +36,7 @@
 | 17 | 外部载入 NAM/NAM A2 文件 | 部分完成 | 外部 NAM/NAM A2 asset load、路径校验和 runtime Prepare/Process/Reset 测试 | 独立程序导入 UI、真实模型回归和资源错误恢复 |
 | 18 | IR 箱体模拟 | 已验证（runtime 层） | `ImpulseResponseConvolver` 和 IR 处理测试 | 接入完整箱头/功放链与真实宿主，并明确延迟、采样率和通道语义 |
 | 19 | 外部导入 IR | 已验证（受限导入层） | WAV/IR 外部包导入、长度/扩展名/采样率适配测试 | 产品导入 UI、取消/错误恢复和大文件资源限制 |
-| 20 | 全功能/边界测试 | 部分完成 | 当前核心 `577/577`、CTest `5/5`、VST3 Validator `47/47` 及 UI/ABI/C# contract；M23-B 增加完整外部管线回归，M23-C1/C2a/C2b 增加无源、Shockley 和 RC 离散频响数学 golden 的真实 Circuit v2 MNA 对照 | 真实 ASIO、多设备、授权参考、完整产品流程和覆盖矩阵逐项闭环 |
+| 20 | 全功能/边界测试 | 部分完成 | 当前核心 `579/579`、CTest `5/5`、VST3 Validator `47/47` 及 UI/ABI/C# contract；M23-B 增加完整外部管线回归，M23-C1/C2a/C2b/C2c 增加无源、Shockley、RC 离散频响和动态结电容数学 golden 的真实 Circuit v2 MNA 对照 | 真实 ASIO、多设备、授权参考、完整产品流程和覆盖矩阵逐项闭环 |
 | 21 | 默认效果器外观与自定义皮肤 | 部分完成 | 模块元数据/主题/编辑器基础资源路径已有实现 | 默认旋钮/拨档/踩钉组件、模块自定义皮肤包、资源安全校验和视觉回归 |
 | 22 | 逻辑、元属性、外观三层模块包 | 部分完成 | `ModulePackage` manifest、logic、descriptor/metadata 和外部 Circuit/NAM/IR 入口 | 三层独立版本/校验、默认皮肤回退、模拟逻辑与数字逻辑统一运行契约 |
 | 23 | 多 ASIO 设备与任意 I/O 通道 | 受阻 | `AsioDeviceDescriptor`、通道映射和异步时钟分析器 | 真实 ASIO 后端、多设备时钟/重采样、任意输入输出选择和故障恢复 |
@@ -103,4 +103,5 @@ M23-A 只有在以下证据同时存在时才算完成：
 - 本轮独立复验：核心 `573/573`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI、C# contract 全通过；build manifest MD5 `02D133DBFE9629C2BA85599A6BDE86F1`。下一步是为代表性 generic 类别接入可审计的授权 SPICE/golden/实机数据，并继续保持缺失资料时的阻塞状态。
 - M23-C2a 新增 Shockley 二极管静态曲线网表、独立方程 golden 和证据包；测试按每个输入点用独立 Newton 方程求解，再对照真实 Circuit v2 MNA 的静态输出。SPICE comparison 仍为 `blocked`，不把 self-authored 数学结果升级为器件校准。
 - M23-C2b 新增 RC 离散频响 golden 和证据包；测试按独立 backward-Euler 离散传递函数生成幅度/相位参考，再用真实 MNA 运行 512 点预热与 1024 点测量逐频率比较。SPICE comparison 仍为 `blocked`，频响结果只代表自有数学模型。
-- 本轮独立复验：核心 `577/577`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI、C# contract 全通过；build manifest MD5 `157FC363F9151D49E90D22E514D7AC0A`。下一步是扩展更多代表性类别的 DC/动态证据，并继续保持缺失资料时的阻塞状态。
+- M23-C2c 新增带结电容的 Shockley 动态网表、独立 backward-Euler/Newton golden 和证据包；测试逐个重算 192 kHz/4x 的每个历史子步，再对照真实 MNA 的动态输出。SPICE comparison 仍为 `blocked`，不把自有动态模型当作商业结电容校准。
+- 本轮独立复验：核心 `579/579`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI、C# contract 全通过；build manifest MD5 `F329CF2FCCB2C2628030FBE3DA51B0E7`。下一步是扩展更多代表性类别的 DC/动态证据，并继续保持缺失资料时的阻塞状态。
