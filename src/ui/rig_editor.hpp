@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -47,6 +48,11 @@ struct RigEditorNode {
     bool selected{};
     bool unresolved{};
     std::string diagnostic;
+    uint32_t declared_latency_samples{};
+    double estimated_cpu_percent{};
+    double measured_cpu_percent{};
+    double peak_cpu_percent{};
+    bool measurement_available{};
 };
 
 struct RigEditorConnection {
@@ -69,6 +75,10 @@ struct ModuleCatalogEntry {
 struct RigEditorPerformance {
     uint32_t total_latency_samples{};
     double estimated_cpu_percent{};
+    double measured_cpu_percent{};
+    double peak_cpu_percent{};
+    uint32_t measured_node_count{};
+    bool measurement_available{};
 };
 
 struct RigEditorScene {
@@ -117,6 +127,13 @@ public:
     [[nodiscard]] bool SetNodeParameter(std::string_view instance_id,
                                          std::string_view parameter_id,
                                          float value);
+    // Control-thread host bridge for measurements captured by a stopped
+    // RigRuntime. These diagnostics never become part of the saved preset.
+    [[nodiscard]] bool SetMeasuredPerformance(std::string_view instance_id,
+                                               uint32_t declared_latency_samples,
+                                               double measured_cpu_percent,
+                                               double peak_cpu_percent);
+    void ClearMeasuredPerformance();
     [[nodiscard]] std::optional<std::vector<MidiBinding>> MidiBindings() const;
     [[nodiscard]] bool SetMidiBindings(std::vector<MidiBinding> bindings);
     [[nodiscard]] bool IsDirty() const noexcept;
@@ -178,6 +195,12 @@ private:
     std::string file_status_;
     std::string resource_status_{"No external resource imported"};
     std::vector<std::string> unresolved_nodes_;
+    struct MeasuredNodePerformance {
+        uint32_t declared_latency_samples{};
+        double measured_cpu_percent{};
+        double peak_cpu_percent{};
+    };
+    std::map<std::string, MeasuredNodePerformance, std::less<>> measured_performance_;
     RigEditorScene scene_;
 };
 

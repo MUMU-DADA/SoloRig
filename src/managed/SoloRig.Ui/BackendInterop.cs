@@ -35,6 +35,10 @@ internal struct NativeSnapshotInfo
     public uint TotalLatencySamples;
     public double EstimatedCpuPercent;
     public IntPtr ResourceStatus;
+    public double MeasuredCpuPercent;
+    public double PeakCpuPercent;
+    public uint MeasuredNodeCount;
+    public byte MeasurementAvailable;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -48,6 +52,11 @@ internal struct NativeNodeView
     public byte Unresolved;
     public IntPtr Diagnostic;
     public uint ParameterCount;
+    public uint DeclaredLatencySamples;
+    public double EstimatedCpuPercent;
+    public double MeasuredCpuPercent;
+    public double PeakCpuPercent;
+    public byte MeasurementAvailable;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -172,6 +181,14 @@ internal static class NativeMethods
         [MarshalAs(UnmanagedType.LPUTF8Str)] string parameterId, float value);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_set_node_performance_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string instanceId,
+        uint declaredLatencySamples, double measuredCpuPercent, double peakCpuPercent);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_clear_node_performance(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_set_theme_dark(IntPtr backend, byte dark);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -261,9 +278,17 @@ public sealed record NodeSnapshot(
     bool Selected,
     bool Unresolved,
     string Diagnostic,
-    IReadOnlyList<ParameterSnapshot> Parameters)
+    IReadOnlyList<ParameterSnapshot> Parameters,
+    uint DeclaredLatencySamples,
+    double EstimatedCpuPercent,
+    double MeasuredCpuPercent,
+    double PeakCpuPercent,
+    bool MeasurementAvailable)
 {
     public string LayoutText => $"Layout: ({LayoutX:0}, {LayoutY:0})";
+    public string PerformanceText => MeasurementAvailable
+        ? $"实测 {MeasuredCpuPercent:0.0}% / 峰值 {PeakCpuPercent:0.0}% CPU · {DeclaredLatencySamples} samples"
+        : $"预计 {EstimatedCpuPercent:0.0}% CPU · {DeclaredLatencySamples} samples · 实测未连接";
 }
 public sealed record ConnectionSnapshot(
     string SourceInstanceId,
@@ -338,7 +363,11 @@ public sealed record BackendSnapshot(
     IReadOnlyList<BindingSnapshot> Bindings,
     uint TotalLatencySamples,
     double EstimatedCpuPercent,
-    string ResourceStatus);
+    string ResourceStatus,
+    double MeasuredCpuPercent,
+    double PeakCpuPercent,
+    uint MeasuredNodeCount,
+    bool MeasurementAvailable);
 
 public sealed class BackendSession : IDisposable
 {
@@ -390,7 +419,9 @@ public sealed class BackendSession : IDisposable
                 }
                 nodes.Add(new NodeSnapshot(
                     NativeMethods.Utf8(node.InstanceId), NativeMethods.Utf8(node.ModuleId), node.LayoutX, node.LayoutY,
-                    node.Selected != 0, node.Unresolved != 0, NativeMethods.Utf8(node.Diagnostic), parameters));
+                    node.Selected != 0, node.Unresolved != 0, NativeMethods.Utf8(node.Diagnostic), parameters,
+                    node.DeclaredLatencySamples, node.EstimatedCpuPercent, node.MeasuredCpuPercent,
+                    node.PeakCpuPercent, node.MeasurementAvailable != 0));
             }
             var connections = new List<ConnectionSnapshot>((int)info.ConnectionCount);
             for (uint connectionIndex = 0; connectionIndex < info.ConnectionCount; connectionIndex++)
@@ -411,7 +442,9 @@ public sealed class BackendSession : IDisposable
                 NativeMethods.Utf8(info.PresetName), NativeMethods.Utf8(info.SourcePath), NativeMethods.Utf8(info.AudioStatus),
                 NativeMethods.Utf8(info.FileStatus), NativeMethods.Utf8(info.MidiStatus), info.ViewportWidth,
                 info.ViewportHeight, info.DpiScale, info.Dirty != 0, nodes, connections, bindings,
-                info.TotalLatencySamples, info.EstimatedCpuPercent, NativeMethods.Utf8(info.ResourceStatus));
+                info.TotalLatencySamples, info.EstimatedCpuPercent, NativeMethods.Utf8(info.ResourceStatus),
+                info.MeasuredCpuPercent, info.PeakCpuPercent, info.MeasuredNodeCount,
+                info.MeasurementAvailable != 0);
         }
         finally
         {
@@ -428,6 +461,14 @@ public sealed class BackendSession : IDisposable
         }
         Ensure(NativeMethods.solorig_backend_set_parameter_utf8(handle, target[..separator], target[(separator + 1)..], value), "set parameter");
     }
+
+    public void SetNodePerformance(string instanceId, uint declaredLatencySamples,
+        double measuredCpuPercent, double peakCpuPercent) =>
+        Ensure(NativeMethods.solorig_backend_set_node_performance_utf8(handle, instanceId,
+            declaredLatencySamples, measuredCpuPercent, peakCpuPercent), "set node performance");
+
+    public void ClearNodePerformance() =>
+        Ensure(NativeMethods.solorig_backend_clear_node_performance(handle), "clear node performance");
 
     public void SetTheme(bool dark) => Ensure(NativeMethods.solorig_backend_set_theme_dark(handle, dark ? (byte)1 : (byte)0), "set theme");
 

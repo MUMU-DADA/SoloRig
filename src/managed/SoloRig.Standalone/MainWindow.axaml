@@ -121,6 +121,7 @@
                   <TextBlock FontSize="17" FontWeight="Bold" Text="{Binding InstanceId}" />
                   <TextBlock Text="{Binding ModuleId}" TextWrapping="Wrap" Foreground="#D7DDE6" />
                   <TextBlock Text="{Binding LayoutText}" Foreground="#B8C1CD" />
+                  <TextBlock Text="{Binding PerformanceText}" Foreground="#AAB5C5" TextWrapping="Wrap" />
                   <TextBlock Text="缺失模块资源" IsVisible="{Binding Unresolved}" Foreground="#FFB454" />
                 </StackPanel>
               </Border>

@@ -2,6 +2,9 @@ using SoloRig.Ui;
 
 using var viewModel = new RigEditorViewModel();
 Require(viewModel.Nodes.Count >= 2, "default snapshot exposes Drive and Delay nodes");
+Require(viewModel.Nodes.All(node => node.EstimatedCpuPercent > 0), "per-node estimated performance is visible");
+Require(viewModel.Nodes.All(node => !node.MeasurementAvailable), "startup keeps measured performance explicitly unavailable");
+Require(viewModel.PerformanceStatus.Contains("实测未连接", StringComparison.Ordinal), "performance status distinguishes estimate from measurement");
 Require(viewModel.Snapshot.Connections.Count == 1, "default snapshot exposes the Drive-to-Delay connection");
 Require(viewModel.MidiStatus.Contains("closed", StringComparison.OrdinalIgnoreCase), "startup MIDI remains closed");
 Require(viewModel.ModuleCatalog.Count >= 2, "module catalog exposes built-in modules");

@@ -14,8 +14,9 @@ public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, dou
     public string Diagnostic => Source.Diagnostic;
     public IReadOnlyList<ParameterSnapshot> Parameters => Source.Parameters;
     public string LayoutText => Source.LayoutText;
+    public string PerformanceText => Source.PerformanceText;
     public double Width => 196.0;
-    public double Height => 126.0;
+    public double Height => 142.0;
     public string CardBackground => Selected ? "#3D6682" : "#30343B";
     public string CardBorder => Selected ? "#79C7FF" : "#777F8A";
 }
@@ -57,7 +58,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     private static BackendSnapshot EmptySnapshot => new(
         0, true, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty,
-        1280, 720, 1, false, [], [], [], 0, 0, "No external resource imported");
+        1280, 720, 1, false, [], [], [], 0, 0, "No external resource imported", 0, 0, 0, false);
 
     public RigEditorViewModel()
     {
@@ -125,7 +126,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public string FileStatus => string.IsNullOrWhiteSpace(snapshot.SourcePath)
         ? $"Preset: unsaved default{(snapshot.Dirty ? " *" : string.Empty)}"
         : $"Preset: {snapshot.SourcePath}{(snapshot.Dirty ? " *" : string.Empty)}";
-    public string PerformanceStatus => $"性能/延迟: {snapshot.EstimatedCpuPercent:0.0}% CPU · {snapshot.TotalLatencySamples} samples";
+    public string PerformanceStatus => snapshot.MeasurementAvailable
+        ? $"性能/延迟: 实测 {snapshot.MeasuredCpuPercent:0.0}% / 峰值 {snapshot.PeakCpuPercent:0.0}% CPU · {snapshot.TotalLatencySamples} samples"
+        : $"性能/延迟: 预计 {snapshot.EstimatedCpuPercent:0.0}% CPU · {snapshot.TotalLatencySamples} samples · 实测未连接";
     public string ResourceStatus => $"资源: {snapshot.ResourceStatus}";
     public RealtimeContractSnapshot RealtimeContract => realtimeContract;
     public WhiteboxStatusSnapshot WhiteboxStatus => whiteboxStatus;

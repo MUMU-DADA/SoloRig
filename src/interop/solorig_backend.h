@@ -49,6 +49,10 @@ typedef struct SoloRigSnapshotInfo {
     uint32_t total_latency_samples;
     double estimated_cpu_percent;
     const char* resource_status_utf8;
+    double measured_cpu_percent;
+    double peak_cpu_percent;
+    uint32_t measured_node_count;
+    uint8_t measurement_available;
 } SoloRigSnapshotInfo;
 
 typedef struct SoloRigModuleCatalogView {
@@ -70,6 +74,11 @@ typedef struct SoloRigNodeView {
     uint8_t unresolved;
     const char* diagnostic_utf8;
     uint32_t parameter_count;
+    uint32_t declared_latency_samples;
+    double estimated_cpu_percent;
+    double measured_cpu_percent;
+    double peak_cpu_percent;
+    uint8_t measurement_available;
 } SoloRigNodeView;
 
 typedef struct SoloRigParameterView {
@@ -175,6 +184,16 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_parameter_utf8(
     const char* instance_id_utf8,
     const char* parameter_id_utf8,
     float value);
+// Control/UI-thread host bridge. Values must come from an actual stopped
+// runtime snapshot; this function does not perform audio processing.
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_node_performance_utf8(
+    SoloRigBackend* backend,
+    const char* instance_id_utf8,
+    uint32_t declared_latency_samples,
+    double measured_cpu_percent,
+    double peak_cpu_percent);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_clear_node_performance(
+    SoloRigBackend* backend);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark(
     SoloRigBackend* backend,
     uint8_t dark);

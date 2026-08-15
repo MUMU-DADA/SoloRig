@@ -121,6 +121,7 @@ void RigEditorViewModel::ApplyPreset(RigPreset preset, std::optional<std::filesy
     }
     layout_ = PedalLayout(GridSize());
     unresolved_nodes_.clear();
+    measured_performance_.clear();
     for (const auto& node : preset_.nodes) {
         const auto position = (std::isfinite(node.layout_x) && std::isfinite(node.layout_y))
             ? PedalPosition{node.layout_x, node.layout_y}
@@ -229,6 +230,35 @@ bool RigEditorViewModel::SetNodeParameter(std::string_view instance_id,
     dirty_ = true;
     SetFileStatus("Unsaved changes");
     return true;
+}
+
+bool RigEditorViewModel::SetMeasuredPerformance(std::string_view instance_id,
+                                                uint32_t declared_latency_samples,
+                                                double measured_cpu_percent,
+                                                double peak_cpu_percent) {
+    if (instance_id.empty() || !std::isfinite(measured_cpu_percent) ||
+        !std::isfinite(peak_cpu_percent) || measured_cpu_percent < 0.0 ||
+        peak_cpu_percent < measured_cpu_percent) {
+        return false;
+    }
+    const auto node = std::ranges::find_if(preset_.nodes, [instance_id](const PresetNode& candidate) {
+        return candidate.instance_id == instance_id;
+    });
+    if (node == preset_.nodes.end()) {
+        return false;
+    }
+    measured_performance_[std::string(instance_id)] = {
+        .declared_latency_samples = declared_latency_samples,
+        .measured_cpu_percent = measured_cpu_percent,
+        .peak_cpu_percent = peak_cpu_percent,
+    };
+    RebuildScene();
+    return true;
+}
+
+void RigEditorViewModel::ClearMeasuredPerformance() {
+    measured_performance_.clear();
+    RebuildScene();
 }
 
 std::optional<std::vector<MidiBinding>> RigEditorViewModel::MidiBindings() const {
@@ -577,12 +607,21 @@ void RigEditorViewModel::RebuildScene() {
     scene_.source_path = source_path_.has_value() ? source_path_->string() : std::string{};
     scene_.resource_status = resource_status_;
     scene_.performance = {};
+    scene_.performance.measured_node_count = 0U;
     for (const auto& node : preset_.nodes) {
         if (const auto* entry = CatalogEntry(node.module_id); entry != nullptr) {
             scene_.performance.total_latency_samples += entry->latency_samples;
             scene_.performance.estimated_cpu_percent += entry->estimated_cpu_percent;
         }
+        if (const auto measured = measured_performance_.find(node.instance_id);
+            measured != measured_performance_.end()) {
+            scene_.performance.measured_cpu_percent += measured->second.measured_cpu_percent;
+            scene_.performance.peak_cpu_percent += measured->second.peak_cpu_percent;
+            ++scene_.performance.measured_node_count;
+        }
     }
+    scene_.performance.measurement_available = !preset_.nodes.empty() &&
+        static_cast<std::size_t>(scene_.performance.measured_node_count) == preset_.nodes.size();
     scene_.dirty = dirty_;
     scene_.nodes.clear();
     scene_.connections.clear();
@@ -590,6 +629,8 @@ void RigEditorViewModel::RebuildScene() {
     constexpr double kNodeHeight = 126.0;
     for (const auto& node : preset_.nodes) {
         const auto position = layout_.Find(node.instance_id).value_or(PedalPosition{});
+        const auto* entry = CatalogEntry(node.module_id);
+        const auto measured = measured_performance_.find(node.instance_id);
         scene_.nodes.push_back({.instance_id = node.instance_id,
                                 .module_id = node.module_id,
                                 .bounds = {.x = position.x * dpi_scale_,
@@ -598,7 +639,16 @@ void RigEditorViewModel::RebuildScene() {
                                            .height = kNodeHeight * dpi_scale_},
                                 .selected = node.instance_id == dragging_instance_id_,
                                 .unresolved = !IsKnownModule(node.module_id),
-                                .diagnostic = !IsKnownModule(node.module_id) ? "Missing module asset" : std::string{}});
+                                .diagnostic = !IsKnownModule(node.module_id) ? "Missing module asset" : std::string{},
+                                .declared_latency_samples = measured == measured_performance_.end()
+                                    ? (entry == nullptr ? 0U : entry->latency_samples)
+                                    : measured->second.declared_latency_samples,
+                                .estimated_cpu_percent = entry == nullptr ? 0.0 : entry->estimated_cpu_percent,
+                                .measured_cpu_percent = measured == measured_performance_.end()
+                                    ? 0.0 : measured->second.measured_cpu_percent,
+                                .peak_cpu_percent = measured == measured_performance_.end()
+                                    ? 0.0 : measured->second.peak_cpu_percent,
+                                .measurement_available = measured != measured_performance_.end()});
     }
     for (const auto& connection : preset_.connections) {
         const auto* source = FindSceneNode(connection.source_instance_id);

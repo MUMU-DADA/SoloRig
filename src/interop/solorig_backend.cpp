@@ -202,7 +202,7 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_info(
     if (snapshot == nullptr || out_info == nullptr) {
         return SOLO_RIG_STATUS_INVALID_ARGUMENT;
     }
-    out_info->schema_version = 2U;
+    out_info->schema_version = 3U;
     out_info->dark_theme = snapshot->scene.theme.id.find("dark") != std::string::npos ? 1U : 0U;
     out_info->preset_id_utf8 = snapshot->preset.preset_id.c_str();
     out_info->preset_name_utf8 = snapshot->preset.name.c_str();
@@ -222,6 +222,10 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_info(
     out_info->total_latency_samples = snapshot->scene.performance.total_latency_samples;
     out_info->estimated_cpu_percent = snapshot->scene.performance.estimated_cpu_percent;
     out_info->resource_status_utf8 = snapshot->scene.resource_status.c_str();
+    out_info->measured_cpu_percent = snapshot->scene.performance.measured_cpu_percent;
+    out_info->peak_cpu_percent = snapshot->scene.performance.peak_cpu_percent;
+    out_info->measured_node_count = snapshot->scene.performance.measured_node_count;
+    out_info->measurement_available = snapshot->scene.performance.measurement_available ? 1U : 0U;
     return SOLO_RIG_STATUS_OK;
 }
 
@@ -242,6 +246,11 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node(
     out_node->unresolved = node->unresolved ? 1U : 0U;
     out_node->diagnostic_utf8 = node->diagnostic.c_str();
     out_node->parameter_count = static_cast<uint32_t>(preset_node->parameter_values.size());
+    out_node->declared_latency_samples = node->declared_latency_samples;
+    out_node->estimated_cpu_percent = node->estimated_cpu_percent;
+    out_node->measured_cpu_percent = node->measured_cpu_percent;
+    out_node->peak_cpu_percent = node->peak_cpu_percent;
+    out_node->measurement_available = node->measurement_available ? 1U : 0U;
     return SOLO_RIG_STATUS_OK;
 }
 
@@ -308,6 +317,38 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_parameter_utf8(
     if (!backend->editor.SetNodeParameter(instance_id_utf8, parameter_id_utf8, value)) {
         return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "parameter target was not found or value was rejected");
     }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_node_performance_utf8(
+    SoloRigBackend* backend,
+    const char* instance_id_utf8,
+    uint32_t declared_latency_samples,
+    double measured_cpu_percent,
+    double peak_cpu_percent) {
+    if (!ValidBackend(backend) || !ValidText(instance_id_utf8) ||
+        !std::isfinite(measured_cpu_percent) || !std::isfinite(peak_cpu_percent) ||
+        measured_cpu_percent < 0.0 || peak_cpu_percent < measured_cpu_percent) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "node performance requires finite non-negative values with peak >= last");
+    }
+    if (!backend->editor.SetMeasuredPerformance(instance_id_utf8,
+                                                declared_latency_samples,
+                                                measured_cpu_percent,
+                                                peak_cpu_percent)) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "performance node was not found");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_clear_node_performance(
+    SoloRigBackend* backend) {
+    if (!ValidBackend(backend)) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    backend->editor.ClearMeasuredPerformance();
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }

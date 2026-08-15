@@ -4,6 +4,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 
 TEST_CASE("C ABI backend creates a side-effect-free default snapshot") {
@@ -152,6 +153,46 @@ TEST_CASE("C ABI exposes catalog, transactional editing and performance snapshot
     REQUIRE(info.node_count == 4U);
     REQUIRE(info.total_latency_samples > 0U);
     REQUIRE(info.estimated_cpu_percent > 0.0);
+    REQUIRE(info.schema_version == 3U);
+    REQUIRE(info.measured_node_count == 0U);
+    REQUIRE(info.measurement_available == 0U);
+    SoloRigNodeView node{};
+    REQUIRE(solorig_snapshot_node(snapshot, 0U, &node) == SOLO_RIG_STATUS_OK);
+    REQUIRE(node.estimated_cpu_percent > 0.0);
+    REQUIRE(node.measurement_available == 0U);
+    solorig_snapshot_destroy(snapshot);
+    REQUIRE(solorig_backend_set_node_performance_utf8(
+                backend, "drive-1", 7U, 3.5, 4.0) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_set_node_performance_utf8(
+                backend, "missing", 0U, 1.0, 1.0) == SOLO_RIG_STATUS_NOT_FOUND);
+    REQUIRE(solorig_backend_set_node_performance_utf8(
+                backend, "drive-1", 0U, std::numeric_limits<double>::quiet_NaN(), 1.0) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    REQUIRE(info.measured_node_count == 1U);
+    REQUIRE(info.measurement_available == 0U);
+    REQUIRE(solorig_snapshot_node(snapshot, 0U, &node) == SOLO_RIG_STATUS_OK);
+    REQUIRE(node.declared_latency_samples == 7U);
+    REQUIRE(node.measured_cpu_percent == 3.5);
+    REQUIRE(node.peak_cpu_percent == 4.0);
+    REQUIRE(node.measurement_available != 0U);
+    solorig_snapshot_destroy(snapshot);
+    REQUIRE(solorig_backend_set_node_performance_utf8(backend, "delay-1", 96U, 2.5, 3.0) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_set_node_performance_utf8(backend, "drive-2", 0U, 1.0, 1.5) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_set_node_performance_utf8(backend, "drive-3", 0U, 1.0, 1.5) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    REQUIRE(info.measured_node_count == 4U);
+    REQUIRE(info.measurement_available != 0U);
+    REQUIRE(info.measured_cpu_percent == 8.0);
+    REQUIRE(info.peak_cpu_percent == 10.0);
+    solorig_snapshot_destroy(snapshot);
+    REQUIRE(solorig_backend_clear_node_performance(backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    REQUIRE(info.measured_node_count == 0U);
+    REQUIRE(info.measurement_available == 0U);
     solorig_snapshot_destroy(snapshot);
     REQUIRE(solorig_backend_add_node_utf8(backend, "missing.module", "bad", 0.0, 0.0) == SOLO_RIG_STATUS_NOT_FOUND);
     REQUIRE(solorig_backend_delete_node_utf8(backend, "drive-3") == SOLO_RIG_STATUS_OK);
