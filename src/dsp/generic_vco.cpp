@@ -152,6 +152,14 @@ GenericVcoError GenericVcoRuntime::Process(double control_voltage, double& outpu
     return GenericVcoError::None;
 }
 
+GenericVcoError GenericVcoRuntime::ProcessGenerator(double& output) noexcept {
+    if (!prepared_) {
+        output = 0.0;
+        return GenericVcoError::NotPrepared;
+    }
+    return Process(model_.reference_voltage, output);
+}
+
 void GenericVcoRuntime::Reset() noexcept {
     phase_cycles_ = model_.initial_phase_cycles;
     current_frequency_hz_ = model_.base_frequency_hz;

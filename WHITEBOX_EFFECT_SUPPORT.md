@@ -4,7 +4,7 @@
 
 ## 结论
 
-当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 generic dynamic diode/Zener、BJT、JFET、MOSFET、dynamic opamp、bounded OTA、triode、pentode、beam tetrode、vari-mu、lossy-linear coupled-inductor 和 saturating-hysteretic transformer/core 模型。C8b-C9e 已由 `9b06c70` 提交；C10a/C10b、D1a/D1b1/D1b2/D1b3 和 D2a generic clocked BBD/delay 已由 `9dc9368` 提交，D2b1 VCO、D2b2 VCA、D2c1 envelope follower、D2c2 generic LFO、D2d1 optocoupler/LDR response 已分别由 `4774d79`、`4a4bfa1`、`dc2f1b6`、`ebd2438`、`f4c5b14` 提交。D2d2 generic modal spring response、D2e1 behavior graph Compile/lowering route contract、D2e2 fixed-capacity block runtime、D2e3 typed port/route Compile contract、D2e4 typed control runtime、D2e5 typed envelope detector runtime、D2e6 typed optocoupler resistance runtime 和 D2e7 envelope + VCA typed composite route/runtime 当前均为未提交本地候选。这些仍只构成 self-authored clean-room generic 能力，不构成商业器件或 1:1 证据。
+当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 generic dynamic diode/Zener、BJT、JFET、MOSFET、dynamic opamp、bounded OTA、triode、pentode、beam tetrode、vari-mu、lossy-linear coupled-inductor 和 saturating-hysteretic transformer/core 模型。C8b-C9e 已由 `9b06c70` 提交；C10a/C10b、D1a/D1b1/D1b2/D1b3 和 D2a generic clocked BBD/delay 已由 `9dc9368` 提交，D2b1 VCO、D2b2 VCA、D2c1 envelope follower、D2c2 generic LFO、D2d1 optocoupler/LDR response 已分别由 `4774d79`、`4a4bfa1`、`dc2f1b6`、`ebd2438`、`f4c5b14` 提交。D2d2 generic modal spring response、D2e1-D2e7 behavior graph Compile/lowering、固定容量 runtime、typed port/route、控制域 runtime 和 envelope + VCA composite 已随 M19-A1 提交 `2e6a8bf`；M18-D3a 动态 BBD 时钟链为未提交本地候选，M18-D3b/M19-A2 单延迟反馈链也为未提交本地候选。这些仍只构成 self-authored clean-room generic 能力，不构成商业器件或 1:1 证据。
 
 当前仍不能宣称覆盖“绝大多数单块效果器和箱头”。主要阻塞不只是元件数量，还包括实时旋钮/开关、行为模块、复杂拓扑编译、器件高阶物理、功放与电源/负载交互，以及 SPICE/golden/实机误差验证。
 
@@ -76,7 +76,7 @@
 | OTA/VCA 压缩、滤波和调制 | 部分可表达 | OTA、D2b2 generic VCA 和 D2c1 envelope follower 已交付；完整 sidechain、控制馈通和具体芯片行为仍不完整。 |
 | Wah、Phaser、Tremolo | 部分可表达 | 基础滤波、D1a 实时控制和 D2c2 generic LFO 已交付；当前仅有独立 runtime 与 D2e4/D2e7 的受限 typed 控制/组合路径，光学耦合及完整行为图仍缺失。 |
 | 光学压缩、光学 Tremolo、Uni-Vibe | 部分可表达 | D2d1 已交付 generic emitter/LDR 非线性映射及 attack/release 记忆，D2e6 提供受限 emitter -> resistance typed runtime；仍缺真实 LED/灯泡电气语义、自动电路连接和完整行为图。 |
-| Chorus、Flanger、Analog Delay | 部分可表达 | D2a generic clocked BBD/delay、D2b1 VCO 和 D2c2 LFO 已交付，D2e2/D2e4 提供受限 single-signal/typed runtime；尚未形成 BBD clock 联接、clock feedthrough、抗混叠或完整行为图。 |
+| Chorus、Flanger、Analog Delay | 部分可表达 | D2a generic clocked BBD/delay、D2b1 VCO、D2c2 LFO 和 D3a 显式 VCO -> BBD clock typed runtime 已交付；clock feedthrough、抗混叠、反馈组合和完整行为图仍缺失。 |
 | Spring Reverb | 部分可表达 | D2d2 已有固定容量 generic modal spring ringing/decay，D2e2 提供严格单 signal BBD/VCO/spring block 的固定容量单速率串联执行；当前仍只有独立 runtime 与受限组合路径，不含 drive/pickup coil 电气阻抗、逐段传播、非线性碰撞、商业 tank 校准或完整行为图。 |
 | 真空管前级单块/前级通道 | 通用模型初步能力 | generic triode/pentode/beam tetrode/vari-mu 已交付；真实栅流、极间电容、供电和具体管型尚未完成。 |
 
@@ -105,7 +105,7 @@
 - WDF 非线性联合求解、DC 工作点和 K-method 增量优化；
 - 外部/递归/主动/多端 subcircuit macro-model、跨实例状态共享和完整运行时行为绑定；D1b2 仅覆盖显式端口映射的 inline R/C/L 编译期扁平化；
 - 无锁、无分配的实时参数邮箱，以及电位器、开关、继电器和供电变化；
-- 行为岛之间的完整任意路由；当前已具备 D2e2-D2e7 的受限 single-signal、typed port/route、控制域、detector、emitter -> resistance 及 envelope -> VCA composite 路径和独立 runtime，但 feedback、sidechain、动态端口、跨图状态、JSON 图加载与完整效果器语义仍缺失；
+- 行为岛之间的完整任意路由；当前已具备 D2e2-D2e7 的受限 single-signal、typed port/route、控制域、detector、emitter -> resistance、envelope -> VCA composite，以及 D3b 的单一延迟反馈路径和独立 runtime，但一般 feedback、sidechain、动态端口、跨图状态、JSON 图加载与完整效果器语义仍缺失；
 - 完整且授权可审计的型号数据库；
 - 每个模块的 DC、频响、静态曲线、谐波/互调、动态响应、参数扫动、采样率、收敛及误差阈值证据。
 
@@ -125,10 +125,39 @@
 | M18-C9b+ | 其余半导体与运放高阶物理 | C9b-C9e generic BJT/JFET/MOSFET/dynamic opamp 已由 `9b06c70` 交付；更复杂载流子存储、显式供电脚、自热、噪声与商业模型仍排除。 |
 | M18-C10 | 电源与负载交互 | C10a/C10b 已由 `9dc9368` 交付 generic 整流储能/Sag 与 electrodynamic speaker/feedback；不构成完整箱头能量闭环。 |
 | M18-D1 | 实时控制和跨网络语义 | D1a、D1b1/D1b3 relay、D1b2 inline passive flattening 已由 `9dc9368` 交付；外部/递归 macro-model 仍待后续。 |
-| M18-D2 | 行为模块 | D2a-D2d2 已交付独立 BBD/VCO/VCA/envelope/LFO/optocoupler/modal spring；D2e1 Compile/lowering、D2e2 固定容量单速率 block runtime、D2e3 typed port/route Compile contract、D2e4 typed control runtime、D2e5 typed envelope detector runtime、D2e6 typed optocoupler resistance runtime 与 D2e7 envelope + VCA typed composite route/runtime 均为未提交本地候选。D2e4 仅支持 LFO -> VCA.control、audio -> VCA.audio_in、VCA.out -> output.audio；D2e5 仅支持 audio -> envelope.detector、envelope.out -> output.control；D2e6 仅支持 emitter-drive -> optocoupler.emitter、optocoupler.out -> output.resistance；D2e7 仅支持独立 `input.audio`、`input.detector` 加 envelope -> VCA 的四路显式链路，不做隐式域转换或外部输入 fan-out。feedback、sidechain、动态端口、跨图状态、JSON 外部加载和商业/SPICE/1:1 语义仍明确排除。 |
+| M18-D2 | 行为模块 | D2a-D2d2 已交付独立 BBD/VCO/VCA/envelope/LFO/optocoupler/modal spring；D2e1-D2e7 的 Compile/lowering、固定容量 runtime、typed port/route、控制域、detector、emitter -> resistance 和 envelope + VCA composite 已随 M19-A1 提交 `2e6a8bf`。这些仍是受限显式链路，不做隐式域转换或外部输入 fan-out；feedback、sidechain、动态端口、跨图状态、JSON 外部加载和商业/SPICE/1:1 语义仍明确排除。 |
 | M18-B 后续收口 | 通用拓扑编译与混合求解 | canonical SPQR/rigid、多端口 R、WDF/MNA 混合树、非线性联合求解和 DC/K-method 闭环。 |
-| M19 | 代表性单块与箱头验证 | M19-A1 已形成未提交本地候选：以 self-authored generic fixture 验证 D2e2-D2e7 五条受限效果链的 Compile/Prepare、Reset、采样率/oversampling、确定性和拒绝边界；核心 `489/489`、CTest `5/5`、Validator `47/47` 及宿主/UI/C ABI/C# contract 全通过，manifest `75151e09517543caa45357ec695cf122`。完整 SPICE/golden/实机校准、商业效果器和 `reference-1to1` 仍需后续资料，资料不足保持 `blocked`。 |
+| M18-D3a | 显式 BBD 时钟控制链 | 已形成未提交本地候选：独立 `generic_bbd_clocked.*` 与 typed `VCO.out(control) -> BBD.clock` runtime 支持显式 `input.audio -> BBD.audio_in`、`BBD.out(audio) -> output.audio`；核心 `496/496`、CTest `5/5`、Validator `47/47` 及宿主/UI/C ABI/C# contract 全通过，manifest `1396cc27618d40dba80d21fcf378cdae`。仍排除 fixed-clock 替代、feedback/sidechain、clock feedthrough、电荷传输、商业抗混叠、JSON、SPICE/1:1。 |
+| M18-D3b | 受限单反馈 BBD/delay 链 | 已形成未提交本地候选：独立 `generic_bbd_feedback.*` 与 typed feedback runtime 仅允许一个显式 `BBD.out(audio) -> BBD.feedback(audio)` 延迟边，反馈值来自上一采样/子步状态；核心 `504/504`、CTest `5/5`、Validator `47/47` 及宿主/UI/C ABI/C# contract 全通过，manifest `6b027d3ed7df4e54a7758b8f98b3f0e4`。一般代数环、无延迟 cycle、多反馈、隐式 fan-out、sidechain 和跨图状态继续拒绝。 |
+| M19 | 代表性单块与箱头验证 | M19-A1 已由 `2e6a8bf` 完成：以 self-authored generic fixture 验证 D2e2-D2e7 五条受限效果链的 Compile/Prepare、Reset、采样率/oversampling、确定性和拒绝边界；核心 `489/489`、CTest `5/5`、Validator `47/47` 及宿主/UI/C ABI/C# contract 全通过，manifest `75151e09517543caa45357ec695cf122`。完整 SPICE/golden/实机校准、商业效果器和 `reference-1to1` 仍需后续资料，资料不足保持 `blocked`。 |
+| M19-A2 | 反馈代表性验证 | 已形成未提交本地候选：self-authored generic VCO -> BBD 单延迟反馈 fixture 验证 Compile/Prepare、上一采样/子步反馈、Reset、采样率/oversampling、非有限和稳定拒绝；不宣称完整 Chorus/Flanger、真实 BBD clock feedthrough、商业硬件、SPICE 或 `reference-1to1`。 |
+| M19-B1 阶段 1 | generic 箱头前后级闭环接口审计 | 已完成静态审计：circuit v2 与 MNA 底层可以在同一实例中容纳 triode/pentode/beam tetrode、C10a Sag、C8b transformer/core 和 C10b speaker，但当前只有单 input/单 output 的 netlist 端口和组件 pins，没有前级/功放/电源/变压器/负载的阶段化 typed route contract。阶段 2 先实现显式 Compile-only contract 与 stable refusal；不在 content 层固定拓扑、控制值或隐藏状态。 |
+| M19-B1 阶段 2b/3b | generic 箱头真实 pin/net contract 与 MNA lowering/runtime | 未提交本地候选：2b 使用真实 triode/pentode/beam、C10a、transformer 四端和 speaker 两端；secondary return 保留真实 pin 名但显式接到 `ground`，并将 terminal 合并进 ground net，output 仍复用真实 `secondary_dot`。3b 已证明 caller-owned netlist 可 Compile/Prepare/Solve，48/96/192 kHz、1x/4x、Reset 和有限确定性序列通过；浮动 secondary 回归稳定拒绝。 |
 | M20 | 性能与产品全量回归 | 192 kHz/过采样、CPU、延迟、无分配、稳定性、C ABI、VST3、UI 和 Validator 全量通过。 |
+
+## M19-B1 阶段 1 审计结论
+
+- `circuit.json v2` 的真实表达是一个版本化 netlist：`nodes`/`ports`/`supplies`/`components`/`parameter_bindings` 和 solver 配置。`CompileMnaCircuit` 当前只接受至多一个 input port 和一个 output port；器件之间通过共享 node 名称连接，没有独立的前级、功放、输出变压器或 speaker stage/route 类型。
+- generic triode 使用 `[plate, grid, cathode]` 三节点 KCL/Jacobian，无 branch unknown 或持久动态 history；pentode 与 beam tetrode 使用 `[plate, screen, grid, cathode]` 四节点 KCL/Jacobian，同样没有独立 branch。Compile 会拒绝控制节点复用、缺 pin、错误模型或未授权 model reference。
+- C10a `rectified-reservoir` supply 是 `[positive, negative]` 两端电压源 branch unknown，Newton stamp 读取 branch current 并维护 Sag/ripple phase；Prepare 预分配 state，Reset 恢复 `initialSag`，失败稳定返回 `NonFinite`、`SingularMatrix` 或 `NonConvergent`。
+- C8b `saturating-hysteretic` coupled-inductor/core 使用四个绕组节点、primary/secondary 两个 branch unknown，以及独立 flux/hysteresis history；C10b electrodynamic speaker 使用两节点动态 branch unknown 和 current/velocity/displacement history。两者均在同一 MNA Newton/BE/oversampling 路径中 Prepare/Reset，并遵守 Solve 的无分配、无锁、无文件边界。
+- 已有 `dynamic opamp` 负反馈驱动 speaker 的 MNA 测试证明“一个已声明网表内的输出级与动态负载联合求解”可行；现有 triode/pentode/beam/core/supply 证据分别覆盖 Compile/Prepare/Solve、Reset、过采样和奇异/不收敛边界。但尚无一个可审计的 generic 前级 -> 功放 -> transformer/core -> speaker 阶段契约，也没有证据证明这些阶段已经以稳定接口组合。
+
+### 阶段 2b/3b 准入结论与 stable refusal
+
+底层 MNA 数学和 branch/state 资源足以容纳 self-authored generic 最小网表；阶段 2b 已落地独立 typed Compile plan（固定容量、真实 pin、显式节点/端口方向和域、完整 terminal membership、无隐藏状态），阶段 3b 将 Ready plan 与 caller-owned netlist 做映射校验后调用既有 MNA Compile/Prepare/Solve。无法满足任一契约的图统一返回 stable refusal。
+
+阶段 2b/3b 的最小 fixture 由真实 circuit nodes 和 MNA 元件组成，不能由 content 固定数值、数字 IR/EQ、隐藏反馈或商业命名补齐。secondary return 显式连接 reference ground 后，fixture 已取得有限 Solve；Newton 上限 `256` 是 fixture 调用方声明值，不是 content 默认值。浮动次级回归必须稳定拒绝，不能静默修复。
+
+风险保持明确：现有 dynamic opamp 不抽取 C10a supply branch 的功率级电流，speaker 只提供 generic electromechanical 负载，transformer/core 不是商业磁芯，triode/pentode/beam 不是具体功率管；因此当前不能宣称完整电源-功放-变压器-扬声器能量闭环、箱体声学、SOA/保护、SPICE/golden 或 `reference-1to-1`。
+
+## M19-B1 阶段 2b/3b 本地候选
+
+- 独立 `src/content/generic_tube_amp_compile.*`、`fixtures/whitebox/m19b1_generic_tube_amp_compile_fixture.*` 和 `tests/generic_tube_amp_compile_tests.cpp` 定义固定容量 `std::array` typed request/plan。成功只表示结构契约可供后续 lowering，不表示箱头闭环已运行。
+- 允许的最小结构由真实 terminal/net 表达：外部 input 节点经 `input_coupling` 到 triode grid；triode plate 经 `interstage_coupling` 到 pentode/beam grid；单一 C10a positive/negative rail 通过声明的 `triode_plate_load`、`screen_feed`、`power_plate_load` 供电；功率管 plate 与 transformer `primary_dot` 相连、`primary_return` 回到 supply rail；transformer 四端 secondary 与 speaker 两端相连，speaker positive/secondary dot 节点同时作为唯一 output measurement。不存在虚构的 `plate_supply`、`screen_supply` 或 `speaker.output` 端口。共享模拟 net 仅接受 contract 列出的完整 terminal membership，额外 terminal、缺失 terminal、短接、跨域和未声明连接稳定拒绝。
+- Compile 为 `noexcept`、无文件/JSON 访问、无 runtime 分配、无 MNA/Solve 副作用；失败返回单一错误且不带 partially prepared plan。错误分类包括 `MissingStage`、`DuplicateStage`、`DuplicateRoute`、`InvalidModelReference`、`IncompatibleConnection`、`CapacityExceeded`、`NonFinite`、fan-in/out、cycle 和供电/变压器连接拒绝。
+- 本地候选验证：`generic_tube_amp_compile` 专项用例已并入核心，覆盖合法 pentode/beam-tetrode、缺失/重复/错接、node/pin 篡改、fan-in/fan-out、cycle、模型/容量/非有限和失败原子性；本次增量构建核心 `513/513`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 均通过，manifest `8660354af48f41f6a78486645060b361`。
+- 2b Compile 固定容量为 11 个 net、11 个 caller-owned nodes、最多 9 个 terminal/net，`noexcept`、无 JSON/文件/MNA 副作用；3b 的独立 lowering/runtime 不生成组件、节点、参数，也不修改共享 MNA。ground net 显式承载 supply negative、偏置回路和 transformer/speaker secondary return，secondary pin/domain 仍保持真实定义。专项测试覆盖节点/pin、供电/transformer polarity/speaker output、缺失/额外器件、浮动次级拒绝、Prepare 清理、Reset、48/96/192 kHz、1x/4x、有限确定性序列和 NaN `NonFinite`。不得引入商业箱头、SPICE/golden/实机等价、功率管 SOA/保护、真实箱体声学、复杂反馈或外部任意 JSON 加载。
 
 ## 覆盖完成口径
 

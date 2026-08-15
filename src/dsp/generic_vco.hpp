@@ -44,6 +44,9 @@ public:
                                           std::uint32_t oversampling) noexcept;
     [[nodiscard]] GenericVcoError SetSampleRate(double sample_rate_hz) noexcept;
     [[nodiscard]] GenericVcoError Process(double control_voltage, double& output) noexcept;
+    // Explicit generator mode uses the model's declared reference voltage;
+    // it does not invent an external control route.
+    [[nodiscard]] GenericVcoError ProcessGenerator(double& output) noexcept;
     void Reset() noexcept;
 
     [[nodiscard]] bool IsPrepared() const noexcept { return prepared_; }
