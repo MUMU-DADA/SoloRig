@@ -1,6 +1,8 @@
 #include "content/module_package.hpp"
 
 #include "content/json.hpp"
+#include "dsp/impulse_response.hpp"
+#include "dsp/nam_processor.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -295,7 +297,7 @@ std::optional<ModulePackageLoadError> ParseModuleLogic(const std::filesystem::pa
         std::ranges::transform(extension, extension.begin(), [](unsigned char character) {
             return static_cast<char>(std::tolower(character));
         });
-        if (extension != ".nam") {
+        if (extension != ".nam" && extension != ".nam-a2") {
             return ModulePackageLoadError::InvalidLogicDefinition;
         }
         logic = NeuralAmpModelLogic{.model_path = logic_path};
@@ -511,6 +513,70 @@ ModulePackageLoadResult LoadModulePackage(const std::filesystem::path& root_dire
         return {.package = std::nullopt, .errors = {*logic_error}};
     }
     return {.package = std::move(package), .errors = {}};
+}
+
+ModulePackageLoadResult LoadExternalModuleAsset(const std::filesystem::path& asset_path,
+                                                ExternalModuleSourceKind source_kind,
+                                                std::string module_id,
+                                                std::string display_name) {
+    if (source_kind == ExternalModuleSourceKind::PackageDirectory || module_id.empty() ||
+        !std::filesystem::is_regular_file(asset_path)) {
+        return {.package = std::nullopt, .errors = {ModulePackageLoadError::ExternalAssetInvalid}};
+    }
+    std::error_code absolute_error;
+    const auto absolute_asset = std::filesystem::absolute(asset_path, absolute_error).lexically_normal();
+    if (absolute_error || absolute_asset.empty()) {
+        return {.package = std::nullopt, .errors = {ModulePackageLoadError::ExternalAssetInvalid}};
+    }
+    if (display_name.empty()) display_name = absolute_asset.filename().string();
+    EffectDescriptor descriptor{
+        .module_id = std::move(module_id),
+        .display_name = std::move(display_name),
+        .api_version = 1U,
+        .category = source_kind == ExternalModuleSourceKind::NeuralAmpModel
+            ? EffectCategory::NeuralAmpModel : EffectCategory::ImpulseResponse,
+        .logic_entry_point = absolute_asset.filename().string(),
+        .declared_latency_samples = 0U,
+    };
+    if (source_kind == ExternalModuleSourceKind::NeuralAmpModel) {
+        NamProcessor probe;
+        if (probe.LoadModel(absolute_asset).has_value() || !probe.ModelInfo().has_value()) {
+            return {.package = std::nullopt, .errors = {ModulePackageLoadError::ExternalAssetInvalid}};
+        }
+        const auto& info = *probe.ModelInfo();
+        descriptor.ports = {
+            {.id = "input", .direction = PortDirection::Input, .max_channels = info.input_channels},
+            {.id = "output", .direction = PortDirection::Output, .max_channels = info.output_channels},
+        };
+        if (!descriptor.Validate().empty()) {
+            return {.package = std::nullopt, .errors = {ModulePackageLoadError::DescriptorInvalid}};
+        }
+        return {.package = ModulePackage{
+                     .descriptor = std::move(descriptor),
+                     .root_directory = absolute_asset.parent_path(),
+                     .logic_path = absolute_asset,
+                     .logic = NeuralAmpModelLogic{.model_path = absolute_asset},
+                 },
+                 .errors = {}};
+    }
+    const auto imported = LoadWaveImpulseResponse(absolute_asset);
+    if (!std::holds_alternative<ImportedImpulseResponse>(imported)) {
+        return {.package = std::nullopt, .errors = {ModulePackageLoadError::ExternalAssetInvalid}};
+    }
+    descriptor.ports = {
+        {.id = "input", .direction = PortDirection::Input, .max_channels = 1U},
+        {.id = "output", .direction = PortDirection::Output, .max_channels = 1U},
+    };
+    if (!descriptor.Validate().empty()) {
+        return {.package = std::nullopt, .errors = {ModulePackageLoadError::DescriptorInvalid}};
+    }
+    return {.package = ModulePackage{
+                 .descriptor = std::move(descriptor),
+                 .root_directory = absolute_asset.parent_path(),
+                 .logic_path = absolute_asset,
+                 .logic = ImpulseResponseLogic{.impulse_response_path = absolute_asset},
+             },
+             .errors = {}};
 }
 
 } // namespace solo_rig

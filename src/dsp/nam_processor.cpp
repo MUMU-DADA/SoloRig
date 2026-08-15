@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <fstream>
 #include <iterator>
 
@@ -41,12 +42,29 @@ std::optional<NamModelLoadError> NamProcessor::LoadModel(const std::filesystem::
     std::ranges::transform(extension, extension.begin(), [](unsigned char character) {
         return static_cast<char>(std::tolower(character));
     });
-    if (extension != ".nam") {
+    if (extension != ".nam" && extension != ".nam-a2") {
         return NamModelLoadError::InvalidExtension;
     }
 
+    std::filesystem::path load_source = source;
+    std::filesystem::path compatibility_copy;
+    if (extension == ".nam-a2") {
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        compatibility_copy = std::filesystem::temp_directory_path() /
+            ("solorig-nam-a2-" + std::to_string(stamp) + ".nam");
+        std::error_code copy_error;
+        std::filesystem::copy_file(source, compatibility_copy,
+                                   std::filesystem::copy_options::overwrite_existing, copy_error);
+        if (copy_error) {
+            return NamModelLoadError::LoadFailure;
+        }
+        load_source = compatibility_copy;
+    }
+
     try {
-        auto model = nam::get_dsp(source);
+        auto model = nam::get_dsp(load_source);
+        std::error_code cleanup_error;
+        if (!compatibility_copy.empty()) std::filesystem::remove(compatibility_copy, cleanup_error);
         if (model == nullptr) {
             return NamModelLoadError::UnsupportedModel;
         }
@@ -67,6 +85,8 @@ std::optional<NamModelLoadError> NamProcessor::LoadModel(const std::filesystem::
         output_channels_.clear();
         return std::nullopt;
     } catch (...) {
+        std::error_code cleanup_error;
+        if (!compatibility_copy.empty()) std::filesystem::remove(compatibility_copy, cleanup_error);
         model_.reset();
         model_info_.reset();
         return NamModelLoadError::LoadFailure;

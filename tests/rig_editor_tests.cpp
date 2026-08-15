@@ -389,10 +389,27 @@ TEST_CASE("RigEditor exposes deterministic performance and explicit resource rec
     REQUIRE(!missing.success);
     REQUIRE(editor.Scene().resource_status == before);
     const auto path = std::filesystem::temp_directory_path() / "solorig-test-model.nam";
-    { std::ofstream output(path, std::ios::binary | std::ios::trunc); output << "model"; }
+    std::error_code copy_error;
+    std::filesystem::copy_file(
+        SourcePath("third_party/NeuralAmpModelerCore/example_models/wavenet.nam"),
+        path,
+        std::filesystem::copy_options::overwrite_existing,
+        copy_error);
+    REQUIRE(!copy_error);
     const auto imported = editor.ImportResource(path);
     REQUIRE(imported.success);
     REQUIRE(editor.Scene().resource_status.find("NAM") != std::string::npos);
+    REQUIRE(editor.ExportPreset().external_module_packages.size() == 1U);
+    REQUIRE(editor.Catalog().size() == 3U);
+    const auto preset_path = std::filesystem::temp_directory_path() / "solorig-direct-model.srig";
+    REQUIRE(editor.SaveTo(preset_path).success);
+    solo_rig::RigEditorViewModel restored;
+    REQUIRE(restored.LoadFrom(preset_path).success);
+    REQUIRE(restored.Catalog().size() == 3U);
+    REQUIRE(std::ranges::any_of(restored.Catalog(), [](const auto& entry) {
+        return entry.category == "NAM";
+    }));
     std::error_code cleanup;
     std::filesystem::remove(path, cleanup);
+    std::filesystem::remove(preset_path, cleanup);
 }

@@ -11,6 +11,12 @@
 
 namespace solo_rig {
 
+enum class ExternalModuleSourceKind {
+    PackageDirectory,
+    NeuralAmpModel,
+    ImpulseResponse,
+};
+
 enum class AnalogCircuitSolver {
     ModifiedNodalAnalysis,
 };
@@ -88,6 +94,7 @@ enum class ModulePackageLoadError {
     LogicCategoryMismatch,
     InvalidLogicDefinition,
     LogicParameterUnknown,
+    ExternalAssetInvalid,
 };
 
 struct ModulePackage {
@@ -105,5 +112,10 @@ struct ModulePackageLoadResult {
 
 [[nodiscard]] bool IsSafeRelativeAssetPath(std::string_view path);
 [[nodiscard]] ModulePackageLoadResult LoadModulePackage(const std::filesystem::path& root_directory);
+[[nodiscard]] ModulePackageLoadResult LoadExternalModuleAsset(
+    const std::filesystem::path& asset_path,
+    ExternalModuleSourceKind source_kind,
+    std::string module_id,
+    std::string display_name);
 
 } // namespace solo_rig

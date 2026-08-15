@@ -42,6 +42,25 @@ std::filesystem::path PathFromUtf8(std::string_view text) {
     return std::filesystem::path(encoded);
 }
 
+std::string ExternalModuleSourceKindName(ExternalModuleSourceKind source_kind) {
+    switch (source_kind) {
+    case ExternalModuleSourceKind::PackageDirectory:
+        return "package";
+    case ExternalModuleSourceKind::NeuralAmpModel:
+        return "nam";
+    case ExternalModuleSourceKind::ImpulseResponse:
+        return "ir";
+    }
+    return "package";
+}
+
+std::optional<ExternalModuleSourceKind> ParseExternalModuleSourceKind(std::string_view text) {
+    if (text == "package") return ExternalModuleSourceKind::PackageDirectory;
+    if (text == "nam") return ExternalModuleSourceKind::NeuralAmpModel;
+    if (text == "ir") return ExternalModuleSourceKind::ImpulseResponse;
+    return std::nullopt;
+}
+
 std::optional<double> NumberField(const JsonValue::Object& object, std::string_view key) {
     const auto* value = Find(object, key);
     return value != nullptr && value->AsNumber() != nullptr ? std::optional<double>(*value->AsNumber()) : std::nullopt;
@@ -174,7 +193,9 @@ std::vector<PresetValidationError> ValidatePreset(const RigPreset& preset) {
     }
     std::set<std::string, std::less<>> package_ids;
     for (const auto& package : preset.external_module_packages) {
+        const auto direct_asset = package.source_kind != ExternalModuleSourceKind::PackageDirectory;
         if (package.module_id.empty() || package.root_directory.empty() ||
+            (direct_asset && package.asset_path.empty()) || (!direct_asset && !package.asset_path.empty()) ||
             !package_ids.insert(package.module_id).second) {
             errors.push_back(PresetValidationError::InvalidExternalModulePackage);
         }
@@ -261,7 +282,12 @@ std::string SerializePreset(const RigPreset& preset) {
                 serialized += ',';
             }
             serialized += "{\"moduleId\":\"" + EscapeJsonString(package.module_id) +
-                          "\",\"rootDirectory\":\"" + EscapeJsonString(PathToUtf8(package.root_directory)) + "\"}";
+                          "\",\"rootDirectory\":\"" + EscapeJsonString(PathToUtf8(package.root_directory)) + "\"";
+            if (package.source_kind != ExternalModuleSourceKind::PackageDirectory) {
+                serialized += ",\"sourceKind\":\"" + ExternalModuleSourceKindName(package.source_kind) +
+                    "\",\"assetPath\":\"" + EscapeJsonString(PathToUtf8(package.asset_path)) + "\"";
+            }
+            serialized += "}";
         }
         serialized += "]";
     }
@@ -370,8 +396,20 @@ std::optional<RigPreset> DeserializePreset(std::string_view source) {
             if (!module_id.has_value() || module_id->empty() || !root_directory.has_value() || root_directory->empty()) {
                 return std::nullopt;
             }
+            const auto source_kind = ParseExternalModuleSourceKind(
+                StringField(*package, "sourceKind").value_or("package"));
+            const auto asset_path = StringField(*package, "assetPath");
+            if (!source_kind.has_value() ||
+                (*source_kind == ExternalModuleSourceKind::PackageDirectory
+                     ? asset_path.has_value()
+                     : !asset_path.has_value() || asset_path->empty())) {
+                return std::nullopt;
+            }
             preset.external_module_packages.push_back({.module_id = *module_id,
-                                                       .root_directory = PathFromUtf8(*root_directory)});
+                                                       .root_directory = PathFromUtf8(*root_directory),
+                                                       .source_kind = *source_kind,
+                                                       .asset_path = asset_path.has_value()
+                                                           ? PathFromUtf8(*asset_path) : std::filesystem::path{}});
         }
     }
     return ValidatePreset(preset).empty() ? std::optional<RigPreset>(std::move(preset)) : std::nullopt;

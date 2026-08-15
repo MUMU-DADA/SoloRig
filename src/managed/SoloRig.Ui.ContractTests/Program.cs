@@ -59,7 +59,16 @@ try
     File.Delete(path);
     File.Delete(resourcePath);
     File.WriteAllText(corruptPath, "{not-json");
-    File.WriteAllText(resourcePath, "model");
+    var modelCandidates = new[]
+    {
+        Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "third_party", "NeuralAmpModelerCore", "example_models", "wavenet.nam")),
+        Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "..", "third_party", "NeuralAmpModelerCore", "example_models", "wavenet.nam")),
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "third_party", "NeuralAmpModelerCore", "example_models", "wavenet.nam")),
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "third_party", "NeuralAmpModelerCore", "example_models", "wavenet.nam"))
+    };
+    var sourceModel = modelCandidates.FirstOrDefault(File.Exists);
+    Require(!string.IsNullOrWhiteSpace(sourceModel), "NAM contract fixture is available");
+    File.Copy(sourceModel!, resourcePath, true);
     Require(viewModel.ImportResource(resourcePath), "explicit resource import is recognized");
     Require(viewModel.Snapshot.ResourceStatus.Contains("NAM", StringComparison.Ordinal), "resource status identifies NAM");
     Require(viewModel.SaveToPath(path), "explicit Save writes a validated preset");

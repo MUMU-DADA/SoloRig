@@ -48,6 +48,16 @@ TEST_CASE("NamProcessor loads and processes the A2 NAM reference model") {
     REQUIRE(processor.Prepare(NamFormat()));
     processor.Process(input, output, 16);
     REQUIRE(std::isfinite(output.ChannelData(0)[0]));
+
+    const auto renamed_path = std::filesystem::temp_directory_path() / "solorig-a2-model.nam-a2";
+    std::error_code cleanup;
+    std::filesystem::copy_file(model_path, renamed_path,
+                               std::filesystem::copy_options::overwrite_existing, cleanup);
+    REQUIRE(!cleanup);
+    REQUIRE(!processor.LoadModel(renamed_path).has_value());
+    REQUIRE(processor.ModelInfo().has_value());
+    REQUIRE(processor.ModelInfo()->architecture == solo_rig::NamArchitecture::A2);
+    std::filesystem::remove(renamed_path, cleanup);
 }
 
 TEST_CASE("NamProcessor refuses a missing or non-NAM external model file") {

@@ -70,6 +70,32 @@ std::string CategoryName(EffectCategory category) {
     return "External";
 }
 
+std::string ImportedAssetModuleId(const std::filesystem::path& source,
+                                  const std::vector<ModuleCatalogEntry>& catalog) {
+    auto stem = source.stem().string();
+    std::string safe_stem;
+    safe_stem.reserve(stem.size());
+    for (const auto character : stem) {
+        const auto unsigned_character = static_cast<unsigned char>(character);
+        if (std::isalnum(unsigned_character)) {
+            safe_stem.push_back(static_cast<char>(std::tolower(unsigned_character)));
+        } else if (safe_stem.empty() || safe_stem.back() != '-') {
+            safe_stem.push_back('-');
+        }
+    }
+    while (!safe_stem.empty() && safe_stem.back() == '-') safe_stem.pop_back();
+    if (safe_stem.empty()) safe_stem = "asset";
+    const std::string prefix = "org.mumu-dada.solorig.imported.";
+    auto candidate = prefix + safe_stem;
+    std::size_t suffix = 2U;
+    while (std::ranges::any_of(catalog, [&candidate](const auto& entry) {
+        return entry.module_id == candidate;
+    })) {
+        candidate = prefix + safe_stem + "-" + std::to_string(suffix++);
+    }
+    return candidate;
+}
+
 bool HasConnection(const RigPreset& preset, std::string_view source, std::string_view destination) {
     return std::ranges::any_of(preset.connections, [source, destination](const auto& connection) {
         return connection.source_instance_id == source && connection.destination_instance_id == destination;
@@ -578,12 +604,16 @@ EditorFileResult RigEditorViewModel::ImportResource(const std::filesystem::path&
         return static_cast<char>(std::tolower(character));
     });
     std::string label;
+    ExternalModuleSourceKind source_kind = ExternalModuleSourceKind::PackageDirectory;
     if (extension == ".nam") {
         label = "NAM";
+        source_kind = ExternalModuleSourceKind::NeuralAmpModel;
     } else if (extension == ".nam-a2") {
         label = "NAM A2";
+        source_kind = ExternalModuleSourceKind::NeuralAmpModel;
     } else if (extension == ".ir" || extension == ".wav") {
         label = "IR";
+        source_kind = ExternalModuleSourceKind::ImpulseResponse;
     } else if (extension == ".json") {
         label = "external circuit";
     } else {
@@ -595,7 +625,36 @@ EditorFileResult RigEditorViewModel::ImportResource(const std::filesystem::path&
         SetFileStatus("Resource import failed: file cannot be read.");
         return {.success = false, .error = EditorFileError::CannotRead, .message = file_status_};
     }
-    resource_status_ = "Imported " + label + ": " + source.filename().string();
+    if (source_kind != ExternalModuleSourceKind::PackageDirectory) {
+        std::error_code absolute_error;
+        const auto absolute_asset = std::filesystem::absolute(source, absolute_error).lexically_normal();
+        if (absolute_error || absolute_asset.empty()) {
+            SetFileStatus("Resource import failed: asset path cannot be normalized.");
+            return {.success = false, .error = EditorFileError::CannotRead, .message = file_status_};
+        }
+        const auto module_id = ImportedAssetModuleId(absolute_asset, catalog_);
+        const auto loaded = LoadExternalModuleAsset(absolute_asset, source_kind, module_id,
+                                                    label + ": " + source.filename().string());
+        if (!loaded.package.has_value() || !loaded.errors.empty()) {
+            SetFileStatus("Resource import failed: " + label + " asset is invalid or unsupported.");
+            return {.success = false, .error = EditorFileError::InvalidSchema, .message = file_status_};
+        }
+        auto candidate = preset_;
+        candidate.external_module_packages.push_back({.module_id = module_id,
+                                                       .root_directory = absolute_asset.parent_path(),
+                                                       .source_kind = source_kind,
+                                                       .asset_path = absolute_asset});
+        if (!ValidatePreset(candidate).empty()) {
+            SetFileStatus("Resource import failed: asset reference could not be added to the preset.");
+            return {.success = false, .error = EditorFileError::InvalidSchema, .message = file_status_};
+        }
+        imported_packages_.emplace(module_id, std::move(*loaded.package));
+        preset_ = std::move(candidate);
+        RebuildCatalog();
+        resource_status_ = "Imported " + label + " module: " + module_id;
+    } else {
+        resource_status_ = "Imported " + label + ": " + source.filename().string();
+    }
     dirty_ = true;
     SetFileStatus("Unsaved changes");
     RebuildScene();
@@ -705,18 +764,21 @@ RigEditorViewModel::LoadExternalPackages(RigPreset& preset,
             return std::nullopt;
         }
         auto root = reference.root_directory;
-        if (root.is_relative()) {
-            root = base_directory / root;
-        }
+        auto asset = reference.asset_path;
+        if (root.is_relative()) root = base_directory / root;
+        if (asset.is_relative()) asset = base_directory / asset;
         std::error_code absolute_error;
         root = std::filesystem::absolute(root, absolute_error).lexically_normal();
         if (absolute_error || root.empty()) {
             diagnostic = "path cannot be normalized for " + reference.module_id;
             return std::nullopt;
         }
-        const auto loaded = LoadModulePackage(root);
+        const auto loaded = reference.source_kind == ExternalModuleSourceKind::PackageDirectory
+            ? LoadModulePackage(root)
+            : LoadExternalModuleAsset(asset, reference.source_kind, reference.module_id, {});
         if (!loaded.package.has_value() || !loaded.errors.empty()) {
-            diagnostic = "could not validate " + reference.module_id + " at " + root.string();
+            diagnostic = "could not validate " + reference.module_id + " at " +
+                (reference.source_kind == ExternalModuleSourceKind::PackageDirectory ? root : asset).string();
             return std::nullopt;
         }
         if (loaded.package->descriptor.module_id != reference.module_id) {
@@ -727,12 +789,19 @@ RigEditorViewModel::LoadExternalPackages(RigPreset& preset,
         const auto relative_skin = package.custom_skin_path.has_value()
             ? package.custom_skin_path->lexically_relative(package.root_directory)
             : std::filesystem::path{};
-        package.root_directory = root;
-        package.logic_path = root / package.descriptor.logic_entry_point;
+        package.root_directory = reference.source_kind == ExternalModuleSourceKind::PackageDirectory
+            ? root : asset.parent_path();
+        package.logic_path = reference.source_kind == ExternalModuleSourceKind::PackageDirectory
+            ? root / package.descriptor.logic_entry_point : asset;
+        if (reference.source_kind != ExternalModuleSourceKind::PackageDirectory) {
+            if (auto* model = std::get_if<NeuralAmpModelLogic>(&package.logic)) model->model_path = asset;
+            if (auto* impulse = std::get_if<ImpulseResponseLogic>(&package.logic)) impulse->impulse_response_path = asset;
+        }
         if (!relative_skin.empty()) {
             package.custom_skin_path = root / relative_skin;
         }
-        reference.root_directory = root;
+        reference.root_directory = package.root_directory;
+        if (reference.source_kind != ExternalModuleSourceKind::PackageDirectory) reference.asset_path = asset;
         packages.emplace(reference.module_id, std::move(package));
     }
     return packages;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "content/module_package.hpp"
 #include "content/theme.hpp"
 #include "control/midi_mapping.hpp"
 
@@ -28,6 +29,10 @@ struct PresetConnection {
 struct ExternalModulePackageRef {
     std::string module_id;
     std::filesystem::path root_directory;
+    // PackageDirectory keeps the manifest-based format used by existing
+    // presets. Direct NAM/IR imports persist the source file separately.
+    ExternalModuleSourceKind source_kind{ExternalModuleSourceKind::PackageDirectory};
+    std::filesystem::path asset_path;
 };
 
 struct RigPreset {

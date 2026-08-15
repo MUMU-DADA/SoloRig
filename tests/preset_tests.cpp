@@ -138,6 +138,30 @@ TEST_CASE("RigPreset schema-v2 persists external module package references and r
     }));
 }
 
+TEST_CASE("RigPreset schema-v2 persists direct NAM and IR asset references") {
+    auto preset = CreatePreset();
+    preset.preset_id = "direct-assets-rig";
+    preset.external_module_packages = {
+        {.module_id = "external.nam",
+         .root_directory = std::filesystem::path("assets"),
+         .source_kind = solo_rig::ExternalModuleSourceKind::NeuralAmpModel,
+         .asset_path = std::filesystem::path("assets/model.nam")},
+        {.module_id = "external.ir",
+         .root_directory = std::filesystem::path("assets"),
+         .source_kind = solo_rig::ExternalModuleSourceKind::ImpulseResponse,
+         .asset_path = std::filesystem::path("assets/cabinet.wav")},
+    };
+    const auto restored = solo_rig::DeserializePreset(solo_rig::SerializePreset(preset));
+    REQUIRE(restored.has_value());
+    REQUIRE(restored->external_module_packages.size() == 2U);
+    REQUIRE(restored->external_module_packages[0].source_kind ==
+            solo_rig::ExternalModuleSourceKind::NeuralAmpModel);
+    REQUIRE(restored->external_module_packages[0].asset_path == std::filesystem::path("assets/model.nam"));
+    REQUIRE(restored->external_module_packages[1].source_kind ==
+            solo_rig::ExternalModuleSourceKind::ImpulseResponse);
+    REQUIRE(restored->external_module_packages[1].asset_path == std::filesystem::path("assets/cabinet.wav"));
+}
+
 TEST_CASE("RigPreset rejects malformed or out-of-range persisted MIDI bindings") {
     const auto invalid = solo_rig::DeserializePreset(
         "{\"schemaVersion\":2,\"presetId\":\"bad\",\"name\":\"Bad\",\"nodes\":[],\"connections\":[],"

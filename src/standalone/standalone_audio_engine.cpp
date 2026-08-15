@@ -310,8 +310,45 @@ bool StandaloneAudioEngine::RunExternalModulePackageRuntimeSelfTest() {
         engine.ProcessBlock(inputs, outputs, 1U, 1U);
         const auto valid = std::fabs(output[0] - 0.25F) < 0.0001F;
         engine.ReleaseRuntime();
+        const std::array<std::uint8_t, 48> wave{
+            'R', 'I', 'F', 'F', 40U, 0U, 0U, 0U, 'W', 'A', 'V', 'E',
+            'f', 'm', 't', ' ', 16U, 0U, 0U, 0U, 1U, 0U, 1U, 0U,
+            0x80U, 0xBBU, 0U, 0U, 0U, 0x77U, 1U, 0U, 2U, 0U, 16U, 0U,
+            'd', 'a', 't', 'a', 4U, 0U, 0U, 0U, 0xFFU, 0x7FU, 0U, 0U};
+        {
+            std::ofstream output_wave(directory / "direct.wav", std::ios::binary | std::ios::trunc);
+            output_wave.write(reinterpret_cast<const char*>(wave.data()),
+                              static_cast<std::streamsize>(wave.size()));
+        }
+        const auto direct_asset = std::filesystem::absolute(directory / "direct.wav", cleanup).lexically_normal();
+        if (cleanup) {
+            std::filesystem::remove_all(directory, cleanup);
+            return false;
+        }
+        RigPreset direct_preset{
+            .preset_id = "standalone-direct-asset-self-test",
+            .name = "Standalone Direct Asset Self Test",
+            .nodes = {{.instance_id = "direct-ir-1",
+                       .module_id = "org.mumu-dada.solorig.imported.direct-ir"}},
+            .external_module_packages = {{.module_id = "org.mumu-dada.solorig.imported.direct-ir",
+                                          .root_directory = direct_asset.parent_path(),
+                                          .source_kind = ExternalModuleSourceKind::ImpulseResponse,
+                                          .asset_path = direct_asset}},
+        };
+        StandaloneAudioEngine direct_engine;
+        if (!direct_engine.BuildRuntime(direct_preset, format)) {
+            std::filesystem::remove_all(directory, cleanup);
+            return false;
+        }
+        std::array<float, 64> direct_input{};
+        std::array<float, 64> direct_output{};
+        direct_input[0] = 1.0F;
+        const float* direct_inputs[] = {direct_input.data()};
+        float* direct_outputs[] = {direct_output.data()};
+        direct_engine.ProcessBlock(direct_inputs, direct_outputs, 1U, 2U);
+        direct_engine.ReleaseRuntime();
         std::filesystem::remove_all(directory, cleanup);
-        return valid;
+        return valid && std::isfinite(direct_output[0]) && direct_output[0] > 0.5F;
     } catch (...) {
         std::filesystem::remove_all(directory, cleanup);
         return false;
@@ -327,12 +364,18 @@ bool StandaloneAudioEngine::BuildRuntime(const RigPreset& preset, const AudioFor
         module_registry_.ClearExternalPackages();
         for (const auto& reference : candidate.external_module_packages) {
             auto root = reference.root_directory;
+            auto asset = reference.asset_path;
             std::error_code path_error;
             root = std::filesystem::absolute(root, path_error).lexically_normal();
             if (path_error || root.empty()) {
                 return false;
             }
-            const auto loaded = LoadModulePackage(root);
+            if (asset.is_relative()) {
+                asset = root / asset;
+            }
+            const auto loaded = reference.source_kind == ExternalModuleSourceKind::PackageDirectory
+                ? LoadModulePackage(root)
+                : LoadExternalModuleAsset(asset, reference.source_kind, reference.module_id, {});
             if (!loaded.package.has_value() || !loaded.errors.empty() ||
                 loaded.package->descriptor.module_id != reference.module_id) {
                 return false;
@@ -341,8 +384,14 @@ bool StandaloneAudioEngine::BuildRuntime(const RigPreset& preset, const AudioFor
             const auto relative_skin = package.custom_skin_path.has_value()
                 ? package.custom_skin_path->lexically_relative(package.root_directory)
                 : std::filesystem::path{};
-            package.root_directory = root;
-            package.logic_path = root / package.descriptor.logic_entry_point;
+            package.root_directory = reference.source_kind == ExternalModuleSourceKind::PackageDirectory
+                ? root : asset.parent_path();
+            package.logic_path = reference.source_kind == ExternalModuleSourceKind::PackageDirectory
+                ? root / package.descriptor.logic_entry_point : asset;
+            if (reference.source_kind != ExternalModuleSourceKind::PackageDirectory) {
+                if (auto* model = std::get_if<NeuralAmpModelLogic>(&package.logic)) model->model_path = asset;
+                if (auto* impulse = std::get_if<ImpulseResponseLogic>(&package.logic)) impulse->impulse_response_path = asset;
+            }
             if (!relative_skin.empty()) {
                 package.custom_skin_path = root / relative_skin;
             }

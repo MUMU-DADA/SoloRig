@@ -1,11 +1,27 @@
 #include "interop/solorig_backend.h"
 #include "test_framework.hpp"
 
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <string>
+
+namespace {
+
+void WriteAbiTestWave(const std::filesystem::path& path) {
+    const std::array<std::uint8_t, 48> wave{
+        'R', 'I', 'F', 'F', 40U, 0U, 0U, 0U, 'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ', 16U, 0U, 0U, 0U, 1U, 0U, 1U, 0U,
+        0x80U, 0xBBU, 0U, 0U, 0U, 0x77U, 1U, 0U, 2U, 0U, 16U, 0U,
+        'd', 'a', 't', 'a', 4U, 0U, 0U, 0U, 0xFFU, 0x7FU, 0U, 0U};
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output.write(reinterpret_cast<const char*>(wave.data()), static_cast<std::streamsize>(wave.size()));
+}
+
+} // namespace
 
 TEST_CASE("C ABI backend creates a side-effect-free default snapshot") {
     SoloRigBackend* backend = nullptr;
@@ -203,7 +219,7 @@ TEST_CASE("C ABI explicit resource import identifies supported assets without st
     SoloRigBackend* backend = nullptr;
     REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);
     const auto path = std::filesystem::temp_directory_path() / "solorig-abi-resource.ir";
-    { std::ofstream output(path, std::ios::binary | std::ios::trunc); output << "ir"; }
+    WriteAbiTestWave(path);
     REQUIRE(solorig_backend_import_resource_utf8(backend, path.string().c_str()) == SOLO_RIG_STATUS_OK);
     SoloRigSnapshot* snapshot = nullptr;
     REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
