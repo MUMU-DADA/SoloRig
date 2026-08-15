@@ -65,6 +65,7 @@ add_library(solo_rig_core STATIC
     src/dsp/generic_envelope.cpp
     src/dsp/generic_lfo.cpp
     src/dsp/generic_optocoupler.cpp
+    src/dsp/generic_spring.cpp
     src/dsp/coupled_inductor.cpp
     src/dsp/nonlinear_transformer_core.cpp
     src/dsp/mna_solver.cpp
@@ -100,12 +101,14 @@ add_library(solo_rig_core STATIC
     src/content/dynamic_speaker_load_binding.cpp
     src/content/topology_decomposition.cpp
     src/content/behavior_lowering.cpp
+    src/content/behavior_graph.cpp
     src/content/generic_bbd_binding.cpp
     src/content/generic_vco_binding.cpp
     src/content/generic_vca_binding.cpp
     src/content/generic_envelope_binding.cpp
     src/content/generic_lfo_binding.cpp
     src/content/generic_optocoupler_binding.cpp
+    src/content/generic_spring_binding.cpp
     src/content/evidence_chain.cpp
     src/content/wdf_runtime.cpp
     src/content/module_package.cpp
@@ -290,6 +293,10 @@ if(BUILD_TESTING)
         tests/generic_optocoupler_tests.cpp
         tests/generic_optocoupler_binding_tests.cpp
         tests/generic_optocoupler_runtime_tests.cpp
+        tests/generic_spring_tests.cpp
+        tests/generic_spring_binding_tests.cpp
+        tests/generic_spring_runtime_tests.cpp
+        tests/behavior_graph_tests.cpp
         tests/coupled_inductor_tests.cpp
         tests/nonlinear_transformer_core_tests.cpp
         tests/nonlinear_amplifier_tests.cpp

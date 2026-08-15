@@ -57,6 +57,11 @@ BehaviorLoweringResult LowerBehaviorModule(const BehaviorBindingRequest& request
             .kind = *kind, .model_id = request.model_id, .status = WhiteboxPlanStatus::Ready},
             .error = std::nullopt};
     }
+    if (*kind == BehaviorKind::Spring && request.model_id == "generic-spring-v1") {
+        return {.plan = BehaviorLoweringPlan{.module_id = request.module_id,
+            .kind = *kind, .model_id = request.model_id, .status = WhiteboxPlanStatus::Ready},
+            .error = std::nullopt};
+    }
     // Other behavior families and unrecognized model IDs remain blocked until
     // they have an explicit clean-room model and runtime contract.
     return {.plan = std::nullopt, .error = BehaviorLoweringError::BlockedModel};
@@ -70,7 +75,7 @@ std::vector<BehaviorKindContract> BehaviorKindContracts() {
         {BehaviorKind::Envelope, WhiteboxPlanStatus::Ready},
         {BehaviorKind::Lfo, WhiteboxPlanStatus::Ready},
         {BehaviorKind::Optocoupler, WhiteboxPlanStatus::Ready},
-        {BehaviorKind::Spring, WhiteboxPlanStatus::Blocked},
+        {BehaviorKind::Spring, WhiteboxPlanStatus::Ready},
     };
 }
 
