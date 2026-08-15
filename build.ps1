@@ -206,14 +206,23 @@ function Import-VsDeveloperEnvironment {
     if ($environmentLines.Count -eq 0) {
         Fail-Layer -Layer "Tools" -Message "Visual Studio 开发环境没有返回任何环境变量。"
     }
+    $developerPath = $null
     foreach ($line in $environmentLines) {
         $separator = $line.IndexOf('=')
         if ($separator -gt 0) {
             $name = $line.Substring(0, $separator)
             $value = $line.Substring($separator + 1)
+            if ($name -ieq "PATH") {
+                # Some hosts expose both PATH and Path. Prefer the VsDevCmd value
+                # containing the MSVC toolchain instead of letting the stale alias
+                # overwrite it later in the environment listing.
+                if ($null -eq $developerPath -or $value -match "\\VC\\Tools\\MSVC\\") {
+                    $developerPath = $value
+                }
+                continue
+            }
             [Environment]::SetEnvironmentVariable($name, $value, "Process")
             switch ($name) {
-                "PATH" { $env:PATH = $value }
                 "VSINSTALLDIR" { $env:VSINSTALLDIR = $value }
                 "VCINSTALLDIR" { $env:VCINSTALLDIR = $value }
                 "VCToolsInstallDir" { $env:VCToolsInstallDir = $value }
@@ -225,6 +234,11 @@ function Import-VsDeveloperEnvironment {
             }
         }
     }
+    if ([string]::IsNullOrWhiteSpace($developerPath)) {
+        Fail-Layer -Layer "Tools" -Message "Visual Studio 开发环境没有返回 PATH。"
+    }
+    [Environment]::SetEnvironmentVariable("PATH", $developerPath, "Process")
+    $env:PATH = $developerPath
     $sdkRoot = $env:WindowsSdkDir
     $sdkVersion = $env:WindowsSDKVersion
     if (-not [string]::IsNullOrWhiteSpace($sdkRoot) -and -not [string]::IsNullOrWhiteSpace($sdkVersion)) {
