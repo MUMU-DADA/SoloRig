@@ -1,0 +1,27 @@
+{
+  "evidenceSchemaVersion": 1,
+  "moduleId": "solorig.m23c.passive-reference.v1",
+  "moduleVersion": "m23c-mathematical-golden-1",
+  "status": "blocked",
+  "netlist": {
+    "schemaVersion": 2,
+    "sourceRef": "fixtures/whitebox/m23c_passive_divider_circuit.json",
+    "inputHash": "sha256:solorig-m23c-passive-divider-v1"
+  },
+  "modelAuditRefs": ["self-authored-passive-linear-v1"],
+  "dcOperatingPoint": {"status": "passed", "sampleCount": 4, "maxAbsError": 0.0, "threshold": 1e-12},
+  "frequencyResponse": {"status": "schema-only", "sampleCount": 0},
+  "staticCurve": {"status": "schema-only", "sampleCount": 0},
+  "dynamicResponse": {"status": "passed", "sampleCount": 4, "maxAbsError": 0.0, "threshold": 1e-12},
+  "spiceComparison": {"status": "blocked", "sampleCount": 0, "referenceRef": "no-authorized-spice-data"},
+  "goldenComparison": {
+    "status": "passed", "sampleCount": 4, "maxAbsError": 0.0, "threshold": 1e-12,
+    "referenceRef": "m23c_passive_divider_golden.json"
+  },
+  "convergence": {"status": "passed", "cases": [
+    {"id": "nominal", "status": "passed", "iterations": 1},
+    {"id": "reset", "status": "passed", "iterations": 1}
+  ]},
+  "errorThresholds": {"dcAbsolute": 1e-12, "frequencyMagnitude": 1e-9, "dynamicAbsolute": 1e-10},
+  "run": {"toolVersion": "solorig-evidence-tool-m23c1", "sampleRateHz": 192000.0, "oversampling": 4, "randomSeed": 0}
+}

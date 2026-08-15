@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "kind": "self-authored-mathematical-golden",
+  "caseId": "solorig.m23c.rc-step.v1",
+  "circuitSourceRef": "fixtures/whitebox/m23c_rc_step_circuit.json",
+  "inputHash": "sha256:solorig-m23c-rc-step-v1",
+  "formula": {"type": "backward-euler-rc", "capacitanceFarads": 1e-9, "resistorOhms": 1000.0},
+  "run": {"sampleRateHz": 192000.0, "oversampling": 4, "randomSeed": 0},
+  "inputs": [1.0, 1.0, 1.0, 1.0],
+  "expectedOutputs": [
+    0.964394602597973,
+    0.9987322556758436,
+    0.9999548614595343,
+    0.9999983928243285
+  ],
+  "absoluteTolerance": 1e-10,
+  "referenceStatus": "self-authored-mathematical-only"
+}

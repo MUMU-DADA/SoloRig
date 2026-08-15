@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "kind": "self-authored-mathematical-golden",
+  "caseId": "solorig.m23c.passive-divider.v1",
+  "circuitSourceRef": "fixtures/whitebox/m23c_passive_divider_circuit.json",
+  "inputHash": "sha256:solorig-m23c-passive-divider-v1",
+  "formula": {"type": "resistive-divider", "seriesOhms": 1000.0, "loadOhms": 1000.0},
+  "run": {"sampleRateHz": 192000.0, "oversampling": 4, "randomSeed": 0},
+  "inputs": [0.0, 0.25, 1.0, -0.5],
+  "expectedOutputs": [0.0, 0.125, 0.5, -0.25],
+  "absoluteTolerance": 1e-12,
+  "referenceStatus": "self-authored-mathematical-only"
+}
