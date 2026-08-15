@@ -20,7 +20,7 @@
 - M22-B2 已提交：固定容量 `NamedPortAudioGraph` 将命名端口、域兼容、fan-in/fan-out、采样延迟补偿和显式 block-delay feedback 接入预分配音频块运行时；`TypedBehaviorPortProcessor` 接入 detector sidechain，`TypedBehaviorMnaPortProcessor` 接入控制域到 MNA 的复合。当前 typed/MNA 适配器限定单声道 scalar boundary；任意外部 MNA 命名端口、不同 I/O 数量和多设备 ASIO 仍未完成。
 - M22-B3 已提交：`CreateNamedMnaPortProcessor` 将外部 Circuit v2 的真实命名端口接入 `NamedPortAudioGraph`，已验证 2 输入/1 输出 MNA 图级复合；M22-B4 已把外部 MNA 命名端口扩展为按 `maxChannels` 协商的多声道独立电路实例，并接入动态电源/扬声器负载复合测试。
 - M23-B 已交付首个完整外部 generic 管线：输入耦合 → triode 前级 → pentode 功放 → rectified-reservoir 供电 → saturating-hysteretic transformer → electrodynamic speaker load；网表经过外部包加载、命名端口图 Prepare/Process/Reset，覆盖 192 kHz、Float32、4x 和双声道，核心 `570/570`、CTest `5/5`、VST3 Validator `47/47`、Windows UI/backend ABI/C# contract 全通过，manifest MD5 `93254B6FA091B8C53C8313D5F607EA42`。该证据只证明 self-authored generic 组合可运行，不构成商业箱头、SPICE/golden、实机或 `reference-1to-1`。
-- M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b 已交付第一道可复验参考门禁：无源分压、串联电阻/对地电容低通、Shockley 二极管静态曲线、RC 离散频响、动态结电容、Ebers–Moll BJT 静态曲线、square-law JFET 静态曲线、enhancement square-law MOSFET 静态曲线、space-charge triode 静态/动态曲线、pentode 动态曲线以及 pentode→lossy-linear transformer→electrodynamic speaker 动态组合各有固定 Circuit v2 网表、独立数学 golden、输入哈希、运行条件和误差阈值；测试真实调用 Circuit v2 MNA，并分别检查 192 kHz/4x backward-Euler、静态/动态 Newton、频响幅度/相位、动态历史、BJT 偏置工作点、JFET 工作区、MOSFET 工作区、triode 导通区、pentode 屏极/阳极耦合、变压器一次/二次电流、扬声器机械状态和 Reset。当前核心 `593/593`、CTest `5/5`、VST3 Validator `47/47`、Windows UI/backend ABI/C# contract 全通过，manifest MD5 `B02130F69FBC837F99C8EFAEF00F606F`。这是 self-authored mathematical evidence，不是授权 SPICE、实机或 `reference-1to-1`；证据包中的 SPICE gate 仍为 `blocked`。
+- M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b/C3c 已交付第一道可复验参考门禁：无源分压、串联电阻/对地电容低通、Shockley 二极管静态曲线、RC 离散频响、动态结电容、Ebers–Moll BJT 静态曲线、square-law JFET 静态曲线、enhancement square-law MOSFET 静态曲线、space-charge triode 静态/动态曲线、pentode 动态曲线、pentode→lossy-linear transformer→electrodynamic speaker 动态组合以及 rectified-reservoir supply→pentode→saturating-hysteretic transformer 动态组合各有固定 Circuit v2 网表、独立数学 golden、输入哈希、运行条件和误差阈值；测试真实调用 Circuit v2 MNA，并分别检查 192 kHz/4x backward-Euler、静态/动态 Newton、频响幅度/相位、动态历史、BJT 偏置工作点、JFET 工作区、MOSFET 工作区、triode 导通区、pentode 屏极/阳极耦合、供电 Sag、磁芯磁通/磁滞、变压器一次/二次电流、扬声器机械状态和 Reset。当前核心 `595/595`、CTest `5/5`、VST3 Validator `47/47`、Windows UI/backend ABI/C# contract 全通过，manifest MD5 `1A607290262B454E955648E19E378070`。这是 self-authored mathematical evidence，不是授权 SPICE、实机或 `reference-1to-1`；证据包中的 SPICE gate 仍为 `blocked`。
 - M20-C3-A2 已提交：`RigRuntime::PerformanceSnapshot` 将 active graph 节点的最近/峰值 block CPU 与声明延迟暴露给停止音频后的控制线程；独立程序 UI、真实 ASIO 和过载面板仍未完成。
 - M20-C3-B 已提交：性能快照已经贯通 C++ 编辑器场景、C ABI 和 Avalonia 独立程序；节点卡片与顶部状态同时区分静态预计 CPU、实际最近/峰值 CPU、声明延迟和“实测未连接”。性能数据只允许由停止音频后的控制线程写入，preset 不保存诊断值；真实 ASIO 设备后端和过载状态仍未完成。
 
@@ -34,17 +34,17 @@
 - `RealtimeLoadMeter` 已接入 `AudioGraph::Process`，每个节点在真实图处理时记录最近/峰值 block load；`RigRuntime::PerformanceSnapshot` 在宿主停止 `Process` 后把 active graph 的节点快照向控制线程暴露；M20-C3-B 已把该数据接入 C++/C ABI/Avalonia 性能面板。当前面板在没有真实宿主回灌时明确显示“实测未连接”，不会把静态 `estimated_cpu_percent` 冒充实测。
 - ASIO 路由层可以验证任意通道映射、采样率转换和异步时钟需求，但尚无真实 ASIO SDK 后端、设备枚举、打开/关闭、回调和多设备重采样。
 - 外部 Circuit v2 包可以进入受限 MNA 组件运行时；外部数字逻辑的九种声明操作（Gain、Delay、Feedback、Mix、Filter、Waveshaper、Dynamics、PitchShift、Bypass）均已进入固定容量 runtime，但仍是线性操作序列，不等于任意数字图或 sidechain。
-- reference/golden 已有 M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b 的 self-authored mathematical golden 与真实 MNA 对照，但仓库仍没有可授权的 SPICE、golden waveform 或实机测量数据；因此只能标记数学回归通过，不能标记 `reference-1to1`。
+- reference/golden 已有 M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b/C3c 的 self-authored mathematical golden 与真实 MNA 对照，但仓库仍没有可授权的 SPICE、golden waveform 或实机测量数据；因此只能标记数学回归通过，不能标记 `reference-1to1`。
 
 ### 完成白盒的计划目标与验收门禁
 
 1. **M20-C3：产品性能与宿主真实性**。已完成 AudioGraph 节点级实测 block load、`RigRuntime` 控制线程快照出口，以及 C++/C ABI/Avalonia 性能面板的数据展示契约；仍需提供过载状态、真实宿主回灌和 ASIO 设备枚举/打开/关闭/回调。明确区分图级实测与模块目录估算，没有 SDK 或硬件条件时只能保留 `blocked`，不能用模拟路由测试替代。
 2. **M21：外部模块可运行闭环**。定义并冻结模块包版本、逻辑/电路/皮肤三层契约；已补齐九种声明数字操作以及 NAM/IR 资产的第一阶段 runtime 闭环。每个外部包必须经过 Parse → Compile/Prepare → Process → Reset，并验证参数、文件、错误和实时线程边界；任意数字图、sidechain 和多端口语义仍属于后续 M22。
 3. **M22：通用白盒拓扑**。M22-A1、M22-B1、M22-B2、M22-B3 和 M22-B4 已完成并提交；M23-B 又验证了一个完整外部 generic 管线在命名端口图中的组合。仍需扩展更多复杂电源/负载拓扑、UI 编辑拓扑和多设备通道路由；每个不支持的拓扑必须稳定拒绝，不能靠固定产品识别或静默数字替代。
-4. **M23：参考与覆盖集**。M23-B 已完成首个完整 generic 组合样例，M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b 已将十二类自有数学公式绑定到真实 MNA 并锁定误差比较流程；下一步为非线性磁芯/动态电源组合及选定的失真、滤波/调制、压缩、BBD、混响和箱头负载建立可授权的网表、元件/模型版本、供电/负载条件和测量基线，预先固定静态、频响、动态、谐波/互调、旋钮扫动误差阈值，逐类生成 golden/SPICE/实机证据。
+4. **M23：参考与覆盖集**。M23-B 已完成首个完整 generic 组合样例，M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b/C3c 已将十三类自有数学公式绑定到真实 MNA 并锁定误差比较流程；下一步为可授权参考和更复杂的功放/负载组合建立网表、元件/模型版本、供电/负载条件和测量基线，预先固定静态、频响、动态、谐波/互调、旋钮扫动误差阈值，逐类生成 golden/SPICE/实机证据。
 5. **Release 白盒门**。只有在支持矩阵中的每一类同时具备可运行路径、稳定拒绝边界、实时无分配/无锁/无文件证明、独立参考证据和全量回归，且真实宿主/ASIO 条件通过时，才可称为“白盒完成”。generic self-authored 模型仍需明确标注为 generic，不得自动升级为商业型号 `reference-1to1`。
 
-上述目标是完成条件，不是当前完成声明；真实 ASIO/过载数据、授权 SPICE/golden/实机参考与更广覆盖仍未完成，M21 仅完成数字操作及 NAM/IR 外部资产第一阶段，M23-B 仅覆盖首个 self-authored generic 完整组合，M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b 仅完成十二类自有数学 golden 对照，任意复杂外部拓扑与 `reference-1to-1` 尚未验收。
+上述目标是完成条件，不是当前完成声明；真实 ASIO/过载数据、授权 SPICE/golden/实机参考与更广覆盖仍未完成，M21 仅完成数字操作及 NAM/IR 外部资产第一阶段，M23-B 仅覆盖首个 self-authored generic 完整组合，M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b/C3c 仅完成十三类自有数学 golden 对照，任意复杂外部拓扑与 `reference-1to-1` 尚未验收。
 
 ### M21 第一阶段：外部数字操作 runtime（已提交 `ec21511`）
 
