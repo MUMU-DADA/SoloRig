@@ -409,6 +409,7 @@ if(BUILD_TESTING)
     tests/m23c_bjt_reference_tests.cpp
     tests/m23c_jfet_reference_tests.cpp
     tests/m23c_mosfet_reference_tests.cpp
+    tests/m23c_triode_reference_tests.cpp
         tests/module_package_tests.cpp
         tests/module_runtime_tests.cpp
         tests/rig_runtime_tests.cpp

@@ -1,0 +1,28 @@
+{
+    "schemaVersion": 1,
+    "kind": "self-authored-mathematical-golden",
+    "caseId": "solorig.m23c.triode-static.v1",
+    "circuitSourceRef": "fixtures/whitebox/m23c_triode_static_circuit.json",
+    "inputHash": "sha256:solorig-m23c-triode-static-v1",
+    "formula": {
+        "type": "space-charge-triode-common-cathode",
+        "amplificationFactor": 100.0,
+        "perveance": 0.001,
+        "maxCurrent": 0.01,
+        "plateSupply": 12.0,
+        "plateOhms": 10000.0
+    },
+    "run": {"sampleRateHz": 192000.0, "oversampling": 1, "randomSeed": 0},
+    "inputs": [-1.0, -0.5, 0.0, 0.25, 0.5, 0.75, 1.0],
+    "expectedOutputs": [
+        12.0,
+        12.0,
+        11.604679162411655,
+        9.935126370895127,
+        7.625557520700271,
+        4.862960389181736,
+        1.738148109770313
+    ],
+    "absoluteTolerance": 1e-9,
+    "referenceStatus": "self-authored-mathematical-only"
+}
