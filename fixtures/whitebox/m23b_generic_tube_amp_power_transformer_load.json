@@ -1,0 +1,82 @@
+{
+  "version": 2,
+  "schema": "circuit",
+  "referenceGround": "ground",
+  "nodes": [
+    "input_audio", "triode_grid", "triode_plate", "power_grid", "triode_cathode",
+    "power_cathode", "supply_rail", "power_plate", "power_screen", "secondary_dot", "ground"
+  ],
+  "ports": [
+    {"id": "input", "direction": "input", "node": "input_audio"},
+    {"id": "output", "direction": "output", "node": "secondary_dot"}
+  ],
+  "supplies": [
+    {
+      "id": "supply", "positive": "supply_rail", "negative": "ground", "voltage": 250.0,
+      "kind": "rectified-reservoir", "modelVersion": 1,
+      "sourceResistance": 10.0, "sagResistance": 20.0, "recoveryTime": 0.1,
+      "rippleAmplitude": 0.0, "rippleFrequency": 100.0,
+      "maximumSag": 20.0, "maximumLoadCurrent": 1.0, "initialSag": 0.0
+    }
+  ],
+  "components": [
+    {
+      "id": "triode", "type": "triode", "pins": ["triode_plate", "triode_grid", "triode_cathode"],
+      "triodeModel": {
+        "kind": "space-charge", "modelVersion": 1,
+        "amplificationFactor": 100.0, "perveance": 0.001,
+        "maxCurrent": 0.01, "maxStep": 1.0
+      }
+    },
+    {
+      "id": "power", "type": "pentode", "pins": ["power_plate", "power_screen", "power_grid", "power_cathode"],
+      "pentodeModel": {
+        "kind": "space-charge", "modelVersion": 1,
+        "screenAmplificationFactor": 20.0, "perveance": 0.001,
+        "kneeVoltage": 2.0, "screenCurrentFraction": 0.1,
+        "maxCurrent": 0.01, "maxStep": 1.0
+      }
+    },
+    {"id": "input_coupling", "type": "capacitor", "pins": ["input_audio", "triode_grid"], "value": 1.0e-6},
+    {"id": "triode_grid_leak", "type": "resistor", "pins": ["triode_grid", "ground"], "value": 1000000.0},
+    {"id": "triode_cathode_path", "type": "resistor", "pins": ["triode_cathode", "ground"], "value": 1000.0},
+    {"id": "triode_plate_load", "type": "resistor", "pins": ["supply_rail", "triode_plate"], "value": 100000.0},
+    {"id": "interstage_coupling", "type": "capacitor", "pins": ["triode_plate", "power_grid"], "value": 1.0e-6},
+    {"id": "power_grid_bias", "type": "resistor", "pins": ["power_grid", "ground"], "value": 1000000.0},
+    {"id": "power_cathode_path", "type": "resistor", "pins": ["power_cathode", "ground"], "value": 500.0},
+    {"id": "screen_feed", "type": "resistor", "pins": ["supply_rail", "power_screen"], "value": 10000.0},
+    {"id": "power_plate_load", "type": "resistor", "pins": ["supply_rail", "power_plate"], "value": 10000.0},
+    {
+      "id": "output-transformer", "type": "coupled-inductor",
+      "pins": ["power_plate", "supply_rail", "secondary_dot", "ground"],
+      "coupledInductorModel": {
+        "kind": "saturating-hysteretic", "modelVersion": 1,
+        "turnsRatio": 2.0, "magnetizingInductance": 1.0,
+        "primaryLeakageInductance": 0.1, "secondaryLeakageInductance": 0.025,
+        "primaryResistance": 10.0, "secondaryResistance": 5.0,
+        "saturationFlux": 1.0, "hysteresisWidth": 0.1,
+        "hysteresisRate": 1000.0, "remanentFlux": 0.0,
+        "maxFlux": 2.0, "maxCurrent": 10.0, "maxStep": 1.0
+      }
+    },
+    {
+      "id": "speaker-load", "type": "speaker-load", "pins": ["secondary_dot", "ground"],
+      "speakerModel": {
+        "kind": "electrodynamic", "modelVersion": 1,
+        "voiceCoilResistance": 8.0, "voiceCoilInductance": 0.001,
+        "forceFactor": 5.0, "movingMass": 0.02,
+        "mechanicalResistance": 1.0, "compliance": 0.0001,
+        "nonlinearStiffness": 100.0, "nonlinearDisplacementScale": 0.001,
+        "maximumCurrent": 10.0, "maximumVelocity": 100.0,
+        "maximumDisplacement": 0.01, "initialCurrent": 0.0,
+        "initialVelocity": 0.0, "initialDisplacement": 0.0
+      }
+    }
+  ],
+  "solver": {
+    "method": "modified-nodal-analysis",
+    "integration": "backward-euler",
+    "oversampling": 4,
+    "convergence": {"maxIterations": 256, "absoluteTolerance": 1e-9, "relativeTolerance": 1e-6}
+  }
+}

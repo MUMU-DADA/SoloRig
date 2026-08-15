@@ -11,6 +11,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <string>
@@ -152,6 +153,31 @@ std::filesystem::path CreatePowerLoadMnaPackage(std::uint32_t max_iterations = 6
                 << max_iterations
                 << R"(,"absoluteTolerance":1e-10,"relativeTolerance":1e-8}}})";
     }
+    return directory;
+}
+
+std::string ReadWhiteboxFixture(std::string_view name) {
+    const auto path = std::filesystem::path(SOLO_RIG_SOURCE_DIRECTORY) / "fixtures" / "whitebox" / name;
+    std::ifstream input(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
+std::filesystem::path CreateGenericTubeAmpPackage(std::uint32_t max_channels = 2U) {
+    const auto directory = std::filesystem::temp_directory_path() / "SoloRigNamedMnaTubeAmpTest";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    std::filesystem::create_directories(directory / "logic", error);
+    {
+        std::ofstream manifest(directory / "manifest.json", std::ios::binary | std::ios::trunc);
+        manifest << R"({"schemaVersion":1,"moduleId":"org.mumu-dada.solorig.generic-tube-amp",
+"displayName":"Generic Tube Amp","category":"analog-circuit","logicFile":"logic/main.json",
+"declaredLatencySamples":5,"ports":[{"id":"input","direction":"input","maxChannels":)"
+                << max_channels
+                << R"(},{"id":"output","direction":"output","maxChannels":)"
+                << max_channels << R"(}]})";
+    }
+    std::ofstream logic(directory / "logic" / "main.json", std::ios::binary | std::ios::trunc);
+    logic << ReadWhiteboxFixture("m23b_generic_tube_amp_power_transformer_load.json");
     return directory;
 }
 
@@ -427,6 +453,62 @@ TEST_CASE("M22-B4 external named MNA composes dynamic power supply and speaker l
     constexpr auto contract = solo_rig::MnaPreparedCircuit::ProcessContract();
     static_assert(!contract.process_allocates && !contract.process_locks &&
                   !contract.process_reads_files && !contract.process_parses_json);
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+}
+
+TEST_CASE("M23-B external named MNA composes tube stages, supplies, transformer and speaker load") {
+    const auto directory = CreateGenericTubeAmpPackage();
+    auto package = solo_rig::LoadModulePackage(directory);
+    REQUIRE(package.package.has_value());
+    auto processor = solo_rig::CreateNamedMnaPortProcessor(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor));
+
+    auto named_processor = std::move(std::get<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor));
+    package.package.reset();
+
+    solo_rig::NamedPortAudioGraph graph;
+    REQUIRE(graph.AddInputPort("audio-in", solo_rig::NamedAudioPortDomain::AudioSignal));
+    REQUIRE(graph.AddOutputPort("audio-out", solo_rig::NamedAudioPortDomain::AudioSignal));
+    REQUIRE(graph.AddNode("tube-amp", std::move(named_processor)));
+    REQUIRE(graph.Connect({"input", "audio-in", "tube-amp", "input"}));
+    REQUIRE(graph.Connect({"tube-amp", "output", "output", "audio-out"}));
+    REQUIRE(graph.Prepare({.sample_rate_hz = 192000.0,
+                           .max_block_size = 16U,
+                           .channel_count = 2U,
+                           .sample_representation = solo_rig::SampleRepresentation::Float32}, 4U).empty());
+    REQUIRE(graph.DeclaredLatencySamples() == 5U);
+
+    std::array<solo_rig::AudioBuffer, 1U> inputs{solo_rig::AudioBuffer(2U, 16U)};
+    std::array<solo_rig::AudioBuffer, 1U> outputs{solo_rig::AudioBuffer(2U, 16U)};
+    for (std::uint32_t sample = 0U; sample < 16U; ++sample) {
+        inputs[0].ChannelData(0U)[sample] = sample == 0U
+            ? 0.0F : (sample % 2U == 0U ? -0.25F : 0.25F);
+        inputs[0].ChannelData(1U)[sample] = sample == 0U
+            ? 0.0F : (sample % 2U == 0U ? 0.25F : -0.25F);
+    }
+    REQUIRE(graph.Process(std::span<const solo_rig::AudioBuffer>(inputs),
+                          std::span<solo_rig::AudioBuffer>(outputs), 16U));
+    std::array<std::array<float, 16U>, 2U> first{};
+    bool nontrivial = false;
+    for (std::uint32_t channel = 0U; channel < 2U; ++channel) {
+        for (std::uint32_t sample = 0U; sample < 16U; ++sample) {
+            first[channel][sample] = outputs[0].ChannelData(channel)[sample];
+            REQUIRE(std::isfinite(first[channel][sample]));
+            nontrivial = nontrivial || std::fabs(first[channel][sample]) > 1.0e-8F;
+        }
+    }
+    REQUIRE(nontrivial);
+
+    graph.Reset();
+    REQUIRE(graph.Process(std::span<const solo_rig::AudioBuffer>(inputs),
+                          std::span<solo_rig::AudioBuffer>(outputs), 16U));
+    for (std::uint32_t channel = 0U; channel < 2U; ++channel) {
+        for (std::uint32_t sample = 0U; sample < 16U; ++sample) {
+            REQUIRE(std::fabs(outputs[0].ChannelData(channel)[sample] - first[channel][sample]) < 1.0e-6F);
+        }
+    }
+
     std::error_code error;
     std::filesystem::remove_all(directory, error);
 }

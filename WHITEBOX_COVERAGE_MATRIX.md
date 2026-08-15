@@ -20,9 +20,9 @@
 | 1 | VST3 插件与独立程序 | 部分完成 | `src/vst3/`、`src/managed/`、VST3 Validator、Windows UI 和 C# contract 回归 | 独立程序真实音频后端；VST3/Standalone 均需接入同一完整效果器图，而非仅基础演示链 |
 | 2 | 独立程序连接 ASIO | 受阻 | `src/standalone/audio_routing.*` 目前只做设备/通道/时钟路由分析；测试覆盖格式和映射拒绝 | ASIO SDK/驱动后端、设备枚举、打开/关闭、回调、错误恢复和真实设备测试 |
 | 3 | 内置调音表 | 部分完成 | `src/dsp/tuner.*`、`tests/tuner_tests.cpp` 已验证干净音高和静音/非法输入 | 将分析器接入独立程序/VST3 可用的音频输入与 UI 状态，并补充噪声、低音、失锁和刷新节流测试 |
-| 4 | 模拟单块的电路元件仿真 | 部分完成 | Circuit v2/MNA、无源/电源/二极管/BJT/JFET/MOSFET/运放/电子管/变压器/扬声器等族测试 | 代表性前级、功放、电源、变压器和负载组合的完整运行路径及参考校准 |
+| 4 | 模拟单块的电路元件仿真 | 部分完成 | Circuit v2/MNA、无源/电源/二极管/BJT/JFET/MOSFET/运放/电子管/变压器/扬声器等族测试；M23-B 已将 generic triode → pentode → supply → transformer → speaker 作为外部 Circuit v2 包接入命名图 | 具体器件/功放组合的独立参考校准、复杂拓扑和商业型号证据 |
 | 5 | 数字单块算法模拟 | 部分完成 | `src/content/module_package.*`、`src/content/module_runtime.cpp`、`src/dsp/digital_*` 与九种操作的 parser/runtime 测试 | 任意数字图、sidechain、反馈和更完整参数语义；当前是受限 generic 操作序列 |
-| 6 | 模块化、串联/并联/任意拓扑 | 部分完成 | `NamedPortAudioGraph` 已支持固定容量命名端口、fan-in/fan-out、延迟补偿和显式延迟反馈 | 将完整外部模块包、复杂白盒 MNA 和 UI 编辑拓扑统一到同一图编译/运行时，并覆盖更多拒绝边界 |
+| 6 | 模块化、串联/并联/任意拓扑 | 部分完成 | `NamedPortAudioGraph` 已支持固定容量命名端口、fan-in/fan-out、延迟补偿和显式延迟反馈；M23-B 已验证完整 generic 外部 MNA 包的命名图接入 | 将更多复杂白盒 MNA、UI 编辑拓扑和任意图结构统一到同一图编译/运行时，并覆盖更多拒绝边界 |
 | 7 | 全程 192 kHz、32-bit | 部分完成 | `AudioFormat`、Standalone 路由验证和 M22 192 kHz/Float32/4x 测试 | 真实宿主后端的采样率转换、设备时钟和 Float32 数据链路；不能只用静态格式检查代替 |
 | 8 | NAM 与 NAM A2 | 部分完成 | `third_party/NeuralAmpModelerCore`、NAM/NAM A2 runtime 和外部包测试 | 产品端到端导入、错误恢复、真实模型回归及明确的黑盒精度口径；不计入白盒元件证据 |
 | 9 | 拖动效果器改变位置 | 已验证（编辑器层） | C ABI/Windows UI/C# contract 覆盖选择、拖动、网格吸附和脏状态 | 与任意拓扑图编辑、撤销/重做和保存恢复联合验收 |
@@ -36,7 +36,7 @@
 | 17 | 外部载入 NAM/NAM A2 文件 | 部分完成 | 外部 NAM/NAM A2 asset load、路径校验和 runtime Prepare/Process/Reset 测试 | 独立程序导入 UI、真实模型回归和资源错误恢复 |
 | 18 | IR 箱体模拟 | 已验证（runtime 层） | `ImpulseResponseConvolver` 和 IR 处理测试 | 接入完整箱头/功放链与真实宿主，并明确延迟、采样率和通道语义 |
 | 19 | 外部导入 IR | 已验证（受限导入层） | WAV/IR 外部包导入、长度/扩展名/采样率适配测试 | 产品导入 UI、取消/错误恢复和大文件资源限制 |
-| 20 | 全功能/边界测试 | 部分完成 | 当前核心 `569/569`、CTest `5/5`、VST3 Validator `47/47` 及 UI/ABI/C# contract | 真实 ASIO、多设备、授权参考、完整产品流程和覆盖矩阵逐项闭环 |
+| 20 | 全功能/边界测试 | 部分完成 | 当前核心 `570/570`、CTest `5/5`、VST3 Validator `47/47` 及 UI/ABI/C# contract；M23-B 增加完整外部管线的 Parse → Compile → Prepare → Process → Reset 回归 | 真实 ASIO、多设备、授权参考、完整产品流程和覆盖矩阵逐项闭环 |
 | 21 | 默认效果器外观与自定义皮肤 | 部分完成 | 模块元数据/主题/编辑器基础资源路径已有实现 | 默认旋钮/拨档/踩钉组件、模块自定义皮肤包、资源安全校验和视觉回归 |
 | 22 | 逻辑、元属性、外观三层模块包 | 部分完成 | `ModulePackage` manifest、logic、descriptor/metadata 和外部 Circuit/NAM/IR 入口 | 三层独立版本/校验、默认皮肤回退、模拟逻辑与数字逻辑统一运行契约 |
 | 23 | 多 ASIO 设备与任意 I/O 通道 | 受阻 | `AsioDeviceDescriptor`、通道映射和异步时钟分析器 | 真实 ASIO 后端、多设备时钟/重采样、任意输入输出选择和故障恢复 |
@@ -50,7 +50,7 @@
 3. **拓扑层**：命名端口图、串并联、fan-in/fan-out、延迟补偿、显式延迟反馈和多声道独立电路。
 4. **证据/宿主层**：实时边界、性能计量、SPICE/golden/实机参考以及 VST3/Standalone/ASIO。
 
-当前第 1～3 层已经有较强的 generic 运行基础，M22-B5 已锁定命名 MNA 的实时拒绝边界；第 4 层仍未闭环。因此当前状态应写作“generic whitebox runtime substantially implemented, whitebox Release not complete”。
+当前第 1～3 层已经有较强的 generic 运行基础，M22-B5 已锁定命名 MNA 的实时拒绝边界，M23-B 已完成一个完整外部 generic 管线的端到端组合；第 4 层仍未闭环。因此当前状态应写作“generic whitebox runtime substantially implemented, whitebox Release not complete”。
 
 ## M23 代表性白盒覆盖集
 
@@ -87,4 +87,10 @@ M23-A 只有在以下证据同时存在时才算完成：
 - 受阻项记录了缺失的外部前置条件，但不把受阻状态隐藏为已完成；
 - 后续提交只允许依据新的实现、测试或外部证据更新状态。
 
-本矩阵是收口门禁，不是白盒完成声明。白盒完成仍需通过 M23-B（完整拓扑）、M23-C（参考证据）、M23-D（真实 ASIO/宿主）和最终 Release gate。
+本矩阵是收口门禁，不是白盒完成声明。M23-B 已完成首个完整 generic 组合样例；白盒完成仍需通过 M23-C（参考证据）、M23-D（真实 ASIO/宿主）和最终 Release gate。
+
+## M23-B 首个完整外部 generic 管线
+
+- Fixture `fixtures/whitebox/m23b_generic_tube_amp_power_transformer_load.json` 以真实 Circuit v2 网表表达输入耦合、电压供电、triode 前级、pentode 功放级、级间耦合、saturating-hysteretic transformer 和 electrodynamic speaker load；输出测量点为变压器次级与扬声器正端共享的 `secondary_dot`。
+- `tests/named_audio_graph_tests.cpp` 将该网表复制到外部模块包，经过 ModulePackage Parse、Named MNA Compile、命名端口图 Prepare/Process/Reset；验收条件为 192 kHz、Float32、4x、双声道、声明延迟、有限非平凡输出和 Reset 后逐样本一致。
+- 该里程碑证明“完整 generic 外部组合可运行”，不证明商业箱头、具体管型、真实磁芯、箱体声学、SOA/保护、SPICE/golden、实机测量或 `reference-1to-1`。下一目标是 M23-C：为代表性类别建立独立参考数据与误差门禁。

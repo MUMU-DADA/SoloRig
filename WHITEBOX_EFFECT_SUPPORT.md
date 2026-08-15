@@ -19,6 +19,7 @@
 - M22-B1 已提交：circuit v2 parser 接受多输入端口；外部 MNA runtime 支持“输入端口数=输出端口数、每端口单声道、按 AudioBuffer 声道序映射”的固定容量闭环，并拒绝空输入、不等数量、超过 8 端口或 descriptor 不匹配。命名端口图、独立 sidechain、不同 I/O 数量和任意多端实时图仍未接入。提交时核心为 `555/555`，构建 manifest MD5 为 `f6de0cfd474ade51bb033e50939f6e53`。
 - M22-B2 已提交：固定容量 `NamedPortAudioGraph` 将命名端口、域兼容、fan-in/fan-out、采样延迟补偿和显式 block-delay feedback 接入预分配音频块运行时；`TypedBehaviorPortProcessor` 接入 detector sidechain，`TypedBehaviorMnaPortProcessor` 接入控制域到 MNA 的复合。当前 typed/MNA 适配器限定单声道 scalar boundary；任意外部 MNA 命名端口、不同 I/O 数量和多设备 ASIO 仍未完成。
 - M22-B3 已提交：`CreateNamedMnaPortProcessor` 将外部 Circuit v2 的真实命名端口接入 `NamedPortAudioGraph`，已验证 2 输入/1 输出 MNA 图级复合；M22-B4 已把外部 MNA 命名端口扩展为按 `maxChannels` 协商的多声道独立电路实例，并接入动态电源/扬声器负载复合测试。
+- M23-B 已交付首个完整外部 generic 管线：输入耦合 → triode 前级 → pentode 功放 → rectified-reservoir 供电 → saturating-hysteretic transformer → electrodynamic speaker load；网表经过外部包加载、命名端口图 Prepare/Process/Reset，覆盖 192 kHz、Float32、4x 和双声道，最新核心 `570/570`、CTest `5/5`、VST3 Validator `47/47`、Windows UI/backend ABI/C# contract 全通过，manifest MD5 `93254B6FA091B8C53C8313D5F607EA42`。该证据只证明 self-authored generic 组合可运行，不构成商业箱头、SPICE/golden、实机或 `reference-1to-1`。
 - M20-C3-A2 已提交：`RigRuntime::PerformanceSnapshot` 将 active graph 节点的最近/峰值 block CPU 与声明延迟暴露给停止音频后的控制线程；独立程序 UI、真实 ASIO 和过载面板仍未完成。
 - M20-C3-B 已提交：性能快照已经贯通 C++ 编辑器场景、C ABI 和 Avalonia 独立程序；节点卡片与顶部状态同时区分静态预计 CPU、实际最近/峰值 CPU、声明延迟和“实测未连接”。性能数据只允许由停止音频后的控制线程写入，preset 不保存诊断值；真实 ASIO 设备后端和过载状态仍未完成。
 
@@ -38,11 +39,11 @@
 
 1. **M20-C3：产品性能与宿主真实性**。已完成 AudioGraph 节点级实测 block load、`RigRuntime` 控制线程快照出口，以及 C++/C ABI/Avalonia 性能面板的数据展示契约；仍需提供过载状态、真实宿主回灌和 ASIO 设备枚举/打开/关闭/回调。明确区分图级实测与模块目录估算，没有 SDK 或硬件条件时只能保留 `blocked`，不能用模拟路由测试替代。
 2. **M21：外部模块可运行闭环**。定义并冻结模块包版本、逻辑/电路/皮肤三层契约；已补齐九种声明数字操作以及 NAM/IR 资产的第一阶段 runtime 闭环。每个外部包必须经过 Parse → Compile/Prepare → Process → Reset，并验证参数、文件、错误和实时线程边界；任意数字图、sidechain 和多端口语义仍属于后续 M22。
-3. **M22：通用白盒拓扑**。M22-A1、M22-B1、M22-B2 和 M22-B3 已完成并提交；M22-B4 当前已完成多声道外部 MNA 命名端口的第一阶段，实现每个音频声道独立预编译电路、`maxChannels` 协商和生命周期安全的端口契约。仍需扩展更多电源/负载复合拓扑和多设备通道路由；每个不支持的拓扑必须稳定拒绝，不能靠固定产品识别或静默数字替代。
-4. **M23：参考与覆盖集**。为选定的失真、滤波/调制、压缩、BBD、混响、电子管前后级和箱头负载建立可授权的网表、元件/模型版本、供电/负载条件和测量基线；预先固定静态、频响、动态、谐波/互调、旋钮扫动误差阈值，逐类生成 golden/SPICE/实机证据。
+3. **M22：通用白盒拓扑**。M22-A1、M22-B1、M22-B2、M22-B3 和 M22-B4 已完成并提交；M23-B 又验证了一个完整外部 generic 管线在命名端口图中的组合。仍需扩展更多复杂电源/负载拓扑、UI 编辑拓扑和多设备通道路由；每个不支持的拓扑必须稳定拒绝，不能靠固定产品识别或静默数字替代。
+4. **M23：参考与覆盖集**。M23-B 已完成首个完整 generic 组合样例；下一阶段为选定的失真、滤波/调制、压缩、BBD、混响、电子管前后级和箱头负载建立可授权的网表、元件/模型版本、供电/负载条件和测量基线，预先固定静态、频响、动态、谐波/互调、旋钮扫动误差阈值，逐类生成 golden/SPICE/实机证据。
 5. **Release 白盒门**。只有在支持矩阵中的每一类同时具备可运行路径、稳定拒绝边界、实时无分配/无锁/无文件证明、独立参考证据和全量回归，且真实宿主/ASIO 条件通过时，才可称为“白盒完成”。generic self-authored 模型仍需明确标注为 generic，不得自动升级为商业型号 `reference-1to1`。
 
-上述目标是完成条件，不是当前完成声明；真实 ASIO/过载数据与 M23 参考证据仍未完成，M21 仅完成数字操作及 NAM/IR 外部资产第一阶段，M22-B4 仍未覆盖完整电源/负载拓扑，完整外部拓扑与 reference/golden 尚未验收。
+上述目标是完成条件，不是当前完成声明；真实 ASIO/过载数据与 M23 参考证据仍未完成，M21 仅完成数字操作及 NAM/IR 外部资产第一阶段，M23-B 仅覆盖首个 self-authored generic 完整组合，任意复杂外部拓扑与 reference/golden 尚未验收。
 
 ### M21 第一阶段：外部数字操作 runtime（已提交 `ec21511`）
 
@@ -240,6 +241,7 @@
 | M20-C3 | 性能与产品全量回归 | 部分完成：AudioGraph 节点实测 load、`RigRuntime` active graph 控制线程快照、192 kHz/过采样、延迟、实时契约、C ABI、VST3、UI 和 Validator 有回归证据；独立程序 UI 仍仅展示静态 CPU 估算，真实 ASIO 和 SPICE/golden/实机证据仍未完成。 |
 | M22-A1 | MNA 固定容量多输入/多输出求解边界 | 已提交 `b75200d`：span 输入、多个输出快照、旧单输入兼容和稳定错误边界；不等于 runtime/typed behavior/sidechain 已完成。 |
 | M22-B1 | 外部 MNA 多端口 runtime 第一阶段 | 已提交：等数量单声道端口按 AudioBuffer 声道序映射，最多 8 端口，Parse/Compile/Prepare/Process 和 descriptor 拒绝边界有测试；命名端口图和任意多端拓扑仍未完成。 |
+| M23-B | 完整外部 generic 管线组合 | 已交付：外部 Circuit v2 网表将 triode 前级、pentode 功放、rectified-reservoir 供电、saturating-hysteretic transformer 和 electrodynamic speaker load 接入 `NamedPortAudioGraph`；覆盖双声道、192 kHz/Float32/4x、声明延迟、有限输出和 Reset。仍不等于商业箱头、SPICE/golden、实机或 `reference-1to-1`。 |
 
 ## 本地候选：M19-C 代表性 generic 单块/箱头覆盖审计
 
@@ -255,7 +257,7 @@
 - generic triode 使用 `[plate, grid, cathode]` 三节点 KCL/Jacobian，无 branch unknown 或持久动态 history；pentode 与 beam tetrode 使用 `[plate, screen, grid, cathode]` 四节点 KCL/Jacobian，同样没有独立 branch。Compile 会拒绝控制节点复用、缺 pin、错误模型或未授权 model reference。
 - C10a `rectified-reservoir` supply 是 `[positive, negative]` 两端电压源 branch unknown，Newton stamp 读取 branch current 并维护 Sag/ripple phase；Prepare 预分配 state，Reset 恢复 `initialSag`，失败稳定返回 `NonFinite`、`SingularMatrix` 或 `NonConvergent`。
 - C8b `saturating-hysteretic` coupled-inductor/core 使用四个绕组节点、primary/secondary 两个 branch unknown，以及独立 flux/hysteresis history；C10b electrodynamic speaker 使用两节点动态 branch unknown 和 current/velocity/displacement history。两者均在同一 MNA Newton/BE/oversampling 路径中 Prepare/Reset，并遵守 Solve 的无分配、无锁、无文件边界。
-- 已有 `dynamic opamp` 负反馈驱动 speaker 的 MNA 测试证明“一个已声明网表内的输出级与动态负载联合求解”可行；现有 triode/pentode/beam/core/supply 证据分别覆盖 Compile/Prepare/Solve、Reset、过采样和奇异/不收敛边界。但尚无一个可审计的 generic 前级 -> 功放 -> transformer/core -> speaker 阶段契约，也没有证据证明这些阶段已经以稳定接口组合。
+- 已有 `dynamic opamp` 负反馈驱动 speaker 的 MNA 测试证明“一个已声明网表内的输出级与动态负载联合求解”可行；现有 triode/pentode/beam/core/supply 证据分别覆盖 Compile/Prepare/Solve、Reset、过采样和奇异/不收敛边界。M23-B 已进一步以外部 Circuit v2 网表和命名端口图验证 generic 前级 -> 功放 -> transformer/core -> speaker 的完整组合；仍没有商业阶段模型、SPICE/golden、实机测量或 `reference-1to-1` 证据。
 
 ### 阶段 2b/3b 准入结论与 stable refusal
 
