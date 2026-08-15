@@ -1,0 +1,42 @@
+{
+    "version": 2,
+    "schema": "circuit",
+    "referenceGround": "0",
+    "nodes": ["vdd", "in", "g", "p", "0"],
+    "ports": [
+        {"id": "input", "direction": "input", "node": "in"},
+        {"id": "output", "direction": "output", "node": "p"}
+    ],
+    "supplies": [
+        {"id": "vdd", "positive": "vdd", "negative": "0", "voltage": 12.0}
+    ],
+    "components": [
+        {"id": "rg", "type": "resistor", "pins": ["in", "g"], "value": 1000.0},
+        {"id": "cg", "type": "capacitor", "pins": ["g", "0"], "value": 1e-9, "initial": -0.5},
+        {
+            "id": "t",
+            "type": "triode",
+            "pins": ["p", "g", "0"],
+            "initial": -0.5,
+            "triodeModel": {
+                "kind": "space-charge",
+                "modelVersion": 1,
+                "amplificationFactor": 100.0,
+                "perveance": 0.001,
+                "maxCurrent": 0.01,
+                "maxStep": 0.5
+            }
+        },
+        {"id": "rp", "type": "resistor", "pins": ["vdd", "p"], "value": 10000.0}
+    ],
+    "solver": {
+        "method": "modified-nodal-analysis",
+        "integration": "backward-euler",
+        "oversampling": 4,
+        "convergence": {
+            "maxIterations": 64,
+            "absoluteTolerance": 1e-12,
+            "relativeTolerance": 1e-12
+        }
+    }
+}

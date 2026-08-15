@@ -1,0 +1,31 @@
+{
+    "schemaVersion": 1,
+    "kind": "self-authored-dynamic-mathematical-golden",
+    "caseId": "solorig.m23c.triode-dynamic.v1",
+    "circuitSourceRef": "fixtures/whitebox/m23c_triode_dynamic_circuit.json",
+    "inputHash": "sha256:solorig-m23c-triode-dynamic-v1",
+    "formula": {
+        "type": "backward-euler-grid-coupling-space-charge-triode",
+        "amplificationFactor": 100.0,
+        "perveance": 0.001,
+        "maxCurrent": 0.01,
+        "inputOhms": 1000.0,
+        "gridCapacitanceFarads": 1e-9,
+        "initialGridVoltage": -0.5,
+        "plateSupply": 12.0,
+        "plateOhms": 10000.0
+    },
+    "run": {"sampleRateHz": 192000.0, "oversampling": 4, "randomSeed": 0},
+    "inputs": [-0.8, -0.2, 0.1, 0.3, -0.1, 0.5, 0.8],
+    "expectedOutputs": [
+        12.0,
+        12.0,
+        11.107916686358116,
+        9.580566918479006,
+        11.939056065864838,
+        7.83729359608857,
+        4.402742306591561
+    ],
+    "absoluteTolerance": 1e-9,
+    "referenceStatus": "self-authored-mathematical-only"
+}
