@@ -125,6 +125,55 @@ TEST_CASE("M20-A1 typed runtime executes VCO to BBD and explicit control input")
     REQUIRE(std::isfinite(output.audio));
 }
 
+TEST_CASE("M20-C1 typed runtime executes bounded signal fan-out and fan-in") {
+    static_assert(noexcept(std::declval<solo_rig::TypedBehaviorGraphRuntime&>().Process(
+        std::declval<const solo_rig::TypedBehaviorInput&>(),
+        std::declval<solo_rig::TypedBehaviorOutput&>())));
+    const auto nodes = std::vector<solo_rig::BehaviorGraphNodeSpec>{
+        Node("vco1", "vco", "generic-vco-v1"),
+        Node("vco2", "vco", "generic-vco-v1")};
+    const auto routes = std::vector<solo_rig::BehaviorPortRouteSpec>{
+        {"input", "control", "vco1", "control"},
+        {"input", "control", "vco2", "control"},
+        {"vco1", "out", "output", "audio"},
+        {"vco2", "out", "output", "audio"}};
+    const auto compiled = solo_rig::CompileTypedBehaviorGraph(nodes, routes);
+    REQUIRE(compiled.error == solo_rig::BehaviorPortCompileError::None);
+    solo_rig::TypedBehaviorGraphRuntime runtime;
+    REQUIRE(runtime.Prepare(*compiled.plan, 192000.0, 4U) ==
+            solo_rig::TypedBehaviorRuntimeError::None);
+    solo_rig::TypedBehaviorOutput first{};
+    solo_rig::TypedBehaviorOutput second{};
+    REQUIRE(runtime.Process({.control = 0.0}, first) ==
+            solo_rig::TypedBehaviorRuntimeError::None);
+    runtime.Reset();
+    REQUIRE(runtime.Process({.control = 0.0}, second) ==
+            solo_rig::TypedBehaviorRuntimeError::None);
+    REQUIRE(std::isfinite(first.audio));
+    REQUIRE(first.audio == second.audio);
+}
+
+TEST_CASE("M20-C1 typed compiler merges compatible control fan-in on a port") {
+    const auto nodes = std::vector<solo_rig::BehaviorGraphNodeSpec>{
+        Node("vca", "vca", "generic-vca-v1"),
+        Node("lfo1", "lfo", "generic-lfo-v1"),
+        Node("lfo2", "lfo", "generic-lfo-v1")};
+    const auto routes = std::vector<solo_rig::BehaviorPortRouteSpec>{
+        {"input", "audio", "vca", "audio_in"},
+        {"lfo1", "out", "vca", "control"},
+        {"lfo2", "out", "vca", "control"},
+        {"vca", "out", "output", "audio"}};
+    const auto compiled = solo_rig::CompileTypedBehaviorGraph(nodes, routes);
+    REQUIRE(compiled.error == solo_rig::BehaviorPortCompileError::None);
+    solo_rig::TypedBehaviorGraphRuntime runtime;
+    REQUIRE(runtime.Prepare(*compiled.plan, 48000.0, 1U) ==
+            solo_rig::TypedBehaviorRuntimeError::None);
+    solo_rig::TypedBehaviorOutput output{};
+    REQUIRE(runtime.Process({.audio = 0.5}, output) ==
+            solo_rig::TypedBehaviorRuntimeError::None);
+    REQUIRE(std::isfinite(output.audio));
+}
+
 TEST_CASE("M20-A1 typed runtime exposes explicit control and resistance outputs") {
     const auto nodes = std::vector<solo_rig::BehaviorGraphNodeSpec>{
         Node("envelope", "envelope", "generic-envelope-v1"),

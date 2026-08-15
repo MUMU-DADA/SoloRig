@@ -134,7 +134,8 @@ TypedBehaviorRuntimeError TypedBehaviorGraphRuntime::PrepareSlot(
     Slot& slot, const BehaviorGraphPlanNode& node, double sample_rate_hz,
     std::uint32_t oversampling) noexcept {
     slot.kind = node.lowering.kind;
-    slot.inputs.fill(Connection{});
+    for (auto& connections : slot.inputs) connections.fill(Connection{});
+    slot.input_counts.fill(0U);
     if (!Authorized(node)) return TypedBehaviorRuntimeError::UnsupportedBlock;
     switch (slot.kind) {
     case BehaviorKind::Bbd:
@@ -174,7 +175,8 @@ TypedBehaviorRuntimeError TypedBehaviorGraphRuntime::Prepare(
     std::uint32_t oversampling) noexcept {
     prepared_ = false;
     size_ = 0U;
-    outputs_.fill(Connection{});
+    for (auto& connections : outputs_) connections.fill(Connection{});
+    output_counts_.fill(0U);
     if (plan.nodes.empty() || plan.nodes.size() > kMaximumBehaviorGraphNodes ||
         plan.routes.size() > kMaximumBehaviorGraphRoutes) {
         return TypedBehaviorRuntimeError::CapacityExceeded;
@@ -202,10 +204,8 @@ TypedBehaviorRuntimeError TypedBehaviorGraphRuntime::Prepare(
         if (result != TypedBehaviorRuntimeError::None) return result;
     }
 
-    std::array<std::array<bool, 4U>, kMaximumBehaviorGraphNodes> input_seen{};
+    std::array<std::array<std::size_t, 4U>, kMaximumBehaviorGraphNodes> input_counts{};
     std::array<std::array<bool, 4U>, kMaximumBehaviorGraphNodes> output_seen{};
-    std::array<bool, 4U> external_input_seen{};
-    std::array<bool, 3U> external_output_seen{};
     bool has_external_input = false;
     bool has_external_output = false;
     for (const auto& route : plan.routes) {
@@ -226,10 +226,9 @@ TypedBehaviorRuntimeError TypedBehaviorGraphRuntime::Prepare(
         BehaviorPortContract source_port{};
         if (route.source == "input") {
             const auto input_index = BoundaryInputIndex(route.source_port);
-            if (!input_index.has_value() || external_input_seen[*input_index]) {
+            if (!input_index.has_value()) {
                 return TypedBehaviorRuntimeError::IncompatibleRoute;
             }
-            external_input_seen[*input_index] = true;
             has_external_input = true;
             source_port = {route.source_port, BehaviorPortDirection::Output,
                 route.source_port == "audio" ? BehaviorPortDomain::AudioSignal :
@@ -244,7 +243,7 @@ TypedBehaviorRuntimeError TypedBehaviorGraphRuntime::Prepare(
             source_port = *found;
             const auto source_port_index = PortIndex(plan.nodes[source].lowering.kind,
                                                      route.source_port);
-            if (!source_port_index.has_value() || output_seen[source][*source_port_index]) {
+            if (!source_port_index.has_value()) {
                 return TypedBehaviorRuntimeError::IncompatibleRoute;
             }
             if (route.destination != "output" && source >= destination) {
@@ -256,7 +255,7 @@ TypedBehaviorRuntimeError TypedBehaviorGraphRuntime::Prepare(
         if (route.destination == "output") {
             if (source == kExternal) return TypedBehaviorRuntimeError::IncompatibleRoute;
             const auto output_index = BoundaryOutputIndex(route.destination_port);
-            if (!output_index.has_value() || external_output_seen[*output_index]) {
+            if (!output_index.has_value()) {
                 return TypedBehaviorRuntimeError::IncompatibleRoute;
             }
             const auto destination_domain = route.destination_port == "audio" ?
@@ -265,9 +264,12 @@ TypedBehaviorRuntimeError TypedBehaviorGraphRuntime::Prepare(
             if (!Compatible(source_port.domain, destination_domain)) {
                 return TypedBehaviorRuntimeError::IncompatibleRoute;
             }
-            external_output_seen[*output_index] = true;
             has_external_output = true;
-            outputs_[*output_index] = {.source = source, .domain = source_port.domain};
+            if (output_counts_[*output_index] >= kMaximumBehaviorGraphNodes) {
+                return TypedBehaviorRuntimeError::CapacityExceeded;
+            }
+            outputs_[*output_index][output_counts_[*output_index]++] = {
+                .source = source, .domain = source_port.domain};
             continue;
         }
 
@@ -279,13 +281,17 @@ TypedBehaviorRuntimeError TypedBehaviorGraphRuntime::Prepare(
             destination_port->direction != BehaviorPortDirection::Input) {
             return TypedBehaviorRuntimeError::IncompatibleRoute;
         }
-        if (input_seen[destination][*destination_port_index] ||
-            !Compatible(source_port.domain, destination_port->domain)) {
+        if (!Compatible(source_port.domain, destination_port->domain)) {
             return TypedBehaviorRuntimeError::IncompatibleRoute;
         }
-        input_seen[destination][*destination_port_index] = true;
-        slots_[destination].inputs[*destination_port_index] = {
+        if (input_counts[destination][*destination_port_index] >= kMaximumBehaviorGraphNodes) {
+            return TypedBehaviorRuntimeError::CapacityExceeded;
+        }
+        const auto connection_index = input_counts[destination][*destination_port_index]++;
+        slots_[destination].inputs[*destination_port_index][connection_index] = {
             .source = source, .domain = source_port.domain};
+        slots_[destination].input_counts[*destination_port_index] =
+            input_counts[destination][*destination_port_index];
     }
 
     if (!has_external_input || !has_external_output) {
@@ -295,7 +301,7 @@ TypedBehaviorRuntimeError TypedBehaviorGraphRuntime::Prepare(
         const auto ports = BehaviorPortsForKind(plan.nodes[index].lowering.kind);
         for (std::size_t port = 0U; port < ports.count; ++port) {
             const auto seen = ports.ports[port].direction == BehaviorPortDirection::Input ?
-                input_seen[index][port] : output_seen[index][port];
+                input_counts[index][port] != 0U : output_seen[index][port];
             if (!seen) return TypedBehaviorRuntimeError::InvalidPlan;
         }
     }
@@ -360,11 +366,19 @@ TypedBehaviorRuntimeError TypedBehaviorGraphRuntime::Process(
     std::array<NodeValues, kMaximumBehaviorGraphNodes> values{};
     for (std::size_t index = 0U; index < size_; ++index) {
         const auto read_input = [&](std::size_t port, double& value) noexcept {
-            const auto& connection = slots_[index].inputs[port];
-            if (connection.source == kMissing) return false;
-            value = connection.source == kExternal ? ReadExternalValue(input, connection.domain) :
-                ReadNodeValue(values[connection.source], connection.domain);
-            return std::isfinite(value);
+            if (slots_[index].input_counts[port] == 0U) return false;
+            value = 0.0;
+            for (std::size_t connection_index = 0U;
+                 connection_index < slots_[index].input_counts[port]; ++connection_index) {
+                const auto& connection = slots_[index].inputs[port][connection_index];
+                const double contribution = connection.source == kExternal
+                    ? ReadExternalValue(input, connection.domain)
+                    : ReadNodeValue(values[connection.source], connection.domain);
+                if (!std::isfinite(contribution)) return false;
+                value += contribution;
+                if (!std::isfinite(value)) return false;
+            }
+            return true;
         };
         TypedBehaviorRuntimeError result = TypedBehaviorRuntimeError::None;
         switch (slots_[index].kind) {
@@ -426,13 +440,21 @@ TypedBehaviorRuntimeError TypedBehaviorGraphRuntime::Process(
     }
 
     const auto read_output = [&](std::size_t index, double& value) noexcept {
-        const auto& connection = outputs_[index];
-        if (connection.source == kMissing || connection.source >= size_) return false;
-        value = ReadNodeValue(values[connection.source], connection.domain);
-        return std::isfinite(value);
+        if (output_counts_[index] == 0U) return false;
+        value = 0.0;
+        for (std::size_t connection_index = 0U;
+             connection_index < output_counts_[index]; ++connection_index) {
+            const auto& connection = outputs_[index][connection_index];
+            if (connection.source == kMissing || connection.source >= size_) return false;
+            const double contribution = ReadNodeValue(values[connection.source], connection.domain);
+            if (!std::isfinite(contribution)) return false;
+            value += contribution;
+            if (!std::isfinite(value)) return false;
+        }
+        return true;
     };
     for (std::size_t index = 0U; index < outputs_.size(); ++index) {
-        if (outputs_[index].source == kMissing) continue;
+        if (output_counts_[index] == 0U) continue;
         double* destination = index == 0U ? &output.audio :
             index == 1U ? &output.control : &output.resistance;
         if (!read_output(index, *destination)) {

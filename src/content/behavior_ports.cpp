@@ -114,8 +114,9 @@ BehaviorPortCompileResult CompileTypedBehaviorGraph(
     std::vector<std::size_t> indegree(nodes.size(), 0U);
     std::vector<std::size_t> incoming(nodes.size() * kMaximumTypedPorts, 0U);
     std::vector<std::size_t> outgoing(nodes.size() * kMaximumTypedPorts, 0U);
-    std::array<bool, 4U> external_input_seen{};
-    std::array<bool, 3U> external_output_seen{};
+    std::vector<bool> dependency(nodes.size() * nodes.size(), false);
+    bool has_external_input = false;
+    bool has_external_output = false;
     for (std::size_t route_index = 0U; route_index < routes.size(); ++route_index) {
         const auto& route = routes[route_index];
         if (route.source.empty() || route.source_port.empty() || route.destination.empty() ||
@@ -152,10 +153,8 @@ BehaviorPortCompileResult CompileTypedBehaviorGraph(
                 route.source_port == "detector" ? BehaviorPortDomain::DetectorInput :
                     BehaviorPortDomain::EmitterDrive;
             source_port = {route.source_port, BehaviorPortDirection::Output, domain};
-            if (external_input_seen[*input_index]) {
-                return {.error = BehaviorPortCompileError::FanOutUnsupported};
-            }
-            external_input_seen[*input_index] = true;
+            static_cast<void>(*input_index);
+            has_external_input = true;
         } else {
             const auto ports = BehaviorPortsForKind(candidate.nodes[*source_index].lowering.kind);
             const auto* found = FindPort(ports, route.source_port);
@@ -164,10 +163,8 @@ BehaviorPortCompileResult CompileTypedBehaviorGraph(
             if (source_port.direction != BehaviorPortDirection::Output) {
                 return {.error = BehaviorPortCompileError::DirectionMismatch};
             }
-            if (outgoing[*source_index * kMaximumTypedPorts +
-                         static_cast<std::size_t>(found - ports.ports.data())]++ != 0U) {
-                return {.error = BehaviorPortCompileError::FanOutUnsupported};
-            }
+            ++outgoing[*source_index * kMaximumTypedPorts +
+                       static_cast<std::size_t>(found - ports.ports.data())];
         }
         if (route.destination == "output") {
             const auto output_index = BoundaryOutputIndex(route.destination_port);
@@ -178,10 +175,8 @@ BehaviorPortCompileResult CompileTypedBehaviorGraph(
                 route.destination_port == "audio" ? BehaviorPortDomain::AudioSignal :
                 route.destination_port == "control" ? BehaviorPortDomain::ControlSignal :
                     BehaviorPortDomain::Resistance};
-            if (external_output_seen[*output_index]) {
-                return {.error = BehaviorPortCompileError::FanInUnsupported};
-            }
-            external_output_seen[*output_index] = true;
+            static_cast<void>(*output_index);
+            has_external_output = true;
         } else {
             const auto ports = BehaviorPortsForKind(candidate.nodes[*destination_index].lowering.kind);
             const auto* found = FindPort(ports, route.destination_port);
@@ -190,23 +185,21 @@ BehaviorPortCompileResult CompileTypedBehaviorGraph(
             if (destination_port.direction != BehaviorPortDirection::Input) {
                 return {.error = BehaviorPortCompileError::DirectionMismatch};
             }
-            if (incoming[*destination_index * kMaximumTypedPorts +
-                         static_cast<std::size_t>(found - ports.ports.data())]++ != 0U) {
-                return {.error = BehaviorPortCompileError::FanInUnsupported};
+            ++incoming[*destination_index * kMaximumTypedPorts +
+                       static_cast<std::size_t>(found - ports.ports.data())];
+            if (source_index.has_value()) {
+                const auto dependency_index = *source_index * nodes.size() + *destination_index;
+                if (!dependency[dependency_index]) {
+                    dependency[dependency_index] = true;
+                    ++indegree[*destination_index];
+                }
             }
-            if (source_index.has_value()) ++indegree[*destination_index];
         }
         if (!Compatible(source_port.domain, destination_port.domain)) {
             return {.error = BehaviorPortCompileError::IncompatibleConnection};
         }
     }
 
-    const auto has_external_input = std::any_of(external_input_seen.begin(),
-                                                external_input_seen.end(),
-                                                [](bool seen) { return seen; });
-    const auto has_external_output = std::any_of(external_output_seen.begin(),
-                                                 external_output_seen.end(),
-                                                 [](bool seen) { return seen; });
     if (!has_external_input || !has_external_output) {
         return {.error = BehaviorPortCompileError::DisconnectedNode};
     }
@@ -214,6 +207,7 @@ BehaviorPortCompileResult CompileTypedBehaviorGraph(
     for (std::size_t index = 0U; index < nodes.size(); ++index) {
         if (indegree[index] == 0U) ready.push_back(index);
     }
+    std::vector<bool> dependency_released(dependency.size(), false);
     while (!ready.empty()) {
         const auto index = ready.front();
         ready.erase(ready.begin());
@@ -222,7 +216,13 @@ BehaviorPortCompileResult CompileTypedBehaviorGraph(
             if (route.source == "input" || route.destination == "output" ||
                 route.source != nodes[index].id) continue;
             const auto destination = FindNode(nodes, route.destination);
-            if (destination.has_value() && --indegree[*destination] == 0U) ready.push_back(*destination);
+            if (destination.has_value()) {
+                const auto dependency_index = index * nodes.size() + *destination;
+                if (dependency[dependency_index] && !dependency_released[dependency_index]) {
+                    dependency_released[dependency_index] = true;
+                    if (--indegree[*destination] == 0U) ready.push_back(*destination);
+                }
+            }
         }
     }
     if (candidate.topological_order.size() != nodes.size()) {
@@ -236,7 +236,7 @@ BehaviorPortCompileResult CompileTypedBehaviorGraph(
             const auto count = contract.direction == BehaviorPortDirection::Input ?
                 incoming[index * kMaximumTypedPorts + port] :
                 outgoing[index * kMaximumTypedPorts + port];
-            if (count != 1U) return {.error = BehaviorPortCompileError::MissingPort};
+            if (count == 0U) return {.error = BehaviorPortCompileError::MissingPort};
         }
     }
     std::vector<BehaviorGraphPlanNode> ordered;

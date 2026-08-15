@@ -73,7 +73,7 @@ TEST_CASE("M18-D2e3 rejects unknown, duplicate, missing and direction-invalid po
             solo_rig::BehaviorPortCompileError::DirectionMismatch);
 }
 
-TEST_CASE("M18-D2e3 rejects incompatible domains, fan-in/fan-out, cycles and disconnected nodes") {
+TEST_CASE("M20-C1 rejects incompatible domains while accepting bounded fan-in/fan-out") {
     auto nodes = VcaWithLfo();
     auto routes = VcaWithLfoRoutes();
     routes[0].destination_port = "control";
@@ -81,16 +81,21 @@ TEST_CASE("M18-D2e3 rejects incompatible domains, fan-in/fan-out, cycles and dis
     REQUIRE(solo_rig::CompileTypedBehaviorGraph(nodes, routes).error ==
             solo_rig::BehaviorPortCompileError::IncompatibleConnection);
 
-    routes = VcaWithLfoRoutes();
-    routes.push_back({"input", "audio", "vca", "control"});
-    REQUIRE(solo_rig::CompileTypedBehaviorGraph(nodes, routes).error ==
-            solo_rig::BehaviorPortCompileError::FanOutUnsupported);
+    const auto fanout_nodes = std::vector<solo_rig::BehaviorGraphNodeSpec>{
+        Node("vco1", "vco", "generic-vco-v1"), Node("vco2", "vco", "generic-vco-v1")};
+    const auto fanout_routes = std::vector<solo_rig::BehaviorPortRouteSpec>{
+        {"input", "control", "vco1", "control"},
+        {"input", "control", "vco2", "control"},
+        {"vco1", "out", "output", "audio"},
+        {"vco2", "out", "output", "audio"}};
+    REQUIRE(solo_rig::CompileTypedBehaviorGraph(fanout_nodes, fanout_routes).error ==
+            solo_rig::BehaviorPortCompileError::None);
 
     const auto two_lfo_routes = std::vector<solo_rig::BehaviorPortRouteSpec>{
         {"input", "audio", "vca", "audio_in"}, {"lfo", "out", "vca", "control"},
         {"lfo2", "out", "vca", "control"}, {"vca", "out", "output", "audio"}};
     REQUIRE(solo_rig::CompileTypedBehaviorGraph(VcaWithTwoLfo(), two_lfo_routes).error ==
-            solo_rig::BehaviorPortCompileError::FanInUnsupported);
+            solo_rig::BehaviorPortCompileError::None);
 
     routes = VcaWithLfoRoutes();
     routes[0].source = "vca";

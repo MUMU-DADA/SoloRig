@@ -12,7 +12,8 @@
 
 - `a321a0f` 已提交 M18-D3a、M18-D3b/M19-A2 和 M19-B1 阶段 2b/3b；历史计划表中这些阶段的“未提交本地候选”文字为历史记录，不覆盖当前提交状态。
 - M19-C/M20-B4 当前已提交：16 个代表性类别全部具有可运行 generic 证据，包含 Wah、Phaser、Chorus/Flanger 和 caller-owned optical hardware 电气组合；这不等于商业型号或任意拓扑覆盖。
-- M20-B4 最新验证为核心 `538/538`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `ba897feda5a24b1782ae2da3901a6ec9`。
+- M20-B4 已提交时的验证为核心 `538/538`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `ba897feda5a24b1782ae2da3901a6ec9`。
+- M20-C1 已提交：typed behavior graph 的 signal 端口支持固定容量多连接；同域 fan-in 在 runtime 求和，fan-out 复制到多个下游/边界输出；编译阶段仍拒绝非法域、循环、缺端口和容量超限。最新验证为核心 `540/540`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `a179267303ca48b196fa93a57e806bc7`。
 
 ## 当前状态补充：M20-A1
 

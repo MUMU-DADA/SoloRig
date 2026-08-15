@@ -34,6 +34,27 @@ TEST_CASE("M20-A2a parses versioned typed behavior JSON into an executable plan"
     REQUIRE(result.plan->topological_order.size() == 2U);
 }
 
+TEST_CASE("M20-C1 JSON lowering preserves bounded signal fan-in and fan-out") {
+    const auto result = solo_rig::CompileTypedBehaviorGraphJson(R"({
+        "version":1,
+        "schema":"solorig-behavior-graph",
+        "nodes":[
+            {"id":"vco1","moduleId":"vco1","kind":"vco","modelId":"generic-vco-v1"},
+            {"id":"vco2","moduleId":"vco2","kind":"vco","modelId":"generic-vco-v1"}
+        ],
+        "routes":[
+            {"source":"input","sourcePort":"control","destination":"vco1","destinationPort":"control"},
+            {"source":"input","sourcePort":"control","destination":"vco2","destinationPort":"control"},
+            {"source":"vco1","sourcePort":"out","destination":"output","destinationPort":"audio"},
+            {"source":"vco2","sourcePort":"out","destination":"output","destinationPort":"audio"}
+        ]
+    })");
+    REQUIRE(result.error == solo_rig::BehaviorGraphJsonError::None);
+    REQUIRE(result.graph_error == solo_rig::BehaviorPortCompileError::None);
+    REQUIRE(result.plan.has_value());
+    REQUIRE(result.plan->routes.size() == 4U);
+}
+
 TEST_CASE("M20-A2a preserves typed graph refusal boundaries during JSON lowering") {
     auto invalid_schema = std::string(ValidGraph());
     const auto schema = std::string("solorig-behavior-graph");

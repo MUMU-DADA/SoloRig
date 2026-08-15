@@ -77,7 +77,8 @@ private:
     struct Slot {
         Block block{};
         BehaviorKind kind{BehaviorKind::Lfo};
-        std::array<Connection, 4U> inputs{};
+        std::array<std::array<Connection, kMaximumBehaviorGraphNodes>, 4U> inputs{};
+        std::array<std::size_t, 4U> input_counts{};
     };
 
     [[nodiscard]] TypedBehaviorRuntimeError PrepareSlot(Slot& slot,
@@ -85,7 +86,8 @@ private:
                                                         double sample_rate_hz,
                                                         std::uint32_t oversampling) noexcept;
     std::array<Slot, kMaximumBehaviorGraphNodes> slots_{};
-    std::array<Connection, 3U> outputs_{};
+    std::array<std::array<Connection, kMaximumBehaviorGraphNodes>, 3U> outputs_{};
+    std::array<std::size_t, 3U> output_counts_{};
     std::size_t size_{};
     bool prepared_{};
 };
