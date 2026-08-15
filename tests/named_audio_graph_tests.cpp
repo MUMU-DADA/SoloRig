@@ -11,6 +11,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -136,7 +137,7 @@ std::filesystem::path CreateDifferentIoMnaPackage(std::uint32_t max_channels = 1
     return directory;
 }
 
-std::filesystem::path CreatePowerLoadMnaPackage() {
+std::filesystem::path CreatePowerLoadMnaPackage(std::uint32_t max_iterations = 64U) {
     const auto directory = std::filesystem::temp_directory_path() / "SoloRigNamedMnaPowerLoadTest";
     std::error_code error;
     std::filesystem::remove_all(directory, error);
@@ -147,7 +148,25 @@ std::filesystem::path CreatePowerLoadMnaPackage() {
     }
     {
         std::ofstream logic(directory / "logic" / "main.json", std::ios::binary | std::ios::trunc);
-        logic << R"({"version":2,"schema":"circuit","referenceGround":"0","nodes":["in","rail","out","0"],"ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],"supplies":[{"id":"supply","positive":"rail","negative":"0","voltage":12,"kind":"rectified-reservoir","modelVersion":1,"sourceResistance":10,"sagResistance":20,"recoveryTime":0.1,"rippleAmplitude":0.2,"rippleFrequency":100,"maximumSag":4,"maximumLoadCurrent":1,"initialSag":0}],"components":[{"id":"input-coupling","type":"resistor","pins":["in","out"],"value":1000},{"id":"supply-coupling","type":"resistor","pins":["rail","out"],"value":50},{"id":"speaker","type":"speaker-load","pins":["out","0"],"speakerModel":{"kind":"electrodynamic","modelVersion":1,"voiceCoilResistance":6,"voiceCoilInductance":0.0005,"forceFactor":5,"movingMass":0.02,"mechanicalResistance":2,"compliance":0.0005,"nonlinearStiffness":1000,"nonlinearDisplacementScale":0.002,"maximumCurrent":10,"maximumVelocity":100,"maximumDisplacement":0.1,"initialCurrent":0,"initialVelocity":0,"initialDisplacement":0}}],"solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":4,"convergence":{"maxIterations":64,"absoluteTolerance":1e-10,"relativeTolerance":1e-8}}})";
+        logic << R"({"version":2,"schema":"circuit","referenceGround":"0","nodes":["in","rail","out","0"],"ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],"supplies":[{"id":"supply","positive":"rail","negative":"0","voltage":12,"kind":"rectified-reservoir","modelVersion":1,"sourceResistance":10,"sagResistance":20,"recoveryTime":0.1,"rippleAmplitude":0.2,"rippleFrequency":100,"maximumSag":4,"maximumLoadCurrent":1,"initialSag":0}],"components":[{"id":"input-coupling","type":"resistor","pins":["in","out"],"value":1000},{"id":"supply-coupling","type":"resistor","pins":["rail","out"],"value":50},{"id":"speaker","type":"speaker-load","pins":["out","0"],"speakerModel":{"kind":"electrodynamic","modelVersion":1,"voiceCoilResistance":6,"voiceCoilInductance":0.0005,"forceFactor":5,"movingMass":0.02,"mechanicalResistance":2,"compliance":0.0005,"nonlinearStiffness":1000,"nonlinearDisplacementScale":0.002,"maximumCurrent":10,"maximumVelocity":100,"maximumDisplacement":0.1,"initialCurrent":0,"initialVelocity":0,"initialDisplacement":0}}],"solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":4,"convergence":{"maxIterations":)"
+                << max_iterations
+                << R"(,"absoluteTolerance":1e-10,"relativeTolerance":1e-8}}})";
+    }
+    return directory;
+}
+
+std::filesystem::path CreateSingularMnaPackage() {
+    const auto directory = std::filesystem::temp_directory_path() / "SoloRigNamedMnaSingularTest";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    std::filesystem::create_directories(directory / "logic", error);
+    {
+        std::ofstream manifest(directory / "manifest.json", std::ios::binary | std::ios::trunc);
+        manifest << R"({"schemaVersion":1,"moduleId":"org.mumu-dada.solorig.named-mna-singular","displayName":"Named MNA Singular","category":"analog-circuit","logicFile":"logic/main.json","ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}]})";
+    }
+    {
+        std::ofstream logic(directory / "logic" / "main.json", std::ios::binary | std::ios::trunc);
+        logic << R"({"version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","0"],"ports":[{"id":"input","direction":"input","node":"in"},{"id":"output","direction":"output","node":"out"}],"components":[{"id":"input-load","type":"resistor","pins":["in","0"],"value":1000}],"solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":4,"convergence":{"maxIterations":32,"absoluteTolerance":1e-9,"relativeTolerance":1e-6}}})";
     }
     return directory;
 }
@@ -410,4 +429,102 @@ TEST_CASE("M22-B4 external named MNA composes dynamic power supply and speaker l
                   !contract.process_reads_files && !contract.process_parses_json);
     std::error_code error;
     std::filesystem::remove_all(directory, error);
+}
+
+TEST_CASE("M22-B5 named MNA graph enforces realtime format, capacity and finite-input boundaries") {
+    const auto directory = CreateDifferentIoMnaPackage();
+    const auto package = solo_rig::LoadModulePackage(directory);
+    REQUIRE(package.package.has_value());
+    auto processor = solo_rig::CreateNamedMnaPortProcessor(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor));
+
+    solo_rig::NamedPortAudioGraph graph;
+    REQUIRE(graph.AddInputPort("a", solo_rig::NamedAudioPortDomain::AudioSignal));
+    REQUIRE(graph.AddInputPort("b", solo_rig::NamedAudioPortDomain::AudioSignal));
+    REQUIRE(graph.AddOutputPort("mix", solo_rig::NamedAudioPortDomain::AudioSignal));
+    REQUIRE(graph.AddNode("mna", std::move(std::get<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor))));
+    REQUIRE(graph.Connect({"input", "a", "mna", "in-a"}));
+    REQUIRE(graph.Connect({"input", "b", "mna", "in-b"}));
+    REQUIRE(graph.Connect({"mna", "out", "output", "mix"}));
+
+    std::array<solo_rig::AudioBuffer, 2U> inputs{
+        solo_rig::AudioBuffer(1U, 8U), solo_rig::AudioBuffer(1U, 8U)};
+    std::array<solo_rig::AudioBuffer, 1U> outputs{solo_rig::AudioBuffer(1U, 8U)};
+    static_assert(noexcept(std::declval<solo_rig::NamedPortAudioGraph&>().Process(
+        std::span<const solo_rig::AudioBuffer>{}, std::span<solo_rig::AudioBuffer>{}, 0U)));
+    static_assert(noexcept(std::declval<solo_rig::NamedAudioPortProcessor&>().Process(
+        std::span<const solo_rig::NamedAudioPortInput>{},
+        std::span<solo_rig::NamedAudioPortOutput>{}, 0U)));
+    REQUIRE(!graph.Process(std::span<const solo_rig::AudioBuffer>(inputs),
+                           std::span<solo_rig::AudioBuffer>(outputs), 1U));
+
+    const auto format = solo_rig::AudioFormat{.sample_rate_hz = 192000.0,
+                                               .max_block_size = 4U,
+                                               .channel_count = 1U,
+                                               .sample_representation = solo_rig::SampleRepresentation::Float32};
+    REQUIRE(!graph.Prepare(format, 0U).empty());
+    REQUIRE(!graph.Prepare(format, 17U).empty());
+    REQUIRE(graph.Prepare(format, 4U).empty());
+
+    REQUIRE(!graph.Process(std::span<const solo_rig::AudioBuffer>(inputs),
+                           std::span<solo_rig::AudioBuffer>(outputs), 5U));
+    inputs[0].ChannelData(0U)[0] = std::numeric_limits<float>::infinity();
+    REQUIRE(!graph.Process(std::span<const solo_rig::AudioBuffer>(inputs),
+                           std::span<solo_rig::AudioBuffer>(outputs), 1U));
+    inputs[0].ChannelData(0U)[0] = 1.0F;
+    inputs[1].ChannelData(0U)[0] = 0.0F;
+    REQUIRE(graph.Process(std::span<const solo_rig::AudioBuffer>(inputs),
+                          std::span<solo_rig::AudioBuffer>(outputs), 1U));
+    REQUIRE(std::fabs(outputs[0].ChannelData(0U)[0] - (1.0F / 3.0F)) < 0.001F);
+
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+}
+
+TEST_CASE("M22-B5 named MNA graph propagates singular and nonconvergent solver refusal") {
+    {
+        const auto directory = CreateSingularMnaPackage();
+        const auto package = solo_rig::LoadModulePackage(directory);
+        REQUIRE(package.package.has_value());
+        auto processor = solo_rig::CreateNamedMnaPortProcessor(*package.package);
+        REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor));
+
+        solo_rig::NamedPortAudioGraph graph;
+        REQUIRE(graph.AddInputPort("audio-in", solo_rig::NamedAudioPortDomain::AudioSignal));
+        REQUIRE(graph.AddOutputPort("audio-out", solo_rig::NamedAudioPortDomain::AudioSignal));
+        REQUIRE(graph.AddNode("singular", std::move(std::get<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor))));
+        REQUIRE(graph.Connect({"input", "audio-in", "singular", "input"}));
+        REQUIRE(graph.Connect({"singular", "output", "output", "audio-out"}));
+        REQUIRE(graph.Prepare(Format(), 4U).empty());
+        std::array<solo_rig::AudioBuffer, 1U> inputs{solo_rig::AudioBuffer(1U, 8U)};
+        std::array<solo_rig::AudioBuffer, 1U> outputs{solo_rig::AudioBuffer(1U, 8U)};
+        inputs[0].ChannelData(0U)[0] = 1.0F;
+        REQUIRE(!graph.Process(std::span<const solo_rig::AudioBuffer>(inputs),
+                               std::span<solo_rig::AudioBuffer>(outputs), 1U));
+        std::error_code error;
+        std::filesystem::remove_all(directory, error);
+    }
+
+    {
+        const auto directory = CreatePowerLoadMnaPackage(1U);
+        const auto package = solo_rig::LoadModulePackage(directory);
+        REQUIRE(package.package.has_value());
+        auto processor = solo_rig::CreateNamedMnaPortProcessor(*package.package);
+        REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor));
+
+        solo_rig::NamedPortAudioGraph graph;
+        REQUIRE(graph.AddInputPort("audio-in", solo_rig::NamedAudioPortDomain::AudioSignal));
+        REQUIRE(graph.AddOutputPort("audio-out", solo_rig::NamedAudioPortDomain::AudioSignal));
+        REQUIRE(graph.AddNode("nonconvergent", std::move(std::get<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor))));
+        REQUIRE(graph.Connect({"input", "audio-in", "nonconvergent", "input"}));
+        REQUIRE(graph.Connect({"nonconvergent", "output", "output", "audio-out"}));
+        REQUIRE(graph.Prepare(Format(), 4U).empty());
+        std::array<solo_rig::AudioBuffer, 1U> inputs{solo_rig::AudioBuffer(1U, 8U)};
+        std::array<solo_rig::AudioBuffer, 1U> outputs{solo_rig::AudioBuffer(1U, 8U)};
+        inputs[0].ChannelData(0U)[0] = 0.5F;
+        REQUIRE(!graph.Process(std::span<const solo_rig::AudioBuffer>(inputs),
+                               std::span<solo_rig::AudioBuffer>(outputs), 1U));
+        std::error_code error;
+        std::filesystem::remove_all(directory, error);
+    }
 }

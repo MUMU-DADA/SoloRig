@@ -85,6 +85,13 @@
 - 测试覆盖 2 输入/1 输出、2 声道、声道独立输出、Reset 后确定性、包对象释放后的处理器生命周期，以及某端口 `maxChannels` 不足时的稳定 `ProcessorRejectedFormat`。
 - 提交验证：核心 `567/567`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI 和 C# contract 全部通过；本轮构建 manifest MD5 为 `ea43ef334e977cbc6387deeb5881d909`。该阶段仍不宣称完成电源/负载全拓扑、SPICE/golden/实机证据或真实 ASIO。
 
+### M22-B5 第一阶段：命名 MNA 实时边界审计（已提交）
+
+- `NamedPortAudioGraph::Process` 和 `NamedAudioPortProcessor::Process` 的 `noexcept` 边界已用编译期断言锁定；MNA `ProcessContract` 继续明确禁止分配、锁、文件读取和 JSON 解析，Compile/Prepare 负责全部电路存储与状态准备。
+- 命名 MNA 图在未 Prepare、非法 oversampling（0/17）、超过预分配 block、非有限输入时稳定返回失败；下层 MNA 的 singular matrix 与 non-convergent 结果通过命名端口处理器向 graph 调用方传播，不输出静默替代值。
+- 测试继续使用 192 kHz / Float32 / 4x oversampling，并保留有限输入成功路径；与 M22-B4 的动态电源/扬声器负载和 Reset 测试共同覆盖 Compile → Prepare → Process → Reset 的真实边界。
+- 提交验证：核心 `569/569`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI 和 C# contract 全部通过；本轮构建 manifest MD5 为 `56ce310300830bbf02a3b31c3b60ca2a`。该阶段仍不宣称硬件实时负载、真实 ASIO 或参考等价验证。
+
 ## 当前状态补充：M20-A1
 
 - M19-C 已提交为 `6c0d46e`：15 个代表性类别中 12 类具有可运行 generic 证据，Wah/Phaser、Chorus/Flanger 和真实 optical hardware 三类保持 stable refusal。
