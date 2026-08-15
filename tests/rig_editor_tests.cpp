@@ -140,6 +140,43 @@ TEST_CASE("RigEditor saves and loads the edited preset with normalized source an
     std::filesystem::remove(path, cleanup_error);
 }
 
+TEST_CASE("RigEditor explicitly validates an external module package resource") {
+    const auto directory = std::filesystem::temp_directory_path() / "solorig-editor-module-package";
+    std::error_code cleanup;
+    std::filesystem::remove_all(directory, cleanup);
+    std::filesystem::create_directories(directory / "logic");
+    {
+        std::ofstream manifest(directory / "manifest.json", std::ios::binary | std::ios::trunc);
+        manifest << R"({
+            "schemaVersion": 1,
+            "moduleId": "org.mumu-dada.solorig.editor-package",
+            "displayName": "Editor Package",
+            "category": "analog-circuit",
+            "logicFile": "logic/circuit.json",
+            "ports": [
+                {"id":"input","direction":"input","maxChannels":1},
+                {"id":"output","direction":"output","maxChannels":1}
+            ],
+            "parameters": []
+        })";
+        std::ofstream logic(directory / "logic/circuit.json", std::ios::binary | std::ios::trunc);
+        logic << R"({
+            "schemaVersion": 1,
+            "kind": "analog-circuit",
+            "solver": "modified-nodal-analysis",
+            "components": [
+                {"id":"r1","type":"resistor","nodes":["input","output"],"value":1000}
+            ]
+        })";
+    }
+    solo_rig::RigEditorViewModel editor;
+    const auto imported = editor.ImportResource(directory);
+    REQUIRE(imported.success);
+    REQUIRE(editor.Scene().resource_status.find("Editor Package") != std::string::npos);
+    REQUIRE(editor.IsDirty());
+    std::filesystem::remove_all(directory, cleanup);
+}
+
 TEST_CASE("RigEditor marks theme and layout changes dirty and clears after SaveCurrent") {
     const auto path = std::filesystem::temp_directory_path() / "solorig-editor-dirty.srig";
     std::error_code cleanup_error;

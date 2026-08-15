@@ -2,6 +2,7 @@
 
 #include "content/default_preset.hpp"
 #include "content/json.hpp"
+#include "content/module_package.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -472,6 +473,23 @@ bool RigEditorViewModel::DisconnectNodes(std::string_view source_instance_id, st
 }
 
 EditorFileResult RigEditorViewModel::ImportResource(const std::filesystem::path& source) {
+    std::error_code path_error;
+    const auto is_directory = std::filesystem::is_directory(source, path_error);
+    const auto is_manifest = !is_directory && source.filename() == "manifest.json" &&
+        std::filesystem::is_regular_file(source, path_error);
+    if (is_directory || is_manifest) {
+        const auto package_root = is_directory ? source : source.parent_path();
+        const auto loaded = LoadModulePackage(package_root);
+        if (!loaded.package.has_value() || !loaded.errors.empty()) {
+            SetFileStatus("Resource import failed: module package manifest or logic is invalid.");
+            return {.success = false, .error = EditorFileError::InvalidSchema, .message = file_status_};
+        }
+        resource_status_ = "Imported module package: " + loaded.package->descriptor.display_name;
+        dirty_ = true;
+        SetFileStatus("Unsaved changes");
+        RebuildScene();
+        return {.success = true, .message = resource_status_};
+    }
     std::string extension = source.extension().string();
     std::ranges::transform(extension, extension.begin(), [](unsigned char character) {
         return static_cast<char>(std::tolower(character));
