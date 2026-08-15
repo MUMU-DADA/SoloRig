@@ -732,29 +732,47 @@ TEST_CASE("External digital delay package executes declared delay feedback and m
     REQUIRE(output.ChannelData(0)[2] == 1.0F);
 }
 
-TEST_CASE("External module runtime rejects declared algorithms it cannot execute") {
+TEST_CASE("External module runtime executes declared filter dynamics and pitch-shift operations") {
     const auto directory = CreateRuntimePackage(R"({
         "schemaVersion":1,
-        "moduleId":"org.mumu-dada.solorig.unsupported-filter",
-        "displayName":"Unsupported Filter",
+        "moduleId":"org.mumu-dada.solorig.digital-chain",
+        "displayName":"Digital Chain",
         "category":"digital-algorithm",
         "logicFile":"logic/main.json",
-        "ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}]
+        "ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}],
+        "parameters":[
+            {"id":"cutoff","minimum":20,"maximum":20000,"default":1000},
+            {"id":"amount","minimum":0,"maximum":1,"default":0.5},
+            {"id":"semitones","minimum":-24,"maximum":24,"default":7}
+        ]
     })",
                                                 R"({
         "schemaVersion":1,
         "kind":"digital-algorithm",
-        "algorithm":"unimplemented-filter",
-        "operations":[{"type":"filter"}]
+        "algorithm":"filter-dynamics-pitch-shift",
+        "operations":[
+            {"type":"filter","parameter":"cutoff"},
+            {"type":"dynamics","parameter":"amount"},
+            {"type":"pitch-shift","parameter":"semitones"}
+        ]
     })");
     const auto package = solo_rig::LoadModulePackage(directory);
     RemoveRuntimePackage(directory);
     REQUIRE(package.package.has_value());
 
-    const auto runtime = solo_rig::CreateModuleRuntime(*package.package);
-
-    REQUIRE(std::holds_alternative<solo_rig::ModuleRuntimeError>(runtime));
-    REQUIRE(std::get<solo_rig::ModuleRuntimeError>(runtime) == solo_rig::ModuleRuntimeError::UnsupportedDigitalOperation);
+    auto runtime = solo_rig::CreateModuleRuntime(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    solo_rig::AudioBuffer input(1, 8);
+    solo_rig::AudioBuffer output(1, 8);
+    input.ChannelData(0)[0] = 2.0F;
+    REQUIRE(processor->Prepare(TestFormat()));
+    processor->Process(input, output, 8);
+    for (std::uint32_t sample = 0; sample < 8U; ++sample) {
+        REQUIRE(std::isfinite(output.ChannelData(0)[sample]));
+    }
+    REQUIRE(processor->SetParameter("amount", 0.75F));
+    REQUIRE(!processor->SetParameter("amount", 1.5F));
 }
 
 TEST_CASE("External module runtime rejects analog topologies beyond its verified MNA adapter") {

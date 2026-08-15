@@ -1,6 +1,9 @@
 #include "content/module_runtime.hpp"
 
 #include "dsp/digital_delay.hpp"
+#include "dsp/digital_dynamics.hpp"
+#include "dsp/digital_filter.hpp"
+#include "dsp/digital_pitch_shift.hpp"
 #include "dsp/diode_clipper.hpp"
 #include "dsp/mna_solver.hpp"
 
@@ -147,6 +150,7 @@ private:
 struct BoundDigitalOperation {
     DigitalOperationType type{DigitalOperationType::Bypass};
     std::optional<std::size_t> parameter_index;
+    std::size_t state_index{};
 };
 
 class DigitalAlgorithmRuntime final : public ModuleRuntimeProcessor {
@@ -154,8 +158,13 @@ public:
     DigitalAlgorithmRuntime(std::uint32_t declared_latency_samples,
                             ParameterState parameters,
                             std::vector<BoundDigitalOperation> operations,
-                            bool uses_delay)
-        : declared_latency_samples_(declared_latency_samples), parameters_(std::move(parameters)), operations_(std::move(operations)) {
+                            bool uses_delay,
+                            std::size_t filter_count,
+                            std::size_t dynamics_count,
+                            std::size_t pitch_shift_count)
+        : declared_latency_samples_(declared_latency_samples), parameters_(std::move(parameters)),
+          operations_(std::move(operations)), filters_(filter_count), dynamics_(dynamics_count),
+          pitch_shifts_(pitch_shift_count) {
         if (uses_delay) {
             delay_.emplace();
         }
@@ -168,6 +177,15 @@ public:
         scratch_a_ = AudioBuffer(format.channel_count, format.max_block_size);
         scratch_b_ = AudioBuffer(format.channel_count, format.max_block_size);
         if (delay_.has_value() && (!ConfigureDelay() || !delay_->Prepare(format))) {
+            return false;
+        }
+        if (!ConfigureSpecializedOperations() ||
+            std::ranges::any_of(filters_, [&format](DigitalFilter& filter) { return !filter.Prepare(format); }) ||
+            std::ranges::any_of(dynamics_, [&format](DigitalDynamics& dynamics) { return !dynamics.Prepare(format); }) ||
+            std::ranges::any_of(pitch_shifts_, [&format](DigitalPitchShift& pitch_shift) {
+                return !pitch_shift.Prepare(format);
+            })) {
+            prepared_ = false;
             return false;
         }
         prepared_ = scratch_a_.IsValid() && scratch_b_.IsValid();
@@ -190,6 +208,15 @@ public:
             case DigitalOperationType::Waveshaper:
                 ApplyWaveshaper(*current, *next, parameters_.Value(operation.parameter_index, 1.0F), sample_count);
                 break;
+            case DigitalOperationType::Filter:
+                filters_[operation.state_index].Process(*current, *next, sample_count);
+                break;
+            case DigitalOperationType::Dynamics:
+                dynamics_[operation.state_index].Process(*current, *next, sample_count);
+                break;
+            case DigitalOperationType::PitchShift:
+                pitch_shifts_[operation.state_index].Process(*current, *next, sample_count);
+                break;
             case DigitalOperationType::Delay:
                 delay_->Process(*current, *next, sample_count);
                 break;
@@ -198,10 +225,6 @@ public:
             case DigitalOperationType::Bypass:
                 static_cast<void>(next->CopyFrom(*current, sample_count));
                 break;
-            case DigitalOperationType::Filter:
-            case DigitalOperationType::Dynamics:
-            case DigitalOperationType::PitchShift:
-                return;
             }
             current = next;
             next = next == &scratch_a_ ? &scratch_b_ : &scratch_a_;
@@ -221,6 +244,10 @@ public:
             return false;
         }
         if (delay_.has_value() && !ConfigureDelay()) {
+            parameters_.Restore(parameter_id, *previous);
+            return false;
+        }
+        if (!ConfigureSpecializedOperations()) {
             parameters_.Restore(parameter_id, *previous);
             return false;
         }
@@ -263,6 +290,38 @@ private:
         return delay_->SetSettings(settings);
     }
 
+    [[nodiscard]] bool ConfigureSpecializedOperations() noexcept {
+        for (const auto& operation : operations_) {
+            const float value = parameters_.Value(operation.parameter_index,
+                operation.type == DigitalOperationType::Filter ? 1000.0F : 0.0F);
+            switch (operation.type) {
+            case DigitalOperationType::Filter:
+                if (!filters_[operation.state_index].SetCutoffHz(value)) {
+                    return false;
+                }
+                break;
+            case DigitalOperationType::Dynamics:
+                if (!dynamics_[operation.state_index].SetAmount(value)) {
+                    return false;
+                }
+                break;
+            case DigitalOperationType::PitchShift:
+                if (!pitch_shifts_[operation.state_index].SetSemitones(value)) {
+                    return false;
+                }
+                break;
+            case DigitalOperationType::Gain:
+            case DigitalOperationType::Delay:
+            case DigitalOperationType::Feedback:
+            case DigitalOperationType::Mix:
+            case DigitalOperationType::Waveshaper:
+            case DigitalOperationType::Bypass:
+                break;
+            }
+        }
+        return true;
+    }
+
     static void ApplyGain(const AudioBuffer& input, AudioBuffer& output, float gain, std::uint32_t sample_count) noexcept {
         for (std::uint32_t channel = 0; channel < input.ChannelCount(); ++channel) {
             const auto* source = input.ChannelData(channel);
@@ -290,6 +349,9 @@ private:
     ParameterState parameters_;
     std::vector<BoundDigitalOperation> operations_;
     std::optional<DigitalDelay> delay_;
+    std::vector<DigitalFilter> filters_;
+    std::vector<DigitalDynamics> dynamics_;
+    std::vector<DigitalPitchShift> pitch_shifts_;
     AudioBuffer scratch_a_;
     AudioBuffer scratch_b_;
     bool prepared_{};
@@ -470,6 +532,9 @@ std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> Create
     operations.reserve(logic.operations.size());
     std::uint32_t delay_count{};
     bool uses_delay{};
+    std::size_t filter_count{};
+    std::size_t dynamics_count{};
+    std::size_t pitch_shift_count{};
     for (const auto& operation : logic.operations) {
         switch (operation.type) {
         case DigitalOperationType::Gain:
@@ -482,16 +547,36 @@ std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> Create
         case DigitalOperationType::Filter:
         case DigitalOperationType::Dynamics:
         case DigitalOperationType::PitchShift:
-            return ModuleRuntimeError::UnsupportedDigitalOperation;
+            break;
         }
         if (operation.type == DigitalOperationType::Delay) {
             ++delay_count;
             uses_delay = true;
         }
+        std::size_t state_index{};
+        switch (operation.type) {
+        case DigitalOperationType::Filter:
+            state_index = filter_count++;
+            break;
+        case DigitalOperationType::Dynamics:
+            state_index = dynamics_count++;
+            break;
+        case DigitalOperationType::PitchShift:
+            state_index = pitch_shift_count++;
+            break;
+        case DigitalOperationType::Gain:
+        case DigitalOperationType::Delay:
+        case DigitalOperationType::Feedback:
+        case DigitalOperationType::Mix:
+        case DigitalOperationType::Waveshaper:
+        case DigitalOperationType::Bypass:
+            break;
+        }
         operations.push_back({.type = operation.type,
                               .parameter_index = operation.parameter_id.has_value()
                                   ? parameters.Find(*operation.parameter_id)
-                                  : std::nullopt});
+                                  : std::nullopt,
+                              .state_index = state_index});
     }
     if (delay_count > 1U || (!uses_delay && std::ranges::any_of(operations, [](const BoundDigitalOperation& operation) {
             return operation.type == DigitalOperationType::Feedback || operation.type == DigitalOperationType::Mix;
@@ -499,7 +584,8 @@ std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> Create
         return ModuleRuntimeError::InvalidDigitalTopology;
     }
     return std::unique_ptr<ModuleRuntimeProcessor>(std::make_unique<DigitalAlgorithmRuntime>(
-        package.descriptor.declared_latency_samples, std::move(parameters), std::move(operations), uses_delay));
+        package.descriptor.declared_latency_samples, std::move(parameters), std::move(operations), uses_delay,
+        filter_count, dynamics_count, pitch_shift_count));
 }
 
 std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateMnaRuntime(

@@ -87,6 +87,9 @@ add_library(solo_rig_core STATIC
     src/dsp/nonlinear_triode.cpp
     src/dsp/nonlinear_vari_mu.cpp
     src/dsp/digital_delay.cpp
+    src/dsp/digital_filter.cpp
+    src/dsp/digital_dynamics.cpp
+    src/dsp/digital_pitch_shift.cpp
     src/dsp/impulse_response.cpp
     src/dsp/nam_processor.cpp
     src/dsp/tuner.cpp
@@ -375,6 +378,9 @@ if(BUILD_TESTING)
         tests/nonlinear_triode_tests.cpp
         tests/nonlinear_vari_mu_tests.cpp
         tests/digital_delay_tests.cpp
+        tests/digital_filter_tests.cpp
+        tests/digital_dynamics_tests.cpp
+        tests/digital_pitch_shift_tests.cpp
         tests/impulse_response_tests.cpp
         tests/nam_processor_tests.cpp
         tests/quality_policy_tests.cpp
