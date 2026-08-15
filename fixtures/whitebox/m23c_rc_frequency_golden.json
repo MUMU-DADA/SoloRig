@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "kind": "self-authored-discrete-frequency-golden",
+  "caseId": "solorig.m23c.rc-frequency.v1",
+  "circuitSourceRef": "fixtures/whitebox/m23c_rc_step_circuit.json",
+  "inputHash": "sha256:solorig-m23c-rc-frequency-v1",
+  "formula": {
+    "type": "backward-euler-rc-discrete-frequency",
+    "capacitanceFarads": 1e-9,
+    "resistorOhms": 1000.0
+  },
+  "run": {"sampleRateHz": 192000.0, "oversampling": 4, "randomSeed": 0,
+          "warmupSamples": 512, "measurementSamples": 1024},
+  "frequenciesHz": [1875.0, 9375.0, 46875.0, 75000.0],
+  "expectedMagnitude": [
+    0.999927963445758,
+    0.9982171927379776,
+    0.9650478364624782,
+    0.9383355364985747
+  ],
+  "expectedPhaseRadians": [
+    -0.002263797166555788,
+    -0.011130395011890134,
+    -0.03561289902201849,
+    -0.021979245241957927
+  ],
+  "absoluteTolerance": 1e-8,
+  "referenceStatus": "self-authored-mathematical-only"
+}

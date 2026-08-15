@@ -20,7 +20,7 @@
 - M22-B2 已提交：固定容量 `NamedPortAudioGraph` 将命名端口、域兼容、fan-in/fan-out、采样延迟补偿和显式 block-delay feedback 接入预分配音频块运行时；`TypedBehaviorPortProcessor` 接入 detector sidechain，`TypedBehaviorMnaPortProcessor` 接入控制域到 MNA 的复合。当前 typed/MNA 适配器限定单声道 scalar boundary；任意外部 MNA 命名端口、不同 I/O 数量和多设备 ASIO 仍未完成。
 - M22-B3 已提交：`CreateNamedMnaPortProcessor` 将外部 Circuit v2 的真实命名端口接入 `NamedPortAudioGraph`，已验证 2 输入/1 输出 MNA 图级复合；M22-B4 已把外部 MNA 命名端口扩展为按 `maxChannels` 协商的多声道独立电路实例，并接入动态电源/扬声器负载复合测试。
 - M23-B 已交付首个完整外部 generic 管线：输入耦合 → triode 前级 → pentode 功放 → rectified-reservoir 供电 → saturating-hysteretic transformer → electrodynamic speaker load；网表经过外部包加载、命名端口图 Prepare/Process/Reset，覆盖 192 kHz、Float32、4x 和双声道，核心 `570/570`、CTest `5/5`、VST3 Validator `47/47`、Windows UI/backend ABI/C# contract 全通过，manifest MD5 `93254B6FA091B8C53C8313D5F607EA42`。该证据只证明 self-authored generic 组合可运行，不构成商业箱头、SPICE/golden、实机或 `reference-1to-1`。
-- M23-C1/C2a 已交付第一道可复验参考门禁：无源分压、串联电阻/对地电容低通和 Shockley 二极管静态曲线各有固定 Circuit v2 网表、独立数学 golden、输入哈希、运行条件和误差阈值；测试真实调用 Circuit v2 MNA，并分别逐样本检查 192 kHz/4x backward-Euler 或静态 Newton 结果。当前核心 `575/575`、CTest `5/5`、VST3 Validator `47/47`、Windows UI/backend ABI/C# contract 全通过，manifest MD5 `3FEA28ED772FAA53F6D04ACA3ED88023`。这是 self-authored mathematical evidence，不是授权 SPICE、实机或 `reference-1to-1`；证据包中的 SPICE gate 仍为 `blocked`。
+- M23-C1/C2a/C2b 已交付第一道可复验参考门禁：无源分压、串联电阻/对地电容低通、Shockley 二极管静态曲线和 RC 离散频响各有固定 Circuit v2 网表、独立数学 golden、输入哈希、运行条件和误差阈值；测试真实调用 Circuit v2 MNA，并分别检查 192 kHz/4x backward-Euler、静态 Newton、频响幅度和相位结果。当前核心 `577/577`、CTest `5/5`、VST3 Validator `47/47`、Windows UI/backend ABI/C# contract 全通过，manifest MD5 `157FC363F9151D49E90D22E514D7AC0A`。这是 self-authored mathematical evidence，不是授权 SPICE、实机或 `reference-1to-1`；证据包中的 SPICE gate 仍为 `blocked`。
 - M20-C3-A2 已提交：`RigRuntime::PerformanceSnapshot` 将 active graph 节点的最近/峰值 block CPU 与声明延迟暴露给停止音频后的控制线程；独立程序 UI、真实 ASIO 和过载面板仍未完成。
 - M20-C3-B 已提交：性能快照已经贯通 C++ 编辑器场景、C ABI 和 Avalonia 独立程序；节点卡片与顶部状态同时区分静态预计 CPU、实际最近/峰值 CPU、声明延迟和“实测未连接”。性能数据只允许由停止音频后的控制线程写入，preset 不保存诊断值；真实 ASIO 设备后端和过载状态仍未完成。
 
@@ -44,7 +44,7 @@
 4. **M23：参考与覆盖集**。M23-B 已完成首个完整 generic 组合样例，M23-C1 已把无源分压和 RC 动态公式绑定到真实 MNA 并锁定误差比较流程；下一步为选定的失真、滤波/调制、压缩、BBD、混响、电子管前后级和箱头负载建立可授权的网表、元件/模型版本、供电/负载条件和测量基线，预先固定静态、频响、动态、谐波/互调、旋钮扫动误差阈值，逐类生成 golden/SPICE/实机证据。
 5. **Release 白盒门**。只有在支持矩阵中的每一类同时具备可运行路径、稳定拒绝边界、实时无分配/无锁/无文件证明、独立参考证据和全量回归，且真实宿主/ASIO 条件通过时，才可称为“白盒完成”。generic self-authored 模型仍需明确标注为 generic，不得自动升级为商业型号 `reference-1to1`。
 
-上述目标是完成条件，不是当前完成声明；真实 ASIO/过载数据、授权 SPICE/golden/实机参考与更广覆盖仍未完成，M21 仅完成数字操作及 NAM/IR 外部资产第一阶段，M23-B 仅覆盖首个 self-authored generic 完整组合，M23-C1/C2a 仅完成三类自有数学 golden 对照，任意复杂外部拓扑与 `reference-1to-1` 尚未验收。
+上述目标是完成条件，不是当前完成声明；真实 ASIO/过载数据、授权 SPICE/golden/实机参考与更广覆盖仍未完成，M21 仅完成数字操作及 NAM/IR 外部资产第一阶段，M23-B 仅覆盖首个 self-authored generic 完整组合，M23-C1/C2a/C2b 仅完成四类自有数学 golden 对照，任意复杂外部拓扑与 `reference-1to-1` 尚未验收。
 
 ### M21 第一阶段：外部数字操作 runtime（已提交 `ec21511`）
 
