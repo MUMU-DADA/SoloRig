@@ -139,6 +139,7 @@ add_library(solo_rig_core STATIC
     src/content/wdf_runtime.cpp
     src/content/module_package.cpp
     src/content/module_runtime.cpp
+    src/content/default_preset.cpp
     src/content/preset.cpp
     src/content/theme.cpp
     src/control/midi_mapping.cpp

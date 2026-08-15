@@ -281,6 +281,24 @@ const AsioDeviceDescriptor& StandaloneAudioEngine::Device() const noexcept {
 
 const std::string& StandaloneAudioEngine::StatusText() const noexcept { return status_text_; }
 
+std::string StandaloneAudioEngine::RuntimeStatusText() const {
+    auto status = status_text_;
+    if (IsRunning()) {
+        status += " | callbacks " + std::to_string(CallbackCount());
+        const auto last_block = LastCallbackSampleCount();
+        if (last_block != 0U) {
+            status += " / last " + std::to_string(last_block) + " frames";
+        }
+    }
+    if (ResetRequested()) {
+        status += " | ASIO reset requested";
+    }
+    if (DropoutReported()) {
+        status += " | dropout detected; recover required";
+    }
+    return status;
+}
+
 const std::string& StandaloneAudioEngine::ErrorText() const noexcept { return error_text_; }
 
 std::uint32_t StandaloneAudioEngine::BufferSize() const noexcept {

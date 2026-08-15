@@ -46,6 +46,9 @@ public:
     [[nodiscard]] bool IsRunning() const noexcept;
     [[nodiscard]] const AsioDeviceDescriptor& Device() const noexcept;
     [[nodiscard]] const std::string& StatusText() const noexcept;
+    // Control/UI-thread snapshot that appends callback and recovery state.
+    // It must not be called from an ASIO callback.
+    [[nodiscard]] std::string RuntimeStatusText() const;
     [[nodiscard]] const std::string& ErrorText() const noexcept;
     [[nodiscard]] std::uint32_t BufferSize() const noexcept;
     [[nodiscard]] std::uint32_t InputLatencySamples() const noexcept;

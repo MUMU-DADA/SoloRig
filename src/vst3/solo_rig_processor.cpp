@@ -1,5 +1,6 @@
 #include "vst3/solo_rig_processor.h"
 
+#include "content/default_preset.hpp"
 #include "vst3/solo_rig_ids.h"
 
 #include "base/source/fstreamer.h"
@@ -352,16 +353,16 @@ void SoloRigProcessor::ReleaseRuntime() noexcept {
 bool SoloRigProcessor::BuildRuntime(const AudioFormat& format) noexcept {
     try {
         const auto drive = ReadStateSnapshot().drive;
-        RigPreset preset{
-            .preset_id = "vst3-default",
-            .name = "VST3 Default",
-            .nodes = {PresetNode{.instance_id = "drive-1",
-                                 .module_id = "org.mumu-dada.solorig.drive",
-                                 .parameter_values = {{"drive", 1.0F + static_cast<float>(drive) * 15.0F},
-                                                      {"outputGain", 1.0F},
-                                                      {"diodeThreshold", 0.35F}}}},
-            .connections = {},
-        };
+        auto preset = DefaultRigPreset();
+        preset.preset_id = "vst3-default";
+        preset.name = "VST3 Default";
+        auto drive_node = std::find_if(preset.nodes.begin(), preset.nodes.end(), [](const PresetNode& node) {
+            return node.instance_id == "drive-1";
+        });
+        if (drive_node == preset.nodes.end()) {
+            return false;
+        }
+        drive_node->parameter_values["drive"] = 1.0F + static_cast<float>(drive) * 15.0F;
         PreparedPreset prepared{.preset_id = preset.preset_id, .preset = std::move(preset)};
         const auto built = RigRuntimeBuilder{}.Build(prepared, module_registry_, format);
         if (std::holds_alternative<RigBuildError>(built)) {

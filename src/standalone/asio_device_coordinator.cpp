@@ -183,6 +183,53 @@ bool AsioDeviceCoordinator::RunBufferContractSelfTest() {
     return ring.AvailableFrames() == 3U;
 }
 
+bool AsioDeviceCoordinator::RunAsyncClockContractSelfTest() {
+    constexpr std::uint32_t kDeviceBlockSize = 64U;
+    constexpr double kMasterRateHz = 48000.0;
+    constexpr double kSlaveRateHz = 44100.0;
+    constexpr std::uint32_t kInternalBlockSize = 256U;
+    constexpr std::uint32_t kRingCapacity = kInternalBlockSize * kRingBlockCount;
+    if (kInternalBlockSize == 0U || kRingCapacity == 0U) {
+        return false;
+    }
+
+    AudioFrameRing ring;
+    if (!ring.Prepare(1U, kRingCapacity)) {
+        return false;
+    }
+    std::array<float, kInternalBlockSize> produced{};
+    const float* produced_channels[] = {produced.data()};
+    for (std::uint32_t block = 0U; block < kRingBlockCount / 2U; ++block) {
+        if (!ring.Write(produced_channels, kInternalBlockSize)) {
+            return false;
+        }
+    }
+
+    std::array<float, 320U> consumed{};
+    float* consumed_channels[] = {consumed.data()};
+    double next_master_callback = 0.0;
+    double next_slave_callback = 0.0;
+    for (std::size_t callback = 0U; callback < 30000U; ++callback) {
+        if (next_master_callback <= next_slave_callback) {
+            if (!ring.Write(produced_channels, kInternalBlockSize)) {
+                return false;
+            }
+            next_master_callback += static_cast<double>(kDeviceBlockSize) / kMasterRateHz;
+            continue;
+        }
+        const auto correction = ClockCorrection(ring);
+        const auto source_rate = kInternalSampleRateHz * (1.0 + static_cast<double>(correction));
+        const auto source_sample_count = ResampledBlockSize(kDeviceBlockSize, kSlaveRateHz, source_rate);
+        if (source_sample_count == 0U || source_sample_count > consumed.size() ||
+            !ring.Read(consumed_channels, source_sample_count)) {
+            return false;
+        }
+        next_slave_callback += static_cast<double>(kDeviceBlockSize) / kSlaveRateHz;
+    }
+    return !ring.UnderrunReported() && !ring.OverrunReported() &&
+        ring.AvailableFrames() > 0U && ring.AvailableFrames() < ring.CapacityFrames();
+}
+
 bool AsioDeviceCoordinator::Open(std::span<const AsioDriverInfo> drivers,
                                  HWND system_window,
                                  StandaloneAudioRouting routing) {
@@ -812,7 +859,7 @@ const AsioDeviceCoordinator::Endpoint* AsioDeviceCoordinator::FindEndpoint(std::
     return nullptr;
 }
 
-float AsioDeviceCoordinator::ClockCorrection(const AudioFrameRing& ring) const noexcept {
+float AsioDeviceCoordinator::ClockCorrection(const AudioFrameRing& ring) noexcept {
     const auto capacity = ring.CapacityFrames();
     const auto available = ring.AvailableFrames();
     if (capacity == 0U || available == 0U) {

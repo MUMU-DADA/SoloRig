@@ -47,6 +47,10 @@ public:
     // device disconnect. The caller must have stopped the audio thread first.
     [[nodiscard]] bool Recover();
     [[nodiscard]] static bool RunBufferContractSelfTest();
+    // Offline contract only: exercises the bounded clock servo with two
+    // different device rates. It is not a substitute for two physical ASIO
+    // devices, which remains a hardware acceptance gate.
+    [[nodiscard]] static bool RunAsyncClockContractSelfTest();
 
     [[nodiscard]] bool IsOpen() const noexcept;
     [[nodiscard]] bool IsRunning() const noexcept;
@@ -139,7 +143,7 @@ private:
                                                  std::uint32_t preferred) const noexcept;
     [[nodiscard]] Endpoint* FindEndpoint(std::string_view device_id) noexcept;
     [[nodiscard]] const Endpoint* FindEndpoint(std::string_view device_id) const noexcept;
-    [[nodiscard]] float ClockCorrection(const AudioFrameRing& ring) const noexcept;
+    [[nodiscard]] static float ClockCorrection(const AudioFrameRing& ring) noexcept;
     void MarkRuntimeFault(Endpoint& endpoint) noexcept;
     void ReleaseEndpoints() noexcept;
 

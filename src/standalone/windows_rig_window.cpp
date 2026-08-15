@@ -152,6 +152,7 @@ bool Win32RigWindow::Create(HINSTANCE instance, RigEditorViewModel& editor, bool
         return false;
     }
     CreateToolbarButtons();
+    SetTimer(window_, 2U, 250U, nullptr);
     RefreshAsioControls();
     UpdateAudioStatus();
     UpdateEditorViewport();
@@ -403,6 +404,7 @@ void Win32RigWindow::Destroy() noexcept {
     midi_target_ids_.clear();
     if (window_ != nullptr) {
         KillTimer(window_, 1U);
+        KillTimer(window_, 2U);
     }
     midi_timer_enabled_ = false;
     if (midi_session_ != nullptr) {
@@ -824,6 +826,11 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
             static_cast<void>(DrainMidi());
             return 0;
         }
+        if (w_param == 2U) {
+            UpdateAudioStatus();
+            InvalidateRect(window_, nullptr, FALSE);
+            return 0;
+        }
         return 0;
     case WM_DPICHANGED: {
         dpi_scale_ = static_cast<float>(HIWORD(w_param)) / 96.0F;
@@ -862,6 +869,7 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
         return 0;
     case WM_DESTROY:
         KillTimer(window_, 1U);
+        KillTimer(window_, 2U);
         PostQuitMessage(0);
         return 0;
     case WM_ERASEBKGND:
@@ -1046,7 +1054,7 @@ void Win32RigWindow::UpdateAudioStatus() {
     if (editor_ == nullptr || audio_engine_ == nullptr) {
         return;
     }
-    editor_->SetAudioStatus(audio_engine_->StatusText());
+    editor_->SetAudioStatus(audio_engine_->RuntimeStatusText());
 }
 
 void Win32RigWindow::RefreshMidiMappingControls() {

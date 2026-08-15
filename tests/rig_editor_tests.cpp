@@ -1,5 +1,6 @@
 #include "test_framework.hpp"
 
+#include "content/default_preset.hpp"
 #include "content/preset.hpp"
 #include "ui/rig_editor.hpp"
 
@@ -22,7 +23,10 @@ std::filesystem::path SourcePath(std::string_view relative) {
 } // namespace
 
 TEST_CASE("RigEditor builds the default Drive and Delay scene with honest audio status") {
+    const auto shared = solo_rig::DefaultRigPreset();
     solo_rig::RigEditorViewModel editor;
+    REQUIRE(editor.ExportPreset().nodes.size() == shared.nodes.size());
+    REQUIRE(editor.ExportPreset().connections.size() == shared.connections.size());
     REQUIRE(editor.Scene().nodes.size() == 2U);
     REQUIRE(editor.Scene().connections.size() == 1U);
     REQUIRE(editor.Scene().nodes[0].module_id == "org.mumu-dada.solorig.drive");
