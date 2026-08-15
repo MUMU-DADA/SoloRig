@@ -32,3 +32,12 @@ the MIT License; the complete license text is retained in
 `third_party/vst3sdk/LICENSE.txt`.
 
 Copyright (c) 2026 Steinberg Media Technologies GmbH.
+
+## ASIO host boundary
+
+SoloRig does not vendor or redistribute an ASIO SDK implementation. The
+Windows standalone host contains only the small ABI declarations needed to
+call an already-installed, user-selected ASIO driver through its registered
+COM class. Any distribution that bundles an ASIO SDK or driver must complete
+the applicable Steinberg licensing and driver-vendor permission review before
+shipping.

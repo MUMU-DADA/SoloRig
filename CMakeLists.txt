@@ -149,8 +149,12 @@ add_library(solo_rig_core STATIC
     src/ui/rig_editor.cpp
 )
 if(WIN32)
-    target_sources(solo_rig_core PRIVATE src/control/midi_input.cpp)
-    target_link_libraries(solo_rig_core PUBLIC winmm)
+    target_sources(solo_rig_core PRIVATE
+        src/control/midi_input.cpp
+        src/standalone/asio_host.cpp
+        src/standalone/asio_sample_conversion.cpp
+    )
+    target_link_libraries(solo_rig_core PUBLIC winmm ole32 advapi32)
 endif()
 target_include_directories(solo_rig_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(solo_rig_core PUBLIC neural_amp_modeler_core)
@@ -188,6 +192,17 @@ if(WIN32 AND SOLO_RIG_BUILD_STANDALONE)
             "${CMAKE_CURRENT_SOURCE_DIR}/resources"
             "$<TARGET_FILE_DIR:SoloRigStandalone>/resources"
     )
+
+    add_executable(solo_rig_asio_probe
+        tools/asio_probe.cpp
+    )
+    target_include_directories(solo_rig_asio_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(solo_rig_asio_probe PRIVATE solo_rig_core user32)
+    set_target_properties(solo_rig_asio_probe PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        OUTPUT_NAME "SoloRigAsioProbe"
+    )
+    enable_solo_rig_warnings(solo_rig_asio_probe)
 
     if(BUILD_TESTING)
         add_executable(solo_rig_windows_ui_tests
@@ -428,7 +443,11 @@ if(BUILD_TESTING)
     )
     target_link_libraries(solo_rig_tests PRIVATE solo_rig_core)
     if(WIN32)
-        target_sources(solo_rig_tests PRIVATE src/standalone/midi_control_session.cpp)
+        target_sources(solo_rig_tests PRIVATE
+            src/standalone/midi_control_session.cpp
+            tests/asio_host_tests.cpp
+            tests/asio_sample_conversion_tests.cpp
+        )
     endif()
     target_compile_definitions(solo_rig_tests PRIVATE SOLO_RIG_SOURCE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}")
     enable_solo_rig_warnings(solo_rig_tests)
