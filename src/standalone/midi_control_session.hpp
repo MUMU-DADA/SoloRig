@@ -5,6 +5,7 @@
 #include "ui/rig_editor.hpp"
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <map>
 #include <optional>
@@ -100,6 +101,9 @@ public:
     [[nodiscard]] bool ClearBindings();
     [[nodiscard]] bool RegisterPresetBank(
         std::vector<std::pair<std::string, RigPreset>> presets);
+    // Loads a bounded directory of .srig files and assigns deterministic
+    // Program Change numbers in lexical filename order (0..N-1).
+    [[nodiscard]] bool LoadPresetBankDirectory(const std::filesystem::path& directory);
 
     [[nodiscard]] const MidiSessionStatus& Status() const noexcept;
     [[nodiscard]] std::string StatusText() const;
@@ -107,6 +111,8 @@ public:
 
 private:
     [[nodiscard]] bool RebuildController();
+    [[nodiscard]] bool RegisterPresetBankWithProgramChanges(
+        std::vector<std::pair<std::string, RigPreset>> presets);
     void SetError(std::string message);
     void SetOpenMessage();
     void UpdateBindingCount();

@@ -20,6 +20,7 @@ enum class FileDialogAction {
     Open,
     Save,
     ImportResource,
+    MidiPresetBank,
 };
 
 using FileDialogProvider = std::function<std::optional<std::filesystem::path>(
@@ -56,6 +57,7 @@ public:
     [[nodiscard]] bool TriggerMidiRefresh();
     [[nodiscard]] bool TriggerMidiOpen();
     [[nodiscard]] bool TriggerMidiClose();
+    [[nodiscard]] bool TriggerMidiBankImport();
     [[nodiscard]] std::size_t DrainMidi();
     [[nodiscard]] bool TriggerMidiLearn();
     [[nodiscard]] bool TriggerMidiCancelLearn();
@@ -126,6 +128,7 @@ private:
     HWND midi_refresh_button_{};
     HWND midi_open_button_{};
     HWND midi_close_button_{};
+    HWND midi_bank_button_{};
     HWND midi_target_combo_{};
     HWND midi_mapping_list_{};
     HWND midi_learn_button_{};

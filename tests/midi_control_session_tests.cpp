@@ -1,6 +1,8 @@
 #include "standalone/midi_control_session.hpp"
 #include "test_framework.hpp"
 
+#include <filesystem>
+#include <fstream>
 #include <memory>
 
 namespace {
@@ -158,6 +160,48 @@ TEST_CASE("Standalone MIDI session uses a deterministic preset bank for Program 
     REQUIRE(session.Drain() == 1U);
     REQUIRE(editor.ExportPreset().preset_id == "lead");
     REQUIRE(editor.ExportPreset().nodes.front().parameter_values.at("drive") == 9.0F);
+}
+
+TEST_CASE("Standalone MIDI session loads a preset directory and maps lexical files to Program Change") {
+    const auto directory = std::filesystem::temp_directory_path() / "solorig-midi-preset-bank";
+    std::error_code cleanup;
+    std::filesystem::remove_all(directory, cleanup);
+    std::filesystem::create_directories(directory);
+
+    auto clean = solo_rig::RigEditorViewModel::DefaultEditorPreset();
+    clean.preset_id = "clean";
+    clean.name = "Clean";
+    auto lead = clean;
+    lead.preset_id = "lead";
+    lead.name = "Lead";
+    lead.nodes.front().parameter_values.at("drive") = 9.0F;
+    REQUIRE(!solo_rig::SavePreset(directory / "01-clean.srig", clean).has_value());
+    REQUIRE(!solo_rig::SavePreset(directory / "02-lead.srig", lead).has_value());
+
+    solo_rig::RigEditorViewModel editor;
+    auto fake = std::make_unique<FakeMidiInputSource>();
+    auto* source = fake.get();
+    solo_rig::standalone::StandaloneMidiControlSession session(editor, std::move(fake));
+    REQUIRE(session.LoadPresetBankDirectory(directory));
+    const auto bindings = session.Bindings();
+    REQUIRE(bindings.size() == 2U);
+    REQUIRE(bindings.at(0).message_type == solo_rig::MidiMessageType::ProgramChange);
+    REQUIRE(bindings.at(0).number == 0U);
+    REQUIRE(bindings.at(0).target_id == "clean");
+    REQUIRE(bindings.at(1).number == 1U);
+    REQUIRE(bindings.at(1).target_id == "lead");
+    REQUIRE(session.StatusText().find("Program Change 0..1 mapped") != std::string::npos);
+    REQUIRE(session.RefreshDevices().size() == 1U);
+    REQUIRE(session.OpenSelected());
+    source->Inject({.type = solo_rig::MidiMessageType::ProgramChange,
+                    .channel = 0,
+                    .number = 1,
+                    .value = 1});
+    REQUIRE(session.Drain() == 1U);
+    REQUIRE(editor.ExportPreset().preset_id == "lead");
+    REQUIRE(editor.ExportPreset().nodes.front().parameter_values.at("drive") == 9.0F);
+
+    std::filesystem::remove_all(directory, cleanup);
 }
 
 TEST_CASE("Standalone MIDI session reports open failure, no-device state and closes fake input safely") {

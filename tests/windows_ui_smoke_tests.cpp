@@ -454,6 +454,61 @@ TEST_CASE("Win32 standalone MIDI mapping controls perform CC learn delete and cl
     window.Destroy();
 }
 
+TEST_CASE("Win32 standalone MIDI Bank button loads sorted presets and exposes Program Change mappings") {
+    const auto directory = std::filesystem::temp_directory_path() / "solorig-window-midi-bank";
+    std::error_code cleanup;
+    std::filesystem::remove_all(directory, cleanup);
+    std::filesystem::create_directories(directory);
+    auto clean = solo_rig::RigEditorViewModel::DefaultEditorPreset();
+    clean.preset_id = "clean";
+    clean.name = "Clean";
+    auto lead = clean;
+    lead.preset_id = "lead";
+    lead.name = "Lead";
+    lead.nodes.front().parameter_values.at("drive") = 9.0F;
+    REQUIRE(!solo_rig::SavePreset(directory / "01-clean.srig", clean).has_value());
+    REQUIRE(!solo_rig::SavePreset(directory / "02-lead.srig", lead).has_value());
+
+    const auto instance = GetModuleHandleW(nullptr);
+    REQUIRE(instance != nullptr);
+    solo_rig::RigEditorViewModel editor;
+    auto fake = std::make_unique<FakeWindowMidiSource>();
+    auto* source = fake.get();
+    solo_rig::standalone::StandaloneMidiControlSession session(editor, std::move(fake));
+    solo_rig::standalone::Win32RigWindow window;
+    REQUIRE(window.Create(instance, editor, false));
+    window.SetMidiControlSession(&session);
+    std::vector<solo_rig::standalone::FileDialogAction> actions;
+    window.SetFileDialogProvider([&](solo_rig::standalone::FileDialogAction action,
+                                     const std::optional<std::filesystem::path>&) {
+        actions.push_back(action);
+        return action == solo_rig::standalone::FileDialogAction::MidiPresetBank
+            ? std::optional<std::filesystem::path>(directory) : std::nullopt;
+    });
+
+    const auto bank_button = GetDlgItem(window.Handle(), 1026);
+    const auto mapping_list = GetDlgItem(window.Handle(), 1012);
+    REQUIRE(bank_button != nullptr);
+    REQUIRE(mapping_list != nullptr);
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1026, BN_CLICKED), 0) == 0);
+    REQUIRE(SendMessageW(mapping_list, LB_GETCOUNT, 0, 0) == 2);
+    REQUIRE(session.Bindings().at(0).message_type == solo_rig::MidiMessageType::ProgramChange);
+    REQUIRE(session.Bindings().at(1).number == 1U);
+    REQUIRE(std::ranges::find(actions, solo_rig::standalone::FileDialogAction::MidiPresetBank) != actions.end());
+
+    REQUIRE(window.TriggerMidiRefresh());
+    REQUIRE(window.TriggerMidiOpen());
+    source->Inject({.type = solo_rig::MidiMessageType::ProgramChange,
+                    .channel = 0,
+                    .number = 1,
+                    .value = 1});
+    REQUIRE(SendMessageW(window.Handle(), WM_TIMER, 1U, 0) == 0);
+    REQUIRE(editor.ExportPreset().preset_id == "lead");
+    REQUIRE(editor.ExportPreset().nodes.front().parameter_values.at("drive") == 9.0F);
+    window.Destroy();
+    std::filesystem::remove_all(directory, cleanup);
+}
+
 TEST_CASE("Win32 standalone MIDI session syncs loaded bindings and preserves learn on cancel or error") {
     const auto directory = std::filesystem::temp_directory_path();
     const auto valid_path = directory / "solorig-midi-learn-valid.srig";

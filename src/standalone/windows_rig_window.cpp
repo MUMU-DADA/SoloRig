@@ -6,6 +6,7 @@
 #include <wincodec.h>
 #include <windowsx.h>
 #include <commdlg.h>
+#include <shlobj.h>
 
 #include <algorithm>
 #include <array>
@@ -17,6 +18,7 @@
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "shell32.lib")
 
 namespace solo_rig::standalone {
 namespace {
@@ -469,6 +471,10 @@ void Win32RigWindow::Destroy() noexcept {
         DestroyWindow(midi_close_button_);
         midi_close_button_ = nullptr;
     }
+    if (midi_bank_button_ != nullptr) {
+        DestroyWindow(midi_bank_button_);
+        midi_bank_button_ = nullptr;
+    }
     if (midi_open_button_ != nullptr) {
         DestroyWindow(midi_open_button_);
         midi_open_button_ = nullptr;
@@ -752,6 +758,24 @@ bool Win32RigWindow::TriggerMidiClose() {
     RefreshMidiMappingControls();
     InvalidateRect(window_, nullptr, FALSE);
     return true;
+}
+
+bool Win32RigWindow::TriggerMidiBankImport() {
+    if (midi_session_ == nullptr) {
+        return false;
+    }
+    const auto source = file_dialog_provider_ ? file_dialog_provider_(FileDialogAction::MidiPresetBank,
+                                                                       editor_ != nullptr ? editor_->SourcePath()
+                                                                                          : std::nullopt)
+                                              : ShowNativeFileDialog(FileDialogAction::MidiPresetBank);
+    if (!source.has_value()) {
+        return false;
+    }
+    const auto loaded = midi_session_->LoadPresetBankDirectory(*source);
+    RefreshMidiMappingControls();
+    UpdateWindowTitle();
+    InvalidateRect(window_, nullptr, FALSE);
+    return loaded;
 }
 
 std::size_t Win32RigWindow::DrainMidi() {
@@ -1062,6 +1086,8 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
                 static_cast<void>(TriggerMidiOpen());
             } else if (LOWORD(w_param) == 1006) {
                 static_cast<void>(TriggerMidiClose());
+            } else if (LOWORD(w_param) == 1026) {
+                static_cast<void>(TriggerMidiBankImport());
             } else if (LOWORD(w_param) == 1008) {
                 static_cast<void>(TriggerMidiLearn());
             } else if (LOWORD(w_param) == 1009) {
@@ -1129,6 +1155,8 @@ void Win32RigWindow::CreateToolbarButtons() {
                                         454, 16, 88, 30, window_, reinterpret_cast<HMENU>(1005), instance_, nullptr);
     midi_close_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Close", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                          548, 16, 92, 30, window_, reinterpret_cast<HMENU>(1006), instance_, nullptr);
+    midi_bank_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Bank", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                        644, 16, 96, 30, window_, reinterpret_cast<HMENU>(1026), instance_, nullptr);
     midi_target_combo_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", nullptr,
                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
                                          560, 16, 220, 220, window_, reinterpret_cast<HMENU>(1007), instance_, nullptr);
@@ -1144,7 +1172,7 @@ void Win32RigWindow::CreateToolbarButtons() {
                                          WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
                                          560, 72, 520, 110, window_, reinterpret_cast<HMENU>(1012), instance_, nullptr);
     midi_hint_label_ = CreateWindowExW(0, L"STATIC",
-                                       L"MIDI CC Learn only | Program Change bank remains session-controlled",
+                                       L"MIDI CC Learn | MIDI Bank maps sorted .srig files to Program Change 0..N-1",
                                        WS_CHILD | WS_VISIBLE | SS_LEFT,
                                        560, 184, 520, 24, window_, reinterpret_cast<HMENU>(1013), instance_, nullptr);
     LayoutToolbarButtons();
@@ -1176,6 +1204,7 @@ void Win32RigWindow::LayoutToolbarButtons() {
     move(midi_refresh_button_, 350, 16, 98, 30);
     move(midi_open_button_, 454, 16, 88, 30);
     move(midi_close_button_, 548, 16, 92, 30);
+    move(midi_bank_button_, 644, 16, 96, 30);
     RECT client{};
     GetClientRect(window_, &client);
     const auto width = std::max<LONG>(1, client.right - client.left);
@@ -1285,10 +1314,25 @@ std::optional<std::string> Win32RigWindow::SelectedMidiTarget() const {
 bool Win32RigWindow::HandleFileAction(FileDialogAction action) {
     if (action == FileDialogAction::Open) return TriggerOpen();
     if (action == FileDialogAction::Save) return TriggerSave();
+    if (action == FileDialogAction::MidiPresetBank) return TriggerMidiBankImport();
     return TriggerImportResource();
 }
 
 std::optional<std::filesystem::path> Win32RigWindow::ShowNativeFileDialog(FileDialogAction action) const {
+    if (action == FileDialogAction::MidiPresetBank) {
+        BROWSEINFOW browse{};
+        browse.hwndOwner = window_;
+        browse.lpszTitle = L"Select a directory containing .srig MIDI bank presets";
+        browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+        auto* selected = SHBrowseForFolderW(&browse);
+        if (selected == nullptr) {
+            return std::nullopt;
+        }
+        wchar_t directory[MAX_PATH]{};
+        const auto resolved = SHGetPathFromIDListW(selected, directory) != FALSE;
+        CoTaskMemFree(selected);
+        return resolved ? std::optional<std::filesystem::path>(std::filesystem::path(directory)) : std::nullopt;
+    }
     wchar_t filename[32768]{};
     if (editor_ != nullptr && editor_->SourcePath().has_value()) {
         const auto text = editor_->SourcePath()->wstring();

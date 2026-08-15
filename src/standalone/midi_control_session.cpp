@@ -1,8 +1,11 @@
 #include "standalone/midi_control_session.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <set>
 #include <string_view>
+#include <variant>
 
 namespace solo_rig::standalone {
 namespace {
@@ -52,6 +55,16 @@ bool ParameterTargetExists(const RigPreset& preset, std::string_view target_id) 
         return candidate.instance_id == node_id;
     });
     return node != preset.nodes.end() && node->parameter_values.contains(parameter_id);
+}
+
+constexpr std::size_t kMaximumPresetBankEntries = 128U;
+
+bool IsPresetFile(const std::filesystem::path& path) {
+    auto extension = path.extension().string();
+    std::ranges::transform(extension, extension.begin(), [](const unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    return extension == ".srig";
 }
 
 MidiLearnTarget RangeForParameter(const PresetNode& node, std::string parameter_id) {
@@ -448,6 +461,58 @@ bool StandaloneMidiControlSession::ClearBindings() {
     return true;
 }
 
+bool StandaloneMidiControlSession::LoadPresetBankDirectory(const std::filesystem::path& directory) {
+    std::error_code directory_error;
+    if (!std::filesystem::is_directory(directory, directory_error) || directory_error) {
+        SetError("MIDI preset bank directory is missing");
+        return false;
+    }
+
+    std::vector<std::filesystem::path> files;
+    std::filesystem::directory_iterator iterator(directory, directory_error);
+    const std::filesystem::directory_iterator end;
+    while (!directory_error && iterator != end) {
+        std::error_code entry_error;
+        if (iterator->is_regular_file(entry_error) && !entry_error && IsPresetFile(iterator->path())) {
+            files.push_back(iterator->path());
+        }
+        iterator.increment(directory_error);
+    }
+    if (directory_error) {
+        SetError("MIDI preset bank directory cannot be enumerated");
+        return false;
+    }
+    std::ranges::sort(files);
+    if (files.empty()) {
+        SetError("MIDI preset bank contains no .srig files");
+        return false;
+    }
+    if (files.size() > kMaximumPresetBankEntries) {
+        SetError("MIDI preset bank exceeds 128 Program Change entries");
+        return false;
+    }
+
+    std::vector<std::pair<std::string, RigPreset>> presets;
+    presets.reserve(files.size());
+    std::set<std::string, std::less<>> identifiers;
+    for (const auto& file : files) {
+        const auto loaded = LoadPreset(file);
+        if (std::holds_alternative<PresetFileError>(loaded)) {
+            SetError("MIDI preset bank contains an unreadable or invalid preset");
+            return false;
+        }
+        auto preset = std::get<RigPreset>(loaded);
+        const auto identifier = preset.preset_id.empty() ? file.stem().string() : preset.preset_id;
+        if (identifier.empty() || !identifiers.insert(identifier).second) {
+            SetError("MIDI preset bank contains a duplicate or empty preset ID");
+            return false;
+        }
+        preset.preset_id = identifier;
+        presets.emplace_back(identifier, std::move(preset));
+    }
+    return RegisterPresetBankWithProgramChanges(std::move(presets));
+}
+
 bool StandaloneMidiControlSession::RegisterPresetBank(std::vector<std::pair<std::string, RigPreset>> presets) {
     std::map<std::string, RigPreset, std::less<>> candidate;
     for (auto& [id, preset] : presets) {
@@ -475,6 +540,46 @@ bool StandaloneMidiControlSession::RegisterPresetBank(std::vector<std::pair<std:
     }
     SetOpenMessage();
     return true;
+}
+
+bool StandaloneMidiControlSession::RegisterPresetBankWithProgramChanges(
+    std::vector<std::pair<std::string, RigPreset>> presets) {
+    if (presets.empty() || presets.size() > kMaximumPresetBankEntries) {
+        SetError("MIDI preset bank must contain between 1 and 128 presets");
+        return false;
+    }
+    const auto previous_bank = preset_bank_;
+    const auto previous_bindings = bindings_;
+    if (!RegisterPresetBank(presets)) {
+        return false;
+    }
+
+    auto candidate_bindings = bindings_;
+    std::erase_if(candidate_bindings, [](const MidiBinding& binding) {
+        return binding.message_type == MidiMessageType::ProgramChange &&
+            binding.target_kind == MidiTargetKind::Preset;
+    });
+    for (std::size_t index = 0U; index < presets.size(); ++index) {
+        candidate_bindings.push_back({.message_type = MidiMessageType::ProgramChange,
+                                      .channel = 0U,
+                                      .number = static_cast<std::uint8_t>(index),
+                                      .target_kind = MidiTargetKind::Preset,
+                                      .target_id = presets[index].first,
+                                      .minimum = 0.0F,
+                                      .maximum = 1.0F});
+    }
+    if (ConfigureBindings(std::move(candidate_bindings))) {
+        status_.message = "preset bank loaded; Program Change 0.." +
+            std::to_string(presets.size() - 1U) + " mapped";
+        return true;
+    }
+
+    preset_bank_ = previous_bank;
+    bindings_ = previous_bindings;
+    static_cast<void>(editor_.SetMidiBindings(previous_bindings));
+    static_cast<void>(RebuildController());
+    SetError("MIDI preset bank bindings could not be prepared");
+    return false;
 }
 
 const MidiSessionStatus& StandaloneMidiControlSession::Status() const noexcept {
