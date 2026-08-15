@@ -18,7 +18,7 @@
 - M22-A1 已提交 `b75200d`：MNA 编译/求解器支持固定容量多输入、多输出端口，新增 span 输入和输出快照，旧单输入 `Solve(double)` 保持兼容；双输入双输出电阻网络、输入数量、非有限和 192 kHz 边界通过核心回归。
 - M22-B1 已提交：circuit v2 parser 接受多输入端口；外部 MNA runtime 支持“输入端口数=输出端口数、每端口单声道、按 AudioBuffer 声道序映射”的固定容量闭环，并拒绝空输入、不等数量、超过 8 端口或 descriptor 不匹配。命名端口图、独立 sidechain、不同 I/O 数量和任意多端实时图仍未接入。提交时核心为 `555/555`，构建 manifest MD5 为 `f6de0cfd474ade51bb033e50939f6e53`。
 - M22-B2 已提交：固定容量 `NamedPortAudioGraph` 将命名端口、域兼容、fan-in/fan-out、采样延迟补偿和显式 block-delay feedback 接入预分配音频块运行时；`TypedBehaviorPortProcessor` 接入 detector sidechain，`TypedBehaviorMnaPortProcessor` 接入控制域到 MNA 的复合。当前 typed/MNA 适配器限定单声道 scalar boundary；任意外部 MNA 命名端口、不同 I/O 数量和多设备 ASIO 仍未完成。
-- M22-B3 已提交：`CreateNamedMnaPortProcessor` 将外部 Circuit v2 的真实命名端口接入 `NamedPortAudioGraph`，已验证 2 输入/1 输出 MNA 图级复合；M22-B4 正在把外部 MNA 命名端口扩展为按 `maxChannels` 协商的多声道独立电路实例。
+- M22-B3 已提交：`CreateNamedMnaPortProcessor` 将外部 Circuit v2 的真实命名端口接入 `NamedPortAudioGraph`，已验证 2 输入/1 输出 MNA 图级复合；M22-B4 已把外部 MNA 命名端口扩展为按 `maxChannels` 协商的多声道独立电路实例，并接入动态电源/扬声器负载复合测试。
 - M20-C3-A2 已提交：`RigRuntime::PerformanceSnapshot` 将 active graph 节点的最近/峰值 block CPU 与声明延迟暴露给停止音频后的控制线程；独立程序 UI、真实 ASIO 和过载面板仍未完成。
 - M20-C3-B 已提交：性能快照已经贯通 C++ 编辑器场景、C ABI 和 Avalonia 独立程序；节点卡片与顶部状态同时区分静态预计 CPU、实际最近/峰值 CPU、声明延迟和“实测未连接”。性能数据只允许由停止音频后的控制线程写入，preset 不保存诊断值；真实 ASIO 设备后端和过载状态仍未完成。
 
@@ -77,13 +77,13 @@
 - Compile/Prepare/Process/Reset 边界保持分层：Compile 不进入音频线程，Prepare 建立 MNA 状态，Process 用固定 `std::array` 调用 `Solve(span)`，不做文件、JSON、字符串查找或分配。外部 MNA 命名端口当前每端口固定单声道。
 - 测试覆盖 descriptor 端口映射、外部 2 输入/1 输出电阻网络、192 kHz/4x graph Prepare、有限输出和稳定端口拒绝；旧 M22-B1 等量单声道 runtime 回归不变。
 
-### M22-B4 第一阶段：外部 MNA 多声道命名端口（当前候选）
+### M22-B4 第一阶段：外部 MNA 多声道与电源/负载命名端口（已提交）
 
 - `CreateNamedMnaPortProcessor` 不再把 descriptor 的 `maxChannels` 限定为 1；命名端口使用 graph 协商的声道数，并在 Prepare 阶段检查每个端口的最大声道能力。
 - 每个音频声道复制一份已 Compile 的 `MnaPreparedCircuit`，在 Prepare 阶段完成 sample-rate 准备；Process 只按声道读取预分配 AudioBuffer、调用对应电路的 `Solve(span)` 并写回对应输出声道，声道间不共享动态历史。
 - 外部端口名复制到处理器自身存储，处理器不依赖 `ModulePackage` 生命周期；descriptor 声明的延迟也进入 `NamedPortAudioGraph` 的延迟计算。
 - 测试覆盖 2 输入/1 输出、2 声道、声道独立输出、Reset 后确定性、包对象释放后的处理器生命周期，以及某端口 `maxChannels` 不足时的稳定 `ProcessorRejectedFormat`。
-- 当前候选验证：核心 `566/566`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI 和 C# contract 全部通过；本轮构建 manifest MD5 为 `9005e96258271322da76c2348f72ce99`。该阶段仍不宣称完成电源/负载全拓扑、SPICE/golden/实机证据或真实 ASIO。
+- 提交验证：核心 `567/567`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI 和 C# contract 全部通过；本轮构建 manifest MD5 为 `ea43ef334e977cbc6387deeb5881d909`。该阶段仍不宣称完成电源/负载全拓扑、SPICE/golden/实机证据或真实 ASIO。
 
 ## 当前状态补充：M20-A1
 
