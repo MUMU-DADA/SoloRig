@@ -3,6 +3,7 @@
 #include "content/whitebox_mna_json.hpp"
 #include "test_framework.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>

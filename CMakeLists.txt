@@ -401,8 +401,9 @@ if(BUILD_TESTING)
         tests/whitebox_runtime_tests.cpp
         tests/model_database_tests.cpp
         tests/m15_planning_tests.cpp
-        tests/evidence_chain_tests.cpp
-        tests/m23c_reference_evidence_tests.cpp
+    tests/evidence_chain_tests.cpp
+    tests/m23c_reference_evidence_tests.cpp
+    tests/m23c_diode_reference_tests.cpp
         tests/module_package_tests.cpp
         tests/module_runtime_tests.cpp
         tests/rig_runtime_tests.cpp

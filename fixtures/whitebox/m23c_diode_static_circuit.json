@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "schema": "circuit",
+  "referenceGround": "0",
+  "nodes": ["in", "out", "0"],
+  "ports": [
+    {"id": "input", "direction": "input", "node": "in"},
+    {"id": "output", "direction": "output", "node": "out"}
+  ],
+  "components": [
+    {"id": "diode", "type": "diode", "pins": ["out", "0"],
+     "model": {"kind": "shockley", "saturationCurrent": 1e-12,
+               "thermalVoltage": 0.02585, "maxStep": 1.0}},
+    {"id": "series", "type": "resistor", "pins": ["in", "out"], "value": 1000.0}
+  ],
+  "solver": {
+    "method": "modified-nodal-analysis",
+    "integration": "backward-euler",
+    "oversampling": 1,
+    "convergence": {"maxIterations": 64, "absoluteTolerance": 1e-12, "relativeTolerance": 1e-12}
+  }
+}
