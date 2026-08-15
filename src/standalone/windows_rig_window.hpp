@@ -65,6 +65,7 @@ public:
     [[nodiscard]] bool TriggerAsioStart();
     [[nodiscard]] bool TriggerAsioClose();
     [[nodiscard]] bool TriggerAsioRecover();
+    [[nodiscard]] bool TriggerTunerToggle();
 
     [[nodiscard]] static bool RunSmokeTest(HINSTANCE instance);
 
@@ -107,6 +108,7 @@ private:
     HWND asio_start_button_{};
     HWND asio_close_button_{};
     HWND asio_recover_button_{};
+    HWND tuner_button_{};
     HWND asio_route_label_{};
     HWND asio_route_edit_{};
     HWND asio_driver_combo_{};

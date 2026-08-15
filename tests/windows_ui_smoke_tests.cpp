@@ -58,6 +58,7 @@ public:
 } // namespace
 
 TEST_CASE("Win32 standalone editor registers creates renders resizes and destroys a hidden window") {
+    REQUIRE(solo_rig::standalone::StandaloneAudioEngine::RunTunerCaptureSelfTest());
     const auto instance = GetModuleHandleW(nullptr);
     REQUIRE(instance != nullptr);
     solo_rig::RigEditorViewModel editor;
@@ -68,9 +69,17 @@ TEST_CASE("Win32 standalone editor registers creates renders resizes and destroy
     const auto asio_route_label = GetDlgItem(window.Handle(), 1019);
     const auto asio_route_edit = GetDlgItem(window.Handle(), 1020);
     const auto asio_recover_button = GetDlgItem(window.Handle(), 1023);
+    const auto tuner_button = GetDlgItem(window.Handle(), 1024);
     REQUIRE(asio_route_label != nullptr);
     REQUIRE(asio_route_edit != nullptr);
     REQUIRE(asio_recover_button != nullptr);
+    REQUIRE(tuner_button != nullptr);
+    solo_rig::standalone::StandaloneAudioEngine audio_engine;
+    window.SetAudioEngine(&audio_engine);
+    REQUIRE(!audio_engine.TunerEnabled());
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1024, BN_CLICKED), 0) == 0);
+    REQUIRE(audio_engine.TunerEnabled());
+    REQUIRE(editor.AudioStatus().find("tuner") != std::string_view::npos);
     wchar_t route_text[128]{};
     REQUIRE(GetWindowTextW(asio_route_edit, route_text, static_cast<int>(std::size(route_text))) > 0);
     REQUIRE(std::wstring(route_text).find(L"0:in=0,1;out=0,1") != std::wstring::npos);

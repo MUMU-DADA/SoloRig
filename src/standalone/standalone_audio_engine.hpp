@@ -2,10 +2,12 @@
 
 #include "core/audio_buffer.hpp"
 #include "core/rig_runtime.hpp"
+#include "dsp/tuner.hpp"
 #include "standalone/asio_device_coordinator.hpp"
 
 #include <windows.h>
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <optional>
@@ -41,6 +43,12 @@ public:
     void Close() noexcept;
     [[nodiscard]] bool ReloadPreset(RigPreset preset);
     [[nodiscard]] bool RecoverAudio();
+    void SetTunerEnabled(bool enabled) noexcept;
+    [[nodiscard]] bool TunerEnabled() const noexcept;
+    // Control/UI-thread operation. The analyzer never runs from an ASIO
+    // callback; it reads the lock-free input window captured by ProcessBlock.
+    [[nodiscard]] std::optional<TuningResult> AnalyzeTuner() const;
+    [[nodiscard]] static bool RunTunerCaptureSelfTest();
 
     [[nodiscard]] bool IsOpen() const noexcept;
     [[nodiscard]] bool IsRunning() const noexcept;
@@ -92,6 +100,14 @@ private:
     std::string error_text_;
     std::atomic<std::uint64_t> callback_count_{};
     std::atomic<std::uint32_t> last_callback_sample_count_{};
+    // At the fixed 192 kHz internal rate this gives the autocorrelator enough
+    // periods for low guitar notes without doing analysis on the audio thread.
+    static constexpr std::size_t kTunerWindowSamples = 4096U;
+    static_assert(std::atomic<float>::is_always_lock_free,
+                  "Standalone tuner samples must remain lock-free on the audio boundary");
+    std::array<std::atomic<float>, kTunerWindowSamples> tuner_samples_{};
+    std::atomic<std::uint64_t> tuner_write_index_{};
+    std::atomic<bool> tuner_enabled_{};
 };
 
 } // namespace solo_rig::standalone

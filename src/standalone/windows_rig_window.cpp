@@ -336,6 +336,10 @@ void Win32RigWindow::Destroy() noexcept {
         DestroyWindow(asio_recover_button_);
         asio_recover_button_ = nullptr;
     }
+    if (tuner_button_ != nullptr) {
+        DestroyWindow(tuner_button_);
+        tuner_button_ = nullptr;
+    }
     if (asio_route_label_ != nullptr) {
         DestroyWindow(asio_route_label_);
         asio_route_label_ = nullptr;
@@ -547,6 +551,16 @@ bool Win32RigWindow::TriggerAsioRecover() {
     UpdateAudioStatus();
     InvalidateRect(window_, nullptr, FALSE);
     return recovered;
+}
+
+bool Win32RigWindow::TriggerTunerToggle() {
+    if (audio_engine_ == nullptr) {
+        return false;
+    }
+    audio_engine_->SetTunerEnabled(!audio_engine_->TunerEnabled());
+    UpdateAudioStatus();
+    InvalidateRect(window_, nullptr, FALSE);
+    return true;
 }
 
 std::optional<StandaloneAudioRouting> Win32RigWindow::SelectedAsioRouting() const {
@@ -908,6 +922,8 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
                 static_cast<void>(TriggerAsioClose());
             } else if (LOWORD(w_param) == 1023) {
                 static_cast<void>(TriggerAsioRecover());
+            } else if (LOWORD(w_param) == 1024) {
+                static_cast<void>(TriggerTunerToggle());
             }
             if (LOWORD(w_param) == 1007) {
                 InvalidateRect(window_, nullptr, FALSE);
@@ -945,6 +961,8 @@ void Win32RigWindow::CreateToolbarButtons() {
                                        164, 50, 190, 30, window_, reinterpret_cast<HMENU>(1020), instance_, nullptr);
     asio_recover_button_ = CreateWindowExW(0, L"BUTTON", L"ASIO Recover", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                            884, 50, 98, 30, window_, reinterpret_cast<HMENU>(1023), instance_, nullptr);
+    tuner_button_ = CreateWindowExW(0, L"BUTTON", L"Tuner", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                    988, 50, 70, 30, window_, reinterpret_cast<HMENU>(1024), instance_, nullptr);
     midi_refresh_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Refresh", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                            256, 16, 98, 30, window_, reinterpret_cast<HMENU>(1004), instance_, nullptr);
     midi_open_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Open", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
@@ -993,6 +1011,7 @@ void Win32RigWindow::LayoutToolbarButtons() {
     move(asio_start_button_, 576, 50, 84, 30);
     move(asio_close_button_, 666, 50, 84, 30);
     move(asio_recover_button_, 756, 50, 98, 30);
+    move(tuner_button_, 860, 50, 70, 30);
     move(midi_refresh_button_, 256, 16, 98, 30);
     move(midi_open_button_, 360, 16, 88, 30);
     move(midi_close_button_, 454, 16, 92, 30);

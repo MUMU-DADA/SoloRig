@@ -1,9 +1,24 @@
 #include "standalone/standalone_audio_engine.hpp"
+#include <array>
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <utility>
 
 namespace solo_rig::standalone {
+namespace {
+
+std::string TunerNoteName(int midi_note) {
+    static constexpr std::array<const char*, 12> kNoteNames{
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    if (midi_note < 0 || midi_note > 127) {
+        return "?";
+    }
+    const auto octave = midi_note / 12 - 1;
+    return std::string(kNoteNames[static_cast<std::size_t>(midi_note % 12)]) + std::to_string(octave);
+}
+
+} // namespace
 
 StandaloneAudioEngine::~StandaloneAudioEngine() {
     Close();
@@ -176,6 +191,66 @@ bool StandaloneAudioEngine::RecoverAudio() {
     return true;
 }
 
+void StandaloneAudioEngine::SetTunerEnabled(bool enabled) noexcept {
+    tuner_write_index_.store(0U, std::memory_order_release);
+    tuner_enabled_.store(enabled, std::memory_order_release);
+}
+
+bool StandaloneAudioEngine::TunerEnabled() const noexcept {
+    return tuner_enabled_.load(std::memory_order_acquire);
+}
+
+std::optional<TuningResult> StandaloneAudioEngine::AnalyzeTuner() const {
+    if (!TunerEnabled()) {
+        return std::nullopt;
+    }
+    const auto end = tuner_write_index_.load(std::memory_order_acquire);
+    if (end < kTunerWindowSamples || format_.sample_rate_hz <= 0.0) {
+        return std::nullopt;
+    }
+    std::array<float, kTunerWindowSamples> snapshot{};
+    const auto start = end - kTunerWindowSamples;
+    for (std::size_t index = 0U; index < kTunerWindowSamples; ++index) {
+        snapshot[index] = tuner_samples_[(start + index) % kTunerWindowSamples].load(
+            std::memory_order_acquire);
+    }
+    if (format_.sample_rate_hz >= 96000.0) {
+        constexpr std::size_t kDecimation = 4U;
+        std::array<float, kTunerWindowSamples / kDecimation> decimated{};
+        for (std::size_t index = 0U; index < decimated.size(); ++index) {
+            float sum = 0.0F;
+            for (std::size_t offset = 0U; offset < kDecimation; ++offset) {
+                sum += snapshot[index * kDecimation + offset];
+            }
+            decimated[index] = sum / static_cast<float>(kDecimation);
+        }
+        return TunerAnalyzer{}.Analyze(decimated, format_.sample_rate_hz / kDecimation);
+    }
+    return TunerAnalyzer{}.Analyze(snapshot, format_.sample_rate_hz);
+}
+
+bool StandaloneAudioEngine::RunTunerCaptureSelfTest() {
+    StandaloneAudioEngine engine;
+    engine.format_ = AudioFormat{.sample_rate_hz = 192000.0,
+                                 .max_block_size = static_cast<std::uint32_t>(kTunerWindowSamples),
+                                 .channel_count = 1U,
+                                 .sample_representation = SampleRepresentation::Float32};
+    engine.SetTunerEnabled(true);
+    std::array<float, kTunerWindowSamples> input{};
+    std::array<float, kTunerWindowSamples> output{};
+    constexpr double frequency_hz = 440.0;
+    for (std::size_t index = 0U; index < input.size(); ++index) {
+        input[index] = static_cast<float>(0.25 * std::sin(
+            2.0 * std::numbers::pi * frequency_hz * static_cast<double>(index) / 192000.0));
+    }
+    const float* inputs[] = {input.data()};
+    float* outputs[] = {output.data()};
+    engine.ProcessBlock(inputs, outputs, 1U, static_cast<std::uint32_t>(input.size()));
+    const auto result = engine.AnalyzeTuner();
+    return result.has_value() && std::isfinite(result->frequency_hz) &&
+        std::fabs(result->frequency_hz - frequency_hz) < 5.0 && result->confidence >= 0.6;
+}
+
 bool StandaloneAudioEngine::BuildRuntime(const RigPreset& preset, const AudioFormat& format) {
     try {
         auto candidate = preset;
@@ -244,6 +319,15 @@ void StandaloneAudioEngine::ProcessBlock(const float* const* inputs,
                                          float* const* outputs,
                                          std::uint32_t channel_count,
                                          std::uint32_t sample_count) noexcept {
+    if (tuner_enabled_.load(std::memory_order_relaxed) && channel_count > 0U) {
+        const auto write = tuner_write_index_.load(std::memory_order_relaxed);
+        const auto* source = inputs == nullptr ? nullptr : inputs[0];
+        for (std::uint32_t sample = 0U; sample < sample_count; ++sample) {
+            tuner_samples_[(write + sample) % kTunerWindowSamples].store(
+                source == nullptr ? 0.0F : source[sample], std::memory_order_relaxed);
+        }
+        tuner_write_index_.store(write + sample_count, std::memory_order_release);
+    }
     if (!rig_runtime_.has_value() || !rig_runtime_->IsPrepared() ||
         channel_count != format_.channel_count || sample_count > format_.max_block_size) {
         for (std::uint32_t channel = 0U; channel < channel_count; ++channel) {
@@ -295,6 +379,16 @@ std::string StandaloneAudioEngine::RuntimeStatusText() const {
     }
     if (DropoutReported()) {
         status += " | dropout detected; recover required";
+    }
+    if (TunerEnabled()) {
+        const auto tuning = AnalyzeTuner();
+        if (!tuning.has_value()) {
+            status += " | tuner: no stable signal";
+        } else {
+            const auto sign = tuning->cents_from_nearest_note >= 0.0 ? "+" : "-";
+            status += " | tuner: " + TunerNoteName(tuning->midi_note) + " " + sign +
+                std::to_string(std::fabs(tuning->cents_from_nearest_note)) + " cents";
+        }
     }
     return status;
 }
