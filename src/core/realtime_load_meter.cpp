@@ -5,6 +5,27 @@
 
 namespace solo_rig {
 
+RealtimeLoadMeter::RealtimeLoadMeter(RealtimeLoadMeter&& other) noexcept {
+    block_duration_nanoseconds_.store(
+        other.block_duration_nanoseconds_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    last_elapsed_nanoseconds_.store(
+        other.last_elapsed_nanoseconds_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    peak_elapsed_nanoseconds_.store(
+        other.peak_elapsed_nanoseconds_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+}
+
+RealtimeLoadMeter& RealtimeLoadMeter::operator=(RealtimeLoadMeter&& other) noexcept {
+    if (this != &other) {
+        block_duration_nanoseconds_.store(
+            other.block_duration_nanoseconds_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        last_elapsed_nanoseconds_.store(
+            other.last_elapsed_nanoseconds_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        peak_elapsed_nanoseconds_.store(
+            other.peak_elapsed_nanoseconds_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    }
+    return *this;
+}
+
 void RealtimeLoadMeter::Configure(double sample_rate_hz, std::uint32_t block_size) noexcept {
     if (!std::isfinite(sample_rate_hz) || sample_rate_hz <= 0.0 || block_size == 0) {
         block_duration_nanoseconds_.store(1, std::memory_order_relaxed);

@@ -7,6 +7,12 @@ namespace solo_rig {
 
 class RealtimeLoadMeter {
 public:
+    RealtimeLoadMeter() = default;
+    RealtimeLoadMeter(const RealtimeLoadMeter&) = delete;
+    RealtimeLoadMeter& operator=(const RealtimeLoadMeter&) = delete;
+    RealtimeLoadMeter(RealtimeLoadMeter&& other) noexcept;
+    RealtimeLoadMeter& operator=(RealtimeLoadMeter&& other) noexcept;
+
     void Configure(double sample_rate_hz, std::uint32_t block_size) noexcept;
     void RecordProcessingNanoseconds(std::uint64_t elapsed_nanoseconds) noexcept;
 

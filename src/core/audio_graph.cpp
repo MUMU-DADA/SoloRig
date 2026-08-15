@@ -3,6 +3,7 @@
 #include "content/module_runtime.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <deque>
 #include <limits>
 #include <new>
@@ -109,6 +110,7 @@ std::vector<GraphPreparationError> AudioGraph::Prepare(const AudioFormat& format
         if (!node->processor->Prepare(format)) {
             return {GraphPreparationError::ProcessorRejectedFormat};
         }
+        node->performance_meter.Configure(format.sample_rate_hz, format.max_block_size);
 
         std::uint32_t incoming_latency = 0;
         for (const auto source : node->incoming) {
@@ -172,7 +174,12 @@ bool AudioGraph::Process(const AudioBuffer& input, AudioBuffer& output, std::uin
             const auto& source = route.source == InputNodeId ? input : FindNode(route.source)->output_buffer;
             route.compensation.AddFrom(source, node->input_buffer, sample_count);
         }
+        const auto started = std::chrono::steady_clock::now();
         node->processor->Process(node->input_buffer, node->output_buffer, sample_count);
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - started).count();
+        node->performance_meter.RecordProcessingNanoseconds(
+            elapsed < 0 ? 0U : static_cast<std::uint64_t>(elapsed));
     }
 
     output.Clear(sample_count);
@@ -193,6 +200,19 @@ bool AudioGraph::SetParameter(NodeId node_id, std::string_view parameter_id, flo
 
 std::uint32_t AudioGraph::DeclaredLatencySamples() const noexcept {
     return declared_latency_samples_;
+}
+
+std::vector<AudioGraph::NodePerformance> AudioGraph::PerformanceSnapshot() const {
+    std::vector<NodePerformance> result;
+    result.reserve(nodes_.size());
+    for (const auto& node : nodes_) {
+        result.push_back({.node_id = node.id,
+                          .declared_latency_samples = node.processor == nullptr
+                              ? 0U : node.processor->DeclaredLatencySamples(),
+                          .last_cpu_percent = node.performance_meter.LastLoadFraction() * 100.0,
+                          .peak_cpu_percent = node.performance_meter.PeakLoadFraction() * 100.0});
+    }
+    return result;
 }
 
 bool AudioGraph::DelayCompensator::Prepare(std::uint32_t channel_count) {

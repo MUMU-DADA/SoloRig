@@ -2,6 +2,7 @@
 
 #include "core/audio_buffer.hpp"
 #include "core/audio_format.hpp"
+#include "core/realtime_load_meter.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -34,6 +35,13 @@ class AudioGraph {
 public:
     using NodeId = std::uint32_t;
 
+    struct NodePerformance {
+        NodeId node_id{};
+        std::uint32_t declared_latency_samples{};
+        double last_cpu_percent{};
+        double peak_cpu_percent{};
+    };
+
     static constexpr NodeId InputNodeId = 0;
     static constexpr NodeId OutputNodeId = 1;
 
@@ -43,6 +51,9 @@ public:
     [[nodiscard]] bool Process(const AudioBuffer& input, AudioBuffer& output, std::uint32_t sample_count) noexcept;
     [[nodiscard]] bool SetParameter(NodeId node_id, std::string_view parameter_id, float value) noexcept;
     [[nodiscard]] std::uint32_t DeclaredLatencySamples() const noexcept;
+    // Control-thread diagnostic snapshot. The returned vector is intentionally
+    // created outside Process; audio processing only updates lock-free meters.
+    [[nodiscard]] std::vector<NodePerformance> PerformanceSnapshot() const;
 
 private:
     struct DelayCompensator {
@@ -67,6 +78,7 @@ private:
         std::vector<Route> input_routes;
         AudioBuffer input_buffer;
         AudioBuffer output_buffer;
+        RealtimeLoadMeter performance_meter;
         std::uint32_t input_latency_samples{};
         std::uint32_t cumulative_latency_samples{};
     };

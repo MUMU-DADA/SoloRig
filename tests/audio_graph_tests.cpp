@@ -204,3 +204,24 @@ TEST_CASE("AudioGraph rejects processing blocks larger than its preallocated cap
     solo_rig::AudioBuffer output(1, 9);
     REQUIRE(!graph.Process(input, output, 9));
 }
+
+TEST_CASE("AudioGraph records per-node measured block load and declared latency") {
+    solo_rig::AudioGraph graph;
+    const auto node = graph.AddNode(std::make_unique<GainProcessor>(1.0F, 7U));
+    REQUIRE(graph.Connect(solo_rig::AudioGraph::InputNodeId, node));
+    REQUIRE(graph.Connect(node, solo_rig::AudioGraph::OutputNodeId));
+    const solo_rig::AudioFormat format{.sample_rate_hz = 192000.0, .max_block_size = 8, .channel_count = 1};
+    REQUIRE(graph.Prepare(format).empty());
+    solo_rig::AudioBuffer input(1, 8);
+    solo_rig::AudioBuffer output(1, 8);
+    REQUIRE(graph.Process(input, output, 8));
+
+    const auto performance = graph.PerformanceSnapshot();
+    REQUIRE(performance.size() == 1U);
+    REQUIRE(performance[0].node_id == node);
+    REQUIRE(performance[0].declared_latency_samples == 7U);
+    REQUIRE(std::isfinite(performance[0].last_cpu_percent));
+    REQUIRE(std::isfinite(performance[0].peak_cpu_percent));
+    REQUIRE(performance[0].last_cpu_percent >= 0.0);
+    REQUIRE(performance[0].peak_cpu_percent >= performance[0].last_cpu_percent);
+}
