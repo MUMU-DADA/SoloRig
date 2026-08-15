@@ -37,7 +37,7 @@
 | 18 | IR 箱体模拟 | 已验证（runtime 层） | `ImpulseResponseConvolver` 和 IR 处理测试 | 接入完整箱头/功放链与真实宿主，并明确延迟、采样率和通道语义 |
 | 19 | 外部导入 IR | 已验证（受限导入层） | 编辑器/C ABI 显式导入会真实校验 WAV/IR、生成动态模块目录项并将 `sourceKind=ir`/源路径写入 preset；Standalone runtime 与 VST3 state v3 可重建卷积模块，另有格式/长度/采样率适配测试 | 真实宿主回灌、取消/错误恢复、大文件资源限制和完整产品流程 |
 | 20 | 全功能/边界测试 | 部分完成 | 当前核心 `611/611`、CTest `5/5`、VST3 Validator `47/47` 及 UI/ABI/C# contract；M23-B 增加完整外部管线回归，M23-C1/C2a/C2b/C2c/C2d/C2e/C3a/C3b/C3c 增加十三类数学 golden 的真实 Circuit v2 MNA 对照；M23-D1/D2b2/D3b 增加 ASIO 生命周期、整数边界、同步/异步重采样契约、Standalone 控件、统一 Drive+Delay 图、Tuner 捕获和真实硬件回调；M23-D3c/D3d 增加模块包校验、动态目录、preset 引用、Standalone runtime 和 C ABI 重开回归；M23-D3e 增加直接 NAM/IR 引用持久化、编辑器重开和 direct IR runtime 回归；M23-D3f 增加 VST3 state 外部 IR 重建与模块皮肤绑定回归 | 多设备真实硬件、非 192 kHz 硬件实测、授权参考、真实断连恢复、真实宿主回灌和覆盖矩阵逐项闭环 |
-| 21 | 默认效果器外观与自定义皮肤 | 部分完成 | 默认皮肤回退、外部皮肤 JSON 校验、ModulePackage `skinFile` 路径生命周期、模块级皮肤绑定和 Win32 控件标识渲染已接通，并有编辑器重开回归 | 图像资源加载/沙箱校验、完整默认旋钮/拨档/踩钉视觉组件和真实窗口视觉回归 |
+| 21 | 默认效果器外观与自定义皮肤 | 部分完成 | 默认皮肤回退、外部皮肤 JSON 校验、ModulePackage `skinFile` 路径生命周期、模块级皮肤绑定和 Win32 默认旋钮/拨档/按钮/踩钉绘制已接通，并有编辑器重开与 UI Paint 回归 | 图像资源加载/沙箱校验、自定义皮肤图像渲染和真实窗口视觉回归 |
 | 22 | 逻辑、元属性、外观三层模块包 | 部分完成 | `ModulePackage` manifest、logic、descriptor/metadata、外部 Circuit/NAM/IR 入口；编辑器动态目录、manifest 包与直接 NAM/IR preset 引用、Standalone 注册/处理自测、VST3 state v3 重建和 C ABI 重开回归已接通；模块级自定义皮肤缺失/非法时回退默认皮肤 | 真实 VST3 宿主、多模块皮肤视觉产品绑定、图像资源生命周期/版本迁移和更复杂模拟逻辑与数字逻辑统一运行契约 |
 | 23 | 多 ASIO 设备与任意 I/O 通道 | 部分完成 | `AsioDeviceCoordinator` 已支持最多四个 ASIO host、固定容量跨设备 ring、任意物理输入/输出路由文本、每设备 buffer 配置、异步时钟离线契约和 Recover 入口；单设备 `Midiplus USB Audio` 真实回调通过 | 至少两个可用 ASIO 设备的真实同步/异步回归、真实断连/重置恢复和更多硬件 |
 

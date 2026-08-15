@@ -282,13 +282,50 @@ void Win32RigWindow::Paint() {
                                             static_cast<float>(node.bounds.x + node.bounds.width - 16.0 * scene.dpi_scale),
                                             static_cast<float>(node.bounds.y + 48.0 * scene.dpi_scale));
         target->DrawTextW(title.c_str(), static_cast<UINT32>(title.size()), AsTextFormat(text_format_), title_rect, text);
-        const auto controls = Widen("knob: " + node.skin.knob + "   toggle: " + node.skin.toggle +
-                                    "\nbutton: " + node.skin.button + "   footswitch: " + node.skin.footswitch);
-        const auto control_rect = D2D1::RectF(static_cast<float>(node.bounds.x + 16.0 * scene.dpi_scale),
-                                              static_cast<float>(node.bounds.y + 64.0 * scene.dpi_scale),
-                                              static_cast<float>(node.bounds.x + node.bounds.width - 16.0 * scene.dpi_scale),
-                                              static_cast<float>(node.bounds.y + node.bounds.height - 12.0 * scene.dpi_scale));
-        target->DrawTextW(controls.c_str(), static_cast<UINT32>(controls.size()), AsTextFormat(text_format_), control_rect, text);
+        const auto scale = static_cast<float>(scene.dpi_scale);
+        for (int index = 0; index < 3; ++index) {
+            const auto center = D2D1::Point2F(static_cast<float>(node.bounds.x) + (38.0F + 45.0F * index) * scale,
+                                              static_cast<float>(node.bounds.y) + 76.0F * scale);
+            const auto ellipse = D2D1::Ellipse(center, 13.0F * scale, 13.0F * scale);
+            target->FillEllipse(ellipse, accent);
+            target->DrawEllipse(ellipse, text, std::max(1.0F, scale));
+            target->DrawLine(center,
+                             D2D1::Point2F(center.x + 8.0F * scale, center.y - 8.0F * scale),
+                             text,
+                             std::max(1.0F, scale));
+        }
+        const auto toggle = D2D1::RoundedRect(
+            D2D1::RectF(static_cast<float>(node.bounds.x) + 147.0F * scale,
+                        static_cast<float>(node.bounds.y) + 67.0F * scale,
+                        static_cast<float>(node.bounds.x) + 173.0F * scale,
+                        static_cast<float>(node.bounds.y) + 81.0F * scale),
+            5.0F * scale,
+            5.0F * scale);
+        target->FillRoundedRectangle(toggle, accent);
+        target->DrawRoundedRectangle(toggle, text, std::max(1.0F, scale));
+        const auto button = D2D1::RoundedRect(
+            D2D1::RectF(static_cast<float>(node.bounds.x) + 147.0F * scale,
+                        static_cast<float>(node.bounds.y) + 87.0F * scale,
+                        static_cast<float>(node.bounds.x) + 173.0F * scale,
+                        static_cast<float>(node.bounds.y) + 101.0F * scale),
+            3.0F * scale,
+            3.0F * scale);
+        target->FillRoundedRectangle(button, surface);
+        target->DrawRoundedRectangle(button, text, std::max(1.0F, scale));
+        const auto footswitch = D2D1::Ellipse(
+            D2D1::Point2F(static_cast<float>(node.bounds.x) + 98.0F * scale,
+                          static_cast<float>(node.bounds.y) + 108.0F * scale),
+            20.0F * scale,
+            7.0F * scale);
+        target->FillEllipse(footswitch, accent);
+        target->DrawEllipse(footswitch, text, std::max(1.0F, scale));
+        const auto skin_label = Widen("skin: " + node.skin.id);
+        const auto skin_rect = D2D1::RectF(static_cast<float>(node.bounds.x + 12.0 * scene.dpi_scale),
+                                            static_cast<float>(node.bounds.y + 112.0 * scene.dpi_scale),
+                                            static_cast<float>(node.bounds.x + node.bounds.width - 12.0 * scene.dpi_scale),
+                                            static_cast<float>(node.bounds.y + node.bounds.height - 4.0 * scene.dpi_scale));
+        target->DrawTextW(skin_label.c_str(), static_cast<UINT32>(skin_label.size()),
+                          AsTextFormat(text_format_), skin_rect, text);
     }
 
     const auto toolbar = Widen("SoloRig   |   T: Toggle Light/Dark Theme");
