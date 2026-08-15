@@ -6,6 +6,8 @@
 #include "../fixtures/whitebox/m19c_representative_pedal_fixtures.hpp"
 #include "content/behavior_composite.hpp"
 #include "content/behavior_composite_runtime.hpp"
+#include "content/behavior_clocked.hpp"
+#include "content/behavior_clocked_runtime.hpp"
 #include "content/behavior_envelope_runtime.hpp"
 #include "content/behavior_feedback_runtime.hpp"
 #include "content/behavior_optocoupler_runtime.hpp"
@@ -129,6 +131,77 @@ RepresentativeEvidence ValidateFeedback() {
     return evidence;
 }
 
+RepresentativeEvidence ValidateClocked() {
+    RepresentativeEvidence evidence{.category = RepresentativeCategory::ChorusFlanger,
+        .status = RepresentativeStatus::RunnableGeneric};
+    const std::vector<BehaviorGraphNodeSpec> nodes = {
+        {.id = "vco", .binding = {.module_id = "vco", .kind = "vco",
+            .model_id = "generic-vco-v1"}},
+        {.id = "bbd", .binding = {.module_id = "bbd", .kind = "bbd",
+            .model_id = "generic-bbd-v1"}},
+    };
+    const std::vector<BehaviorPortRouteSpec> routes = {
+        {"input", "audio", "bbd", "audio_in"},
+        {"vco", "out", "bbd", "clock"},
+        {"bbd", "out", "output", "audio"},
+    };
+    const auto compiled = CompileVcoBbdClockedGraph(nodes, routes);
+    evidence.compiled = compiled.plan.has_value();
+    if (!evidence.compiled) return evidence;
+
+    TypedVcoBbdClockedModel model{};
+    model.vco.waveform = GenericVcoWaveform::Triangle;
+    model.vco.base_frequency_hz = 0.7;
+    model.vco.minimum_frequency_hz = 0.1;
+    model.vco.maximum_frequency_hz = 4.0;
+    model.vco.output_amplitude = 0.35;
+    model.vco.maximum_control_voltage = 1.0;
+    model.bbd.bucket_count = 128U;
+    model.bbd.clock_frequency_hz = 100000.0;
+    model.bbd.minimum_clock_frequency_hz = 50000.0;
+    model.bbd.maximum_clock_frequency_hz = 200000.0;
+    model.bbd.transfer_efficiency = 0.995;
+    model.bbd.feedback = 0.35;
+    model.bbd.wet = 0.75;
+    model.bbd.dry = 0.25;
+
+    TypedVcoBbdClockedRuntime runtime;
+    evidence.prepared = runtime.Prepare(*compiled.plan, model, 48000.0, 1U) ==
+        TypedVcoBbdClockedRuntimeError::None;
+    if (!evidence.prepared) return evidence;
+    std::array<double, 128U> first{};
+    bool finite = true;
+    for (std::size_t index = 0U; index < first.size(); ++index) {
+        double output{};
+        const auto result = runtime.Process(index == 0U ? 0.5 : 0.0, output);
+        finite = finite && result == TypedVcoBbdClockedRuntimeError::None &&
+            std::isfinite(output);
+        first[index] = output;
+    }
+    evidence.finite_nontrivial = finite && first[0] != 0.0;
+    runtime.Reset();
+    evidence.reset_deterministic = true;
+    for (std::size_t index = 0U; index < first.size(); ++index) {
+        double output{};
+        if (runtime.Process(index == 0U ? 0.5 : 0.0, output) !=
+                TypedVcoBbdClockedRuntimeError::None || output != first[index]) {
+            evidence.reset_deterministic = false;
+            break;
+        }
+    }
+    evidence.sample_rate_and_oversampling = runtime.SetSampleRate(192000.0) ==
+        TypedVcoBbdClockedRuntimeError::None;
+    double output{};
+    evidence.rejection_boundary = runtime.Process(std::numeric_limits<double>::quiet_NaN(), output) ==
+        TypedVcoBbdClockedRuntimeError::NonFinite;
+    if (!(evidence.finite_nontrivial && evidence.reset_deterministic &&
+          evidence.sample_rate_and_oversampling && evidence.rejection_boundary)) {
+        evidence.status = RepresentativeStatus::StableRefusal;
+        evidence.refusal_reason = "clocked BBD generic model evidence refused";
+    }
+    return evidence;
+}
+
 RepresentativeEvidence ValidateTubeAmp() {
     RepresentativeEvidence evidence{.category = RepresentativeCategory::TubeAmp,
         .status = RepresentativeStatus::RunnableGeneric};
@@ -179,8 +252,7 @@ ValidateRepresentativeCoverage() {
         ValidateFeedback(), ValidateTubeAmp(),
         Refusal(RepresentativeCategory::WahPhaser,
                 "no complete generic Wah/Phaser composite contract"),
-        Refusal(RepresentativeCategory::ChorusFlanger,
-                "no unrestricted Chorus/Flanger feedback and clock contract"),
+        ValidateClocked(),
         Refusal(RepresentativeCategory::OpticalHardware,
                 "no real optical electrical hardware model contract")};
 }

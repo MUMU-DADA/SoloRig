@@ -21,11 +21,19 @@ enum class TypedVcoBbdClockedRuntimeError {
     CapacityExceeded,
 };
 
+struct TypedVcoBbdClockedModel final {
+    GenericVcoModel vco{};
+    GenericBbdClockedModel bbd{};
+};
+
 class TypedVcoBbdClockedRuntime final {
 public:
     [[nodiscard]] TypedVcoBbdClockedRuntimeError Prepare(
         const BehaviorClockedGraphPlan& plan, double sample_rate_hz,
         std::uint32_t oversampling) noexcept;
+    [[nodiscard]] TypedVcoBbdClockedRuntimeError Prepare(
+        const BehaviorClockedGraphPlan& plan, const TypedVcoBbdClockedModel& model,
+        double sample_rate_hz, std::uint32_t oversampling) noexcept;
     [[nodiscard]] TypedVcoBbdClockedRuntimeError SetSampleRate(
         double sample_rate_hz) noexcept;
     [[nodiscard]] TypedVcoBbdClockedRuntimeError Process(

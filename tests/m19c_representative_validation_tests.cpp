@@ -23,12 +23,12 @@ TEST_CASE("M19-C representative generic coverage reports auditable status") {
     }
 }
 
-TEST_CASE("M19-C representative generic coverage keeps refusal categories explicit") {
+TEST_CASE("M19-C representative generic coverage keeps remaining refusal categories explicit") {
     const auto evidence = solo_rig::m19c_validation::ValidateRepresentativeCoverage();
     REQUIRE(evidence[static_cast<std::size_t>(solo_rig::m19c_validation::RepresentativeCategory::WahPhaser)].status ==
         solo_rig::m19c_validation::RepresentativeStatus::StableRefusal);
     REQUIRE(evidence[static_cast<std::size_t>(solo_rig::m19c_validation::RepresentativeCategory::ChorusFlanger)].status ==
-        solo_rig::m19c_validation::RepresentativeStatus::StableRefusal);
+        solo_rig::m19c_validation::RepresentativeStatus::RunnableGeneric);
     REQUIRE(evidence[static_cast<std::size_t>(solo_rig::m19c_validation::RepresentativeCategory::OpticalHardware)].status ==
         solo_rig::m19c_validation::RepresentativeStatus::StableRefusal);
     static_assert(noexcept(solo_rig::MnaPreparedCircuit::ProcessContract()));

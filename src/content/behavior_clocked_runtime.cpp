@@ -40,11 +40,12 @@ TypedVcoBbdClockedRuntimeError MapBbd(GenericBbdClockedError error) noexcept {
     return TypedVcoBbdClockedRuntimeError::InvalidPlan;
 }
 
-GenericBbdClockedModel ClockedModel() noexcept {
-    return {.bucket_count = 512U, .clock_frequency_hz = 100000.0,
-        .minimum_clock_frequency_hz = 50000.0, .maximum_clock_frequency_hz = 200000.0,
-        .clock_control_octaves = 1.0, .transfer_efficiency = 0.99, .feedback = 0.0,
-        .wet = 1.0, .dry = 0.0, .maximum_input = 1.0};
+TypedVcoBbdClockedModel DefaultModel() noexcept {
+    return {.vco = {},
+        .bbd = {.bucket_count = 512U, .clock_frequency_hz = 100000.0,
+            .minimum_clock_frequency_hz = 50000.0, .maximum_clock_frequency_hz = 200000.0,
+            .clock_control_octaves = 1.0, .transfer_efficiency = 0.99, .feedback = 0.0,
+            .wet = 1.0, .dry = 0.0, .maximum_input = 1.0}};
 }
 
 bool IsExactPlan(const BehaviorClockedGraphPlan& plan) noexcept {
@@ -85,6 +86,12 @@ bool IsExactPlan(const BehaviorClockedGraphPlan& plan) noexcept {
 TypedVcoBbdClockedRuntimeError TypedVcoBbdClockedRuntime::Prepare(
     const BehaviorClockedGraphPlan& plan, double sample_rate_hz,
     std::uint32_t oversampling) noexcept {
+    return Prepare(plan, DefaultModel(), sample_rate_hz, oversampling);
+}
+
+TypedVcoBbdClockedRuntimeError TypedVcoBbdClockedRuntime::Prepare(
+    const BehaviorClockedGraphPlan& plan, const TypedVcoBbdClockedModel& model,
+    double sample_rate_hz, std::uint32_t oversampling) noexcept {
     prepared_ = false;
     size_ = 0U;
     vco_ = GenericVcoRuntime{};
@@ -96,9 +103,9 @@ TypedVcoBbdClockedRuntimeError TypedVcoBbdClockedRuntime::Prepare(
     if (oversampling == 0U || oversampling > 16U) {
         return TypedVcoBbdClockedRuntimeError::InvalidOversampling;
     }
-    const auto vco_result = vco_.Prepare(GenericVcoModel{}, sample_rate_hz, oversampling);
+    const auto vco_result = vco_.Prepare(model.vco, sample_rate_hz, oversampling);
     if (vco_result != GenericVcoError::None) return MapVco(vco_result);
-    const auto bbd_result = bbd_.Prepare(ClockedModel(), sample_rate_hz, oversampling);
+    const auto bbd_result = bbd_.Prepare(model.bbd, sample_rate_hz, oversampling);
     if (bbd_result != GenericBbdClockedError::None) return MapBbd(bbd_result);
     size_ = 2U;
     prepared_ = true;

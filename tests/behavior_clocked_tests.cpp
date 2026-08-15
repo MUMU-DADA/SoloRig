@@ -105,6 +105,42 @@ TEST_CASE("M18-D3a runtime is deterministic and uses dynamic VCO clock control")
         0.0, std::declval<double&>())));
 }
 
+TEST_CASE("M20-B caller-owned clocked model supports bounded delayed feedback") {
+    const auto plan = solo_rig::CompileVcoBbdClockedGraph(Nodes(), Routes()).plan;
+    solo_rig::TypedVcoBbdClockedModel model{};
+    model.vco.waveform = solo_rig::GenericVcoWaveform::Triangle;
+    model.vco.base_frequency_hz = 0.7;
+    model.vco.minimum_frequency_hz = 0.1;
+    model.vco.maximum_frequency_hz = 4.0;
+    model.vco.output_amplitude = 0.35;
+    model.vco.maximum_control_voltage = 1.0;
+    model.bbd.bucket_count = 128U;
+    model.bbd.minimum_clock_frequency_hz = 50000.0;
+    model.bbd.maximum_clock_frequency_hz = 200000.0;
+    model.bbd.feedback = 0.35;
+    model.bbd.wet = 0.75;
+    model.bbd.dry = 0.25;
+
+    solo_rig::TypedVcoBbdClockedRuntime runtime;
+    REQUIRE(runtime.Prepare(*plan, model, 192000.0, 4U) ==
+        solo_rig::TypedVcoBbdClockedRuntimeError::None);
+    double first{};
+    REQUIRE(runtime.Process(0.5, first) ==
+        solo_rig::TypedVcoBbdClockedRuntimeError::None);
+    REQUIRE(std::isfinite(first));
+    REQUIRE(runtime.CurrentClockFrequencyHz() != model.bbd.clock_frequency_hz);
+    runtime.Reset();
+    double reset{};
+    REQUIRE(runtime.Process(0.5, reset) ==
+        solo_rig::TypedVcoBbdClockedRuntimeError::None);
+    REQUIRE(reset == first);
+
+    model.bbd.feedback = 1.0;
+    REQUIRE(runtime.Prepare(*plan, model, 192000.0, 4U) ==
+        solo_rig::TypedVcoBbdClockedRuntimeError::UnsupportedBlock);
+    REQUIRE(!runtime.IsPrepared());
+}
+
 TEST_CASE("M18-D3a runtime rejects invalid plan, rate, oversampling and nonfinite input") {
     solo_rig::TypedVcoBbdClockedRuntime runtime;
     double output{123.0};
