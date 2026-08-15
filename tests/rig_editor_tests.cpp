@@ -64,6 +64,13 @@ TEST_CASE("RigEditor toggles themes without losing layout and falls back on bad 
     REQUIRE(editor.IsDirty());
     REQUIRE(!editor.LoadThemeFile(SourcePath("resources/themes/missing.json")));
     REQUIRE(editor.Scene().theme.id == "solorig.dark");
+    const auto oversized_theme = std::filesystem::temp_directory_path() / "solorig-oversized-theme.json";
+    {
+        std::ofstream output(oversized_theme, std::ios::binary | std::ios::trunc);
+        output << std::string(4U * 1024U * 1024U + 1U, 'x');
+    }
+    REQUIRE(!editor.LoadThemeFile(oversized_theme));
+    REQUIRE(editor.Scene().theme.id == "solorig.dark");
     REQUIRE(!editor.LoadSkinFile(SourcePath("resources/skins/missing.json")));
     REQUIRE(editor.Scene().skin.id == "solorig.default-pedal");
     const auto damaged_skin = std::filesystem::temp_directory_path() / "solorig-damaged-pedal.json";
@@ -73,6 +80,7 @@ TEST_CASE("RigEditor toggles themes without losing layout and falls back on bad 
     }
     REQUIRE(!editor.LoadSkinFile(damaged_skin));
     std::error_code cleanup_error;
+    std::filesystem::remove(oversized_theme, cleanup_error);
     std::filesystem::remove(damaged_skin, cleanup_error);
     REQUIRE(editor.Scene().skin.id == "solorig.default-pedal");
     REQUIRE(editor.LoadSkinFile(SourcePath("resources/skins/default-pedal.json")));

@@ -18,6 +18,7 @@ struct ThemeDefinition {
 
 enum class ThemeLoadError {
     CannotRead,
+    ResourceLimit,
     InvalidJson,
     InvalidSchema,
     MissingField,

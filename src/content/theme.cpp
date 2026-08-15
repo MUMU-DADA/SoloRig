@@ -12,6 +12,10 @@ namespace solo_rig {
 
 namespace {
 
+constexpr std::size_t kMaximumThemeSourceBytes = 4U * 1024U * 1024U;
+constexpr std::size_t kMaximumThemeEntries = 128U;
+constexpr std::size_t kMaximumThemeStringBytes = 256U;
+
 const JsonValue* Find(const JsonValue::Object& object, std::string_view key) {
     const auto iterator = object.find(key);
     return iterator == object.end() ? nullptr : &iterator->second;
@@ -48,6 +52,9 @@ bool IsHexColor(std::string_view value) noexcept {
 }
 
 std::variant<ThemeDefinition, ThemeLoadError> ParseTheme(std::string_view source) {
+    if (source.size() > kMaximumThemeSourceBytes) {
+        return ThemeLoadError::ResourceLimit;
+    }
     const auto parsed = ParseJson(source);
     if (!parsed.value.has_value() || parsed.value->AsObject() == nullptr) {
         return ThemeLoadError::InvalidJson;
@@ -73,13 +80,23 @@ std::variant<ThemeDefinition, ThemeLoadError> ParseTheme(std::string_view source
     if (theme.id.empty() || theme.display_name.empty()) {
         return ThemeLoadError::MissingField;
     }
+    if (theme.id.size() > kMaximumThemeStringBytes || theme.display_name.size() > kMaximumThemeStringBytes ||
+        colors->AsObject()->size() > kMaximumThemeEntries || metrics->AsObject()->size() > kMaximumThemeEntries) {
+        return ThemeLoadError::ResourceLimit;
+    }
     for (const auto& [name, color] : *colors->AsObject()) {
+        if (name.size() > kMaximumThemeStringBytes) {
+            return ThemeLoadError::ResourceLimit;
+        }
         if (color.AsString() == nullptr || !IsHexColor(*color.AsString())) {
             return ThemeLoadError::InvalidColor;
         }
         theme.colors.emplace(name, *color.AsString());
     }
     for (const auto& [name, metric] : *metrics->AsObject()) {
+        if (name.size() > kMaximumThemeStringBytes) {
+            return ThemeLoadError::ResourceLimit;
+        }
         if (metric.AsNumber() == nullptr || !std::isfinite(*metric.AsNumber()) || *metric.AsNumber() < 0.0) {
             return ThemeLoadError::InvalidMetric;
         }
@@ -89,11 +106,24 @@ std::variant<ThemeDefinition, ThemeLoadError> ParseTheme(std::string_view source
 }
 
 std::variant<ThemeDefinition, ThemeLoadError> LoadThemeFile(const std::filesystem::path& source) {
+    std::error_code file_error;
+    if (!std::filesystem::is_regular_file(source, file_error) || file_error) {
+        return ThemeLoadError::CannotRead;
+    }
+    const auto file_size = std::filesystem::file_size(source, file_error);
+    if (file_error || file_size > kMaximumThemeSourceBytes) {
+        return file_error ? ThemeLoadError::CannotRead : ThemeLoadError::ResourceLimit;
+    }
     std::ifstream input(source, std::ios::binary);
     if (!input) {
         return ThemeLoadError::CannotRead;
     }
-    const std::string contents((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    std::string contents;
+    contents.reserve(static_cast<std::size_t>(file_size));
+    contents.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    if (contents.size() > kMaximumThemeSourceBytes) {
+        return ThemeLoadError::ResourceLimit;
+    }
     return ParseTheme(contents);
 }
 
