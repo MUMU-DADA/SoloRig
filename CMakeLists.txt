@@ -105,6 +105,7 @@ add_library(solo_rig_core STATIC
     src/content/behavior_lowering.cpp
     src/content/behavior_graph.cpp
     src/content/behavior_graph_json.cpp
+    src/content/whitebox_mna_json.cpp
     src/content/behavior_clocked.cpp
     src/content/behavior_clocked_runtime.cpp
     src/content/behavior_feedback.cpp
@@ -317,6 +318,7 @@ if(BUILD_TESTING)
         tests/generic_spring_runtime_tests.cpp
         tests/behavior_graph_tests.cpp
         tests/behavior_graph_json_tests.cpp
+        tests/whitebox_mna_json_tests.cpp
         tests/behavior_clocked_tests.cpp
         tests/behavior_feedback_tests.cpp
         tests/behavior_runtime_tests.cpp
