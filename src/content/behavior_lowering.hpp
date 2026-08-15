@@ -14,6 +14,7 @@ enum class BehaviorKind {
     Vco,
     Vca,
     Envelope,
+    Lfo,
     Spring,
 };
 
