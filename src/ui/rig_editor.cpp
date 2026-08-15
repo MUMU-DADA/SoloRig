@@ -35,8 +35,8 @@ std::optional<std::string> StringField(const JsonValue::Object& object, std::str
     return value != nullptr && value->AsString() != nullptr ? std::optional<std::string>(*value->AsString()) : std::nullopt;
 }
 
-const ModuleCatalogEntry* CatalogEntry(std::string_view module_id) noexcept {
-    static const std::vector<ModuleCatalogEntry> catalog{
+std::vector<ModuleCatalogEntry> BuiltinCatalog() {
+    return {
         {.module_id = "org.mumu-dada.solorig.drive",
          .display_name = "Drive",
          .category = "Analog",
@@ -52,10 +52,22 @@ const ModuleCatalogEntry* CatalogEntry(std::string_view module_id) noexcept {
          .latency_samples = 96U,
          .estimated_cpu_percent = 2.5},
     };
-    const auto iterator = std::ranges::find_if(catalog, [module_id](const auto& entry) {
-        return entry.module_id == module_id;
-    });
-    return iterator == catalog.end() ? nullptr : &*iterator;
+}
+
+std::string CategoryName(EffectCategory category) {
+    switch (category) {
+    case EffectCategory::AnalogCircuit:
+        return "Analog";
+    case EffectCategory::DigitalAlgorithm:
+        return "Digital";
+    case EffectCategory::NeuralAmpModel:
+        return "NAM";
+    case EffectCategory::ImpulseResponse:
+        return "IR";
+    case EffectCategory::Utility:
+        return "Utility";
+    }
+    return "External";
 }
 
 bool HasConnection(const RigPreset& preset, std::string_view source, std::string_view destination) {
@@ -76,6 +88,7 @@ RigPreset RigEditorViewModel::DefaultEditorPreset() {
 
 RigEditorViewModel::RigEditorViewModel(RigPreset preset)
     : layout_(DefaultDarkTheme().metrics.at("gridSize")), theme_(DefaultDarkTheme()), skin_(DefaultPedalSkin()) {
+    RebuildCatalog();
     ApplyPreset(std::move(preset), std::nullopt, false);
 }
 
@@ -83,7 +96,14 @@ void RigEditorViewModel::SetPreset(RigPreset preset) {
     if (preset.name.empty()) {
         preset = DefaultEditorPreset();
     }
-    ApplyPreset(std::move(preset), source_path_, true);
+    std::string diagnostic;
+    auto packages = LoadExternalPackages(preset,
+                                         source_path_.has_value() ? source_path_->parent_path() : std::filesystem::current_path(),
+                                         diagnostic);
+    ApplyPreset(std::move(preset), source_path_, true, packages.value_or({}));
+    if (!diagnostic.empty()) {
+        SetFileStatus("Preset loaded with external package placeholders: " + diagnostic);
+    }
 }
 
 void RigEditorViewModel::NewPreset() {
@@ -91,11 +111,16 @@ void RigEditorViewModel::NewPreset() {
     SetFileStatus("New preset created");
 }
 
-void RigEditorViewModel::ApplyPreset(RigPreset preset, std::optional<std::filesystem::path> source, bool dirty) {
+void RigEditorViewModel::ApplyPreset(RigPreset preset,
+                                     std::optional<std::filesystem::path> source,
+                                     bool dirty,
+                                     std::map<std::string, ModulePackage, std::less<>> packages) {
     if (preset.name.empty()) {
         preset = DefaultEditorPreset();
     }
     preset_ = std::move(preset);
+    imported_packages_ = std::move(packages);
+    RebuildCatalog();
     if (preset_.theme.has_value()) {
         theme_ = *preset_.theme;
         dark_theme_ = theme_.id.find("dark") != std::string::npos;
@@ -182,7 +207,13 @@ EditorFileResult RigEditorViewModel::LoadFrom(const std::filesystem::path& sourc
         SetFileStatus("Open failed: preset contains an invalid cyclic topology.");
         return {.success = false, .error = EditorFileError::InvalidTopology, .message = file_status_};
     }
-    ApplyPreset(std::move(candidate), *normalized, false);
+    std::string package_diagnostic;
+    auto packages = LoadExternalPackages(candidate, normalized->parent_path(), package_diagnostic);
+    if (!packages.has_value()) {
+        SetFileStatus("Open failed: external module package " + package_diagnostic);
+        return {.success = false, .error = EditorFileError::InvalidSchema, .message = file_status_};
+    }
+    ApplyPreset(std::move(candidate), *normalized, false, std::move(*packages));
     if (!unresolved_nodes_.empty()) {
         SetFileStatus("Loaded with placeholders: missing module assets for " + unresolved_nodes_.front() + ".");
         return {.success = true, .warning = true, .message = file_status_};
@@ -343,13 +374,35 @@ bool RigEditorViewModel::LoadSkinFile(const std::filesystem::path& source) {
 }
 
 std::vector<ModuleCatalogEntry> RigEditorViewModel::ModuleCatalog() {
-    return {*CatalogEntry("org.mumu-dada.solorig.drive"),
-            *CatalogEntry("org.mumu-dada.solorig.digital-delay")};
+    return BuiltinCatalog();
+}
+
+const std::vector<ModuleCatalogEntry>& RigEditorViewModel::Catalog() const noexcept {
+    return catalog_;
+}
+
+void RigEditorViewModel::RebuildCatalog() {
+    catalog_ = BuiltinCatalog();
+    for (const auto& [module_id, package] : imported_packages_) {
+        ModuleCatalogEntry entry{
+            .module_id = module_id,
+            .display_name = package.descriptor.display_name,
+            .category = CategoryName(package.descriptor.category),
+            .description = "External module package: " + package.descriptor.logic_entry_point,
+            .latency_samples = package.descriptor.declared_latency_samples,
+            .estimated_cpu_percent = package.descriptor.category == EffectCategory::AnalogCircuit ? 4.0 : 2.0,
+        };
+        entry.default_parameters.reserve(package.descriptor.parameters.size());
+        for (const auto& parameter : package.descriptor.parameters) {
+            entry.default_parameters.emplace_back(parameter.id, parameter.default_value);
+        }
+        catalog_.push_back(std::move(entry));
+    }
 }
 
 bool RigEditorViewModel::AddNode(std::string_view module_id, std::string_view instance_id,
                                  double layout_x, double layout_y) {
-    const auto* entry = CatalogEntry(module_id);
+    const auto* entry = FindCatalogEntry(module_id);
     if (entry == nullptr || instance_id.empty() || !std::isfinite(layout_x) || !std::isfinite(layout_y) ||
         std::ranges::any_of(preset_.nodes, [instance_id](const auto& node) { return node.instance_id == instance_id; })) {
         SetFileStatus("Edit failed: invalid or duplicate module node.");
@@ -484,7 +537,37 @@ EditorFileResult RigEditorViewModel::ImportResource(const std::filesystem::path&
             SetFileStatus("Resource import failed: module package manifest or logic is invalid.");
             return {.success = false, .error = EditorFileError::InvalidSchema, .message = file_status_};
         }
-        resource_status_ = "Imported module package: " + loaded.package->descriptor.display_name;
+        const auto module_id = loaded.package->descriptor.module_id;
+        if (FindCatalogEntry(module_id) != nullptr) {
+            SetFileStatus("Resource import failed: module ID is already registered.");
+            return {.success = false, .error = EditorFileError::InvalidSchema, .message = file_status_};
+        }
+        std::error_code absolute_error;
+        const auto absolute_root = std::filesystem::absolute(package_root, absolute_error).lexically_normal();
+        if (absolute_error || absolute_root.empty()) {
+            SetFileStatus("Resource import failed: package path cannot be normalized.");
+            return {.success = false, .error = EditorFileError::CannotRead, .message = file_status_};
+        }
+        auto candidate = preset_;
+        candidate.external_module_packages.push_back({.module_id = module_id, .root_directory = absolute_root});
+        if (!ValidatePreset(candidate).empty()) {
+            SetFileStatus("Resource import failed: package reference could not be added to the preset.");
+            return {.success = false, .error = EditorFileError::InvalidSchema, .message = file_status_};
+        }
+        auto package = std::move(*loaded.package);
+        const auto relative_skin = package.custom_skin_path.has_value()
+            ? package.custom_skin_path->lexically_relative(package.root_directory)
+            : std::filesystem::path{};
+        const auto display_name = package.descriptor.display_name;
+        package.root_directory = absolute_root;
+        package.logic_path = absolute_root / package.descriptor.logic_entry_point;
+        if (!relative_skin.empty()) {
+            package.custom_skin_path = absolute_root / relative_skin;
+        }
+        imported_packages_.emplace(module_id, std::move(package));
+        preset_ = std::move(candidate);
+        RebuildCatalog();
+        resource_status_ = "Imported module package: " + display_name;
         dirty_ = true;
         SetFileStatus("Unsaved changes");
         RebuildScene();
@@ -604,6 +687,57 @@ void RigEditorViewModel::SetAudioStatus(std::string status) {
     scene_.audio_status = audio_status_;
 }
 
+std::optional<std::map<std::string, ModulePackage, std::less<>>>
+RigEditorViewModel::LoadExternalPackages(RigPreset& preset,
+                                          const std::filesystem::path& base_directory,
+                                          std::string& diagnostic) const {
+    std::map<std::string, ModulePackage, std::less<>> packages;
+    const auto builtins = BuiltinCatalog();
+    for (auto& reference : preset.external_module_packages) {
+        if (reference.module_id.empty() || reference.root_directory.empty()) {
+            diagnostic = "reference is missing module ID or root directory";
+            return std::nullopt;
+        }
+        if (std::ranges::any_of(builtins, [&reference](const auto& entry) {
+                return entry.module_id == reference.module_id;
+            }) || packages.contains(reference.module_id)) {
+            diagnostic = "module ID is duplicated: " + reference.module_id;
+            return std::nullopt;
+        }
+        auto root = reference.root_directory;
+        if (root.is_relative()) {
+            root = base_directory / root;
+        }
+        std::error_code absolute_error;
+        root = std::filesystem::absolute(root, absolute_error).lexically_normal();
+        if (absolute_error || root.empty()) {
+            diagnostic = "path cannot be normalized for " + reference.module_id;
+            return std::nullopt;
+        }
+        const auto loaded = LoadModulePackage(root);
+        if (!loaded.package.has_value() || !loaded.errors.empty()) {
+            diagnostic = "could not validate " + reference.module_id + " at " + root.string();
+            return std::nullopt;
+        }
+        if (loaded.package->descriptor.module_id != reference.module_id) {
+            diagnostic = "manifest ID does not match reference for " + reference.module_id;
+            return std::nullopt;
+        }
+        auto package = std::move(*loaded.package);
+        const auto relative_skin = package.custom_skin_path.has_value()
+            ? package.custom_skin_path->lexically_relative(package.root_directory)
+            : std::filesystem::path{};
+        package.root_directory = root;
+        package.logic_path = root / package.descriptor.logic_entry_point;
+        if (!relative_skin.empty()) {
+            package.custom_skin_path = root / relative_skin;
+        }
+        reference.root_directory = root;
+        packages.emplace(reference.module_id, std::move(package));
+    }
+    return packages;
+}
+
 void RigEditorViewModel::RebuildScene() {
     scene_.viewport_width = viewport_width_;
     scene_.viewport_height = viewport_height_;
@@ -617,7 +751,7 @@ void RigEditorViewModel::RebuildScene() {
     scene_.performance = {};
     scene_.performance.measured_node_count = 0U;
     for (const auto& node : preset_.nodes) {
-        if (const auto* entry = CatalogEntry(node.module_id); entry != nullptr) {
+        if (const auto* entry = FindCatalogEntry(node.module_id); entry != nullptr) {
             scene_.performance.total_latency_samples += entry->latency_samples;
             scene_.performance.estimated_cpu_percent += entry->estimated_cpu_percent;
         }
@@ -637,7 +771,7 @@ void RigEditorViewModel::RebuildScene() {
     constexpr double kNodeHeight = 126.0;
     for (const auto& node : preset_.nodes) {
         const auto position = layout_.Find(node.instance_id).value_or(PedalPosition{});
-        const auto* entry = CatalogEntry(node.module_id);
+        const auto* entry = FindCatalogEntry(node.module_id);
         const auto measured = measured_performance_.find(node.instance_id);
         scene_.nodes.push_back({.instance_id = node.instance_id,
                                 .module_id = node.module_id,
@@ -737,9 +871,15 @@ bool RigEditorViewModel::HasInvalidTopology(const RigPreset& preset) {
     return false;
 }
 
-bool RigEditorViewModel::IsKnownModule(std::string_view module_id) noexcept {
-    return module_id == "org.mumu-dada.solorig.drive" ||
-           module_id == "org.mumu-dada.solorig.digital-delay";
+bool RigEditorViewModel::IsKnownModule(std::string_view module_id) const noexcept {
+    return FindCatalogEntry(module_id) != nullptr;
+}
+
+const ModuleCatalogEntry* RigEditorViewModel::FindCatalogEntry(std::string_view module_id) const noexcept {
+    const auto iterator = std::ranges::find_if(catalog_, [module_id](const auto& entry) {
+        return entry.module_id == module_id;
+    });
+    return iterator == catalog_.end() ? nullptr : &*iterator;
 }
 
 double RigEditorViewModel::GridSize() const noexcept {

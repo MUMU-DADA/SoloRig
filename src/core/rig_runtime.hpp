@@ -33,6 +33,9 @@ public:
 
     [[nodiscard]] std::optional<RigBuildError> Register(std::string module_id, RigModuleFactory factory);
     [[nodiscard]] std::optional<RigBuildError> RegisterPackage(ModulePackage package);
+    // Replaces the control-thread external package set for a new preset while
+    // preserving the built-in factories.
+    void ClearExternalPackages() noexcept;
     [[nodiscard]] bool Contains(std::string_view module_id) const;
     [[nodiscard]] std::variant<std::unique_ptr<ModuleRuntimeProcessor>, RigBuildError> Instantiate(
         const PresetNode& node) const;

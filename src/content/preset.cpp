@@ -7,6 +7,7 @@
 #include <fstream>
 #include <set>
 #include <system_error>
+#include <string_view>
 
 namespace solo_rig {
 
@@ -20,6 +21,25 @@ const JsonValue* Find(const JsonValue::Object& object, std::string_view key) {
 std::optional<std::string> StringField(const JsonValue::Object& object, std::string_view key) {
     const auto* value = Find(object, key);
     return value != nullptr && value->AsString() != nullptr ? std::optional<std::string>(*value->AsString()) : std::nullopt;
+}
+
+std::string PathToUtf8(const std::filesystem::path& path) {
+    const auto encoded = path.u8string();
+    std::string result;
+    result.reserve(encoded.size());
+    for (const auto character : encoded) {
+        result.push_back(static_cast<char>(character));
+    }
+    return result;
+}
+
+std::filesystem::path PathFromUtf8(std::string_view text) {
+    std::u8string encoded;
+    encoded.reserve(text.size());
+    for (const auto character : text) {
+        encoded.push_back(static_cast<char8_t>(character));
+    }
+    return std::filesystem::path(encoded);
 }
 
 std::optional<double> NumberField(const JsonValue::Object& object, std::string_view key) {
@@ -152,6 +172,13 @@ std::vector<PresetValidationError> ValidatePreset(const RigPreset& preset) {
             errors.push_back(PresetValidationError::UnknownConnectionEndpoint);
         }
     }
+    std::set<std::string, std::less<>> package_ids;
+    for (const auto& package : preset.external_module_packages) {
+        if (package.module_id.empty() || package.root_directory.empty() ||
+            !package_ids.insert(package.module_id).second) {
+            errors.push_back(PresetValidationError::InvalidExternalModulePackage);
+        }
+    }
     return errors;
 }
 
@@ -223,6 +250,18 @@ std::string SerializePreset(const RigPreset& preset) {
             serialized += "\",\"targetId\":\"" + EscapeJsonString(binding.target_id) +
                           "\",\"minimum\":" + std::to_string(binding.minimum) +
                           ",\"maximum\":" + std::to_string(binding.maximum) + "}";
+        }
+        serialized += "]";
+    }
+    if (!preset.external_module_packages.empty()) {
+        serialized += ",\"modulePackages\":[";
+        for (std::size_t index = 0; index < preset.external_module_packages.size(); ++index) {
+            const auto& package = preset.external_module_packages[index];
+            if (index != 0U) {
+                serialized += ',';
+            }
+            serialized += "{\"moduleId\":\"" + EscapeJsonString(package.module_id) +
+                          "\",\"rootDirectory\":\"" + EscapeJsonString(PathToUtf8(package.root_directory)) + "\"}";
         }
         serialized += "]";
     }
@@ -316,6 +355,24 @@ std::optional<RigPreset> DeserializePreset(std::string_view source) {
             parsed_bindings.push_back(*parsed_binding);
         }
         preset.midi_bindings = std::move(parsed_bindings);
+    }
+    if (const auto* packages = Find(root, "modulePackages"); packages != nullptr) {
+        if (packages->AsArray() == nullptr) {
+            return std::nullopt;
+        }
+        for (const auto& package_value : *packages->AsArray()) {
+            const auto* package = package_value.AsObject();
+            if (package == nullptr) {
+                return std::nullopt;
+            }
+            const auto module_id = StringField(*package, "moduleId");
+            const auto root_directory = StringField(*package, "rootDirectory");
+            if (!module_id.has_value() || module_id->empty() || !root_directory.has_value() || root_directory->empty()) {
+                return std::nullopt;
+            }
+            preset.external_module_packages.push_back({.module_id = *module_id,
+                                                       .root_directory = PathFromUtf8(*root_directory)});
+        }
     }
     return ValidatePreset(preset).empty() ? std::optional<RigPreset>(std::move(preset)) : std::nullopt;
 }

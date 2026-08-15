@@ -174,6 +174,27 @@ TEST_CASE("RigEditor explicitly validates an external module package resource") 
     REQUIRE(imported.success);
     REQUIRE(editor.Scene().resource_status.find("Editor Package") != std::string::npos);
     REQUIRE(editor.IsDirty());
+    const auto duplicate_import = editor.ImportResource(directory);
+    REQUIRE(!duplicate_import.success);
+    REQUIRE(editor.ExportPreset().external_module_packages.size() == 1U);
+    REQUIRE(editor.ExportPreset().external_module_packages.front().module_id ==
+            "org.mumu-dada.solorig.editor-package");
+    REQUIRE(editor.Catalog().size() == 3U);
+    REQUIRE(std::ranges::any_of(editor.Catalog(), [](const auto& entry) {
+        return entry.module_id == "org.mumu-dada.solorig.editor-package" &&
+               entry.default_parameters.empty();
+    }));
+
+    const auto preset_path = std::filesystem::temp_directory_path() / "solorig-editor-module-package.srig";
+    const auto saved = editor.SaveTo(preset_path);
+    REQUIRE(saved.success);
+    solo_rig::RigEditorViewModel restored;
+    const auto restored_result = restored.LoadFrom(preset_path);
+    REQUIRE(restored_result.success);
+    REQUIRE(restored.Catalog().size() == 3U);
+    REQUIRE(restored.AddNode("org.mumu-dada.solorig.editor-package", "editor-package-1", 600.0, 160.0));
+    REQUIRE(!restored.Scene().nodes.back().unresolved);
+    std::filesystem::remove(preset_path, cleanup);
     std::filesystem::remove_all(directory, cleanup);
 }
 

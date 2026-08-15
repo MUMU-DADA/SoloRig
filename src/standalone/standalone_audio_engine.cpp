@@ -2,6 +2,8 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <numbers>
 #include <utility>
 
@@ -139,6 +141,7 @@ void StandaloneAudioEngine::Stop() {
 void StandaloneAudioEngine::Close() noexcept {
     asio_coordinator_.Close();
     ReleaseRuntime();
+    module_registry_.ClearExternalPackages();
     format_ = {};
     routing_ = {};
     processing_input_ = {};
@@ -251,11 +254,101 @@ bool StandaloneAudioEngine::RunTunerCaptureSelfTest() {
         std::fabs(result->frequency_hz - frequency_hz) < 5.0 && result->confidence >= 0.6;
 }
 
+bool StandaloneAudioEngine::RunExternalModulePackageRuntimeSelfTest() {
+    const auto directory = std::filesystem::temp_directory_path() / "solorig-standalone-module-package";
+    std::error_code cleanup;
+    std::filesystem::remove_all(directory, cleanup);
+    try {
+        std::filesystem::create_directories(directory / "logic");
+        {
+            std::ofstream manifest(directory / "manifest.json", std::ios::binary | std::ios::trunc);
+            manifest << R"({
+                "schemaVersion":1,
+                "moduleId":"org.mumu-dada.solorig.standalone-package",
+                "displayName":"Standalone Package",
+                "category":"digital-algorithm",
+                "logicFile":"logic/main.json",
+                "ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}],
+                "parameters":[{"id":"gain","minimum":0,"maximum":2,"default":0.25}]
+            })";
+            std::ofstream logic(directory / "logic/main.json", std::ios::binary | std::ios::trunc);
+            logic << R"({
+                "schemaVersion":1,
+                "kind":"digital-algorithm",
+                "algorithm":"linear-gain",
+                "operations":[{"type":"gain","parameter":"gain"}]
+            })";
+        }
+        const auto absolute_root = std::filesystem::absolute(directory, cleanup).lexically_normal();
+        if (cleanup) {
+            std::filesystem::remove_all(directory, cleanup);
+            return false;
+        }
+        RigPreset preset{
+            .preset_id = "standalone-package-self-test",
+            .name = "Standalone Package Self Test",
+            .nodes = {{.instance_id = "package-1",
+                       .module_id = "org.mumu-dada.solorig.standalone-package",
+                       .parameter_values = {{"gain", 0.25F}}}},
+            .external_module_packages = {{.module_id = "org.mumu-dada.solorig.standalone-package",
+                                          .root_directory = absolute_root}},
+        };
+        StandaloneAudioEngine engine;
+        const AudioFormat format{.sample_rate_hz = 192000.0,
+                                 .max_block_size = 64U,
+                                 .channel_count = 1U,
+                                 .sample_representation = SampleRepresentation::Float32};
+        if (!engine.BuildRuntime(preset, format)) {
+            std::filesystem::remove_all(directory, cleanup);
+            return false;
+        }
+        std::array<float, 64> input{};
+        std::array<float, 64> output{};
+        input[0] = 1.0F;
+        const float* inputs[] = {input.data()};
+        float* outputs[] = {output.data()};
+        engine.ProcessBlock(inputs, outputs, 1U, 1U);
+        const auto valid = std::fabs(output[0] - 0.25F) < 0.0001F;
+        engine.ReleaseRuntime();
+        std::filesystem::remove_all(directory, cleanup);
+        return valid;
+    } catch (...) {
+        std::filesystem::remove_all(directory, cleanup);
+        return false;
+    }
+}
+
 bool StandaloneAudioEngine::BuildRuntime(const RigPreset& preset, const AudioFormat& format) {
     try {
         auto candidate = preset;
         if (candidate.preset_id.empty()) {
             candidate.preset_id = "standalone-editor";
+        }
+        module_registry_.ClearExternalPackages();
+        for (const auto& reference : candidate.external_module_packages) {
+            auto root = reference.root_directory;
+            std::error_code path_error;
+            root = std::filesystem::absolute(root, path_error).lexically_normal();
+            if (path_error || root.empty()) {
+                return false;
+            }
+            const auto loaded = LoadModulePackage(root);
+            if (!loaded.package.has_value() || !loaded.errors.empty() ||
+                loaded.package->descriptor.module_id != reference.module_id) {
+                return false;
+            }
+            auto package = std::move(*loaded.package);
+            const auto relative_skin = package.custom_skin_path.has_value()
+                ? package.custom_skin_path->lexically_relative(package.root_directory)
+                : std::filesystem::path{};
+            package.root_directory = root;
+            package.logic_path = root / package.descriptor.logic_entry_point;
+            if (!relative_skin.empty()) {
+                package.custom_skin_path = root / relative_skin;
+            }
+            if (module_registry_.RegisterPackage(std::move(package)).has_value()) {
+                return false;
+            }
         }
         PreparedPreset prepared{.preset_id = candidate.preset_id, .preset = std::move(candidate)};
         const auto built = RigRuntimeBuilder{}.Build(prepared, module_registry_, format);

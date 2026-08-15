@@ -25,6 +25,11 @@ struct PresetConnection {
     std::string destination_instance_id;
 };
 
+struct ExternalModulePackageRef {
+    std::string module_id;
+    std::filesystem::path root_directory;
+};
+
 struct RigPreset {
     // Empty identifies a legacy schema-v1 document. New schema-v2 documents
     // persist this stable identity; preparation fills it for legacy content.
@@ -38,6 +43,10 @@ struct RigPreset {
     // Optional schema-v2 control-plane extension. Device identities are
     // intentionally not persisted; bindings target logical preset/module IDs.
     std::optional<std::vector<MidiBinding>> midi_bindings;
+    // Optional additive schema-v2 extension. The package contents remain
+    // external assets; the preset stores their validated roots so the editor
+    // and Standalone can re-register the same modules after reload.
+    std::vector<ExternalModulePackageRef> external_module_packages;
 };
 
 inline constexpr int kCurrentPresetSchemaVersion = 2;
@@ -52,6 +61,7 @@ enum class PresetValidationError {
     MissingConnectionEndpoint,
     UnknownConnectionEndpoint,
     InvalidMidiBinding,
+    InvalidExternalModulePackage,
 };
 
 enum class PresetFileError {

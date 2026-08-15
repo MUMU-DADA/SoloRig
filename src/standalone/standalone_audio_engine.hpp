@@ -49,6 +49,10 @@ public:
     // callback; it reads the lock-free input window captured by ProcessBlock.
     [[nodiscard]] std::optional<TuningResult> AnalyzeTuner() const;
     [[nodiscard]] static bool RunTunerCaptureSelfTest();
+    // Control-thread contract test for the production package registration
+    // path. It exercises package reload, registry registration and one graph
+    // block without opening hardware.
+    [[nodiscard]] static bool RunExternalModulePackageRuntimeSelfTest();
 
     [[nodiscard]] bool IsOpen() const noexcept;
     [[nodiscard]] bool IsRunning() const noexcept;

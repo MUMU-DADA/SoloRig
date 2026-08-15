@@ -1,6 +1,7 @@
 #pragma once
 
 #include "content/theme.hpp"
+#include "content/module_package.hpp"
 #include "content/preset.hpp"
 #include "ui/pedal_layout.hpp"
 
@@ -149,6 +150,10 @@ public:
     [[nodiscard]] bool LoadSkinFile(const std::filesystem::path& source);
 
     [[nodiscard]] static std::vector<ModuleCatalogEntry> ModuleCatalog();
+    // Includes built-ins and all successfully imported package descriptors.
+    // The returned storage belongs to this editor and remains valid until the
+    // next document/package operation.
+    [[nodiscard]] const std::vector<ModuleCatalogEntry>& Catalog() const noexcept;
     [[nodiscard]] bool AddNode(std::string_view module_id, std::string_view instance_id,
                                double layout_x, double layout_y);
     [[nodiscard]] bool DeleteNode(std::string_view instance_id);
@@ -171,13 +176,22 @@ public:
 
 private:
     void RebuildScene();
-    void ApplyPreset(RigPreset preset, std::optional<std::filesystem::path> source, bool dirty);
+    void ApplyPreset(RigPreset preset,
+                     std::optional<std::filesystem::path> source,
+                     bool dirty,
+                     std::map<std::string, ModulePackage, std::less<>> packages = {});
+    [[nodiscard]] std::optional<std::map<std::string, ModulePackage, std::less<>>>
+    LoadExternalPackages(RigPreset& preset,
+                         const std::filesystem::path& base_directory,
+                         std::string& diagnostic) const;
+    void RebuildCatalog();
     void SetFileStatus(std::string status);
     [[nodiscard]] static std::optional<std::filesystem::path> NormalizePresetPath(
         const std::filesystem::path& source);
     [[nodiscard]] static std::optional<EditorFileError> MapLoadError(PresetFileError error);
     [[nodiscard]] static bool HasInvalidTopology(const RigPreset& preset);
-    [[nodiscard]] static bool IsKnownModule(std::string_view module_id) noexcept;
+    [[nodiscard]] bool IsKnownModule(std::string_view module_id) const noexcept;
+    [[nodiscard]] const ModuleCatalogEntry* FindCatalogEntry(std::string_view module_id) const noexcept;
     [[nodiscard]] double GridSize() const noexcept;
     [[nodiscard]] const RigEditorNode* FindSceneNode(std::string_view instance_id) const noexcept;
 
@@ -196,6 +210,8 @@ private:
     std::string file_status_;
     std::string audio_status_{"ASIO backend not configured/available"};
     std::string resource_status_{"No external resource imported"};
+    std::map<std::string, ModulePackage, std::less<>> imported_packages_;
+    std::vector<ModuleCatalogEntry> catalog_;
     std::vector<std::string> unresolved_nodes_;
     struct MeasuredNodePerformance {
         uint32_t declared_latency_samples{};

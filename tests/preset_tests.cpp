@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 #include <variant>
 
 namespace {
@@ -116,6 +117,25 @@ TEST_CASE("RigPreset schema-v2 persists optional MIDI bindings and keeps legacy 
         "{\"schemaVersion\":2,\"presetId\":\"old\",\"name\":\"Old\",\"nodes\":[],\"connections\":[]}");
     REQUIRE(legacy.has_value());
     REQUIRE(!legacy->midi_bindings.has_value());
+}
+
+TEST_CASE("RigPreset schema-v2 persists external module package references and rejects duplicates") {
+    auto preset = CreatePreset();
+    preset.preset_id = "package-rig";
+    preset.external_module_packages = {
+        {.module_id = "external.package", .root_directory = std::filesystem::path("packages/external")},
+    };
+    const auto restored = solo_rig::DeserializePreset(solo_rig::SerializePreset(preset));
+    REQUIRE(restored.has_value());
+    REQUIRE(restored->external_module_packages.size() == 1U);
+    REQUIRE(restored->external_module_packages.front().module_id == "external.package");
+    REQUIRE(restored->external_module_packages.front().root_directory == std::filesystem::path("packages/external"));
+
+    preset.external_module_packages.push_back(preset.external_module_packages.front());
+    const auto errors = solo_rig::ValidatePreset(preset);
+    REQUIRE(std::ranges::any_of(errors, [](auto error) {
+        return error == solo_rig::PresetValidationError::InvalidExternalModulePackage;
+    }));
 }
 
 TEST_CASE("RigPreset rejects malformed or out-of-range persisted MIDI bindings") {

@@ -459,7 +459,7 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_catalog_count(
     if (!ValidBackend(backend) || out_count == nullptr) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "backend and catalog count are required");
     }
-    static const auto catalog = solo_rig::RigEditorViewModel::ModuleCatalog();
+    const auto& catalog = backend->editor.Catalog();
     *out_count = static_cast<uint32_t>(catalog.size());
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
@@ -470,7 +470,7 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_catalog_entry(
     if (!ValidBackend(backend) || out_entry == nullptr) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "backend and catalog entry are required");
     }
-    static const auto catalog = solo_rig::RigEditorViewModel::ModuleCatalog();
+    const auto& catalog = backend->editor.Catalog();
     if (index >= catalog.size()) {
         return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "module catalog entry was not found");
     }

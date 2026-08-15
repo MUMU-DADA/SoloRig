@@ -217,6 +217,64 @@ TEST_CASE("C ABI explicit resource import identifies supported assets without st
     std::filesystem::remove(path, cleanup);
 }
 
+TEST_CASE("C ABI external module package import extends the catalog and persists its reference") {
+    const auto directory = std::filesystem::temp_directory_path() / "solorig-abi-module-package";
+    const auto preset_path = std::filesystem::temp_directory_path() / "solorig-abi-module-package.srig";
+    std::error_code cleanup;
+    std::filesystem::remove_all(directory, cleanup);
+    std::filesystem::remove(preset_path, cleanup);
+    std::filesystem::create_directories(directory / "logic");
+    {
+        std::ofstream manifest(directory / "manifest.json", std::ios::binary | std::ios::trunc);
+        manifest << R"({
+            "schemaVersion":1,
+            "moduleId":"org.mumu-dada.solorig.abi-package",
+            "displayName":"ABI Package",
+            "category":"digital-algorithm",
+            "logicFile":"logic/main.json",
+            "ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}],
+            "parameters":[{"id":"gain","minimum":0,"maximum":2,"default":0.5}]
+        })";
+        std::ofstream logic(directory / "logic/main.json", std::ios::binary | std::ios::trunc);
+        logic << R"({"schemaVersion":1,"kind":"digital-algorithm","algorithm":"linear-gain","operations":[{"type":"gain","parameter":"gain"}]})";
+    }
+
+    SoloRigBackend* backend = nullptr;
+    REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_import_resource_utf8(backend, directory.string().c_str()) == SOLO_RIG_STATUS_OK);
+    uint32_t catalog_count = 0U;
+    REQUIRE(solorig_backend_catalog_count(backend, &catalog_count) == SOLO_RIG_STATUS_OK);
+    REQUIRE(catalog_count == 3U);
+    bool found = false;
+    for (uint32_t index = 0U; index < catalog_count; ++index) {
+        SoloRigModuleCatalogView entry{};
+        REQUIRE(solorig_backend_catalog_entry(backend, index, &entry) == SOLO_RIG_STATUS_OK);
+        if (std::string(entry.module_id_utf8) == "org.mumu-dada.solorig.abi-package") {
+            found = true;
+            REQUIRE(entry.parameter_count == 1U);
+        }
+    }
+    REQUIRE(found);
+    REQUIRE(solorig_backend_add_node_utf8(backend, "org.mumu-dada.solorig.abi-package", "abi-package-1", 600.0, 160.0) ==
+            SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_save_utf8(backend, preset_path.string().c_str()) == SOLO_RIG_STATUS_OK);
+    solorig_backend_destroy(backend);
+
+    REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_open_utf8(backend, preset_path.string().c_str()) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_catalog_count(backend, &catalog_count) == SOLO_RIG_STATUS_OK);
+    REQUIRE(catalog_count == 3U);
+    SoloRigSnapshot* snapshot = nullptr;
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    SoloRigNodeView node{};
+    REQUIRE(solorig_snapshot_node(snapshot, 2U, &node) == SOLO_RIG_STATUS_OK);
+    REQUIRE(node.unresolved == 0U);
+    solorig_snapshot_destroy(snapshot);
+    solorig_backend_destroy(backend);
+    std::filesystem::remove(preset_path, cleanup);
+    std::filesystem::remove_all(directory, cleanup);
+}
+
 TEST_CASE("C ABI exposes explicit realtime and whitebox boundaries") {
     SoloRigBackend* backend = nullptr;
     REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);

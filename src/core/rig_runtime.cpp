@@ -173,6 +173,10 @@ std::optional<RigBuildError> RigModuleRegistry::RegisterPackage(ModulePackage pa
     return std::nullopt;
 }
 
+void RigModuleRegistry::ClearExternalPackages() noexcept {
+    packages_.clear();
+}
+
 bool RigModuleRegistry::Contains(std::string_view module_id) const {
     return factories_.contains(module_id) || packages_.contains(module_id);
 }
