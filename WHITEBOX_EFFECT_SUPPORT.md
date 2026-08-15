@@ -15,6 +15,7 @@
 - M20-B4 已提交时的验证为核心 `538/538`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `ba897feda5a24b1782ae2da3901a6ec9`。
 - M20-C1 已提交：typed behavior graph 的 signal 端口支持固定容量多连接；同域 fan-in 在 runtime 求和，fan-out 复制到多个下游/边界输出；编译阶段仍拒绝非法域、循环、缺端口和容量超限。最新验证为核心 `540/540`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `a179267303ca48b196fa93a57e806bc7`。
 - M20-C2 已提交：通用 typed behavior → MNA control binding composite 将 control/resistance 输出经调用方显式范围映射写入预编译 MNA 控制槽，覆盖 envelope/LFO/optocoupler 类跨域组合；未宣称任意多端 MNA 或商业 sidechain。最新验证为核心 `545/545`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `ed44119e36484516814c808b0bbd9d39`。
+- M22-A1 已形成待提交候选：MNA 编译/求解器支持固定容量多输入、多输出端口，新增 span 输入和输出快照，旧单输入 `Solve(double)` 保持兼容；双输入双输出电阻网络、输入数量、非有限和 192 kHz 边界通过核心回归。外部 module runtime、typed behavior composite 和任意多端口 sidechain 尚未接入。
 
 ## M20-C3 产品级审计与白盒完成计划（当前进行中）
 
@@ -32,7 +33,7 @@
 
 1. **M20-C3：产品性能与宿主真实性**。已完成 AudioGraph 节点级实测 block load 与控制线程快照；仍需把快照接入 UI/ASIO 性能面板并提供过载状态。明确区分图级实测与模块目录估算；补齐 VST3/独立程序生命周期、ASIO 设备枚举与真实回调，没有 SDK 或硬件条件时只能保留 `blocked`，不能用模拟路由测试替代。
 2. **M21：外部模块可运行闭环**。定义并冻结模块包版本、逻辑/电路/皮肤三层契约；已补齐当前九种声明数字操作的受限 runtime。每个外部包必须经过 Parse → Compile/Prepare → Process → Reset，并验证参数、文件、错误和实时线程边界；任意数字图、sidechain 和多端口语义仍属于后续 M22。
-3. **M22：通用白盒拓扑**。将当前受限单输入/单输出 MNA 边界扩展为经过审计的多端口/阶段化接口，覆盖串联、并联、控制、sidechain、反馈和电源/负载组合；每个不支持的拓扑必须稳定拒绝，不能靠固定产品识别或静默数字替代。
+3. **M22：通用白盒拓扑**。M22-A1 已先完成 MNA 固定容量多输入/多输出边界；后续仍需把端口数据接入 runtime/typed behavior，扩展经过审计的阶段化接口，覆盖串联、并联、控制、sidechain、反馈和电源/负载组合；每个不支持的拓扑必须稳定拒绝，不能靠固定产品识别或静默数字替代。
 4. **M23：参考与覆盖集**。为选定的失真、滤波/调制、压缩、BBD、混响、电子管前后级和箱头负载建立可授权的网表、元件/模型版本、供电/负载条件和测量基线；预先固定静态、频响、动态、谐波/互调、旋钮扫动误差阈值，逐类生成 golden/SPICE/实机证据。
 5. **Release 白盒门**。只有在支持矩阵中的每一类同时具备可运行路径、稳定拒绝边界、实时无分配/无锁/无文件证明、独立参考证据和全量回归，且真实宿主/ASIO 条件通过时，才可称为“白盒完成”。generic self-authored 模型仍需明确标注为 generic，不得自动升级为商业型号 `reference-1to1`。
 
@@ -44,6 +45,12 @@
 - `DigitalDynamics` 是有界 envelope compressor/limiter，操作参数为 `[0, 1]` 的 amount；零值透明，满值为高比例限制。
 - `DigitalPitchShift` 是固定容量双 grain 处理器，操作参数为 `[-24, 24]` 半音；grain/ring 状态在 Prepare 分配，Process 不分配、不读文件、不解析 JSON。
 - M21 新增独立 DSP 测试、外部 package 集成测试和参数拒绝测试；当前增量核心测试为 `552/552`，CTest `5/5`，VST3 Validator `47/47`。这些测试证明 self-authored generic 算法的运行边界，不证明商业算法、音质 1:1 或任意数字拓扑。
+
+### M22-A1 第一阶段：MNA 固定容量多端口边界（已实现，待里程碑提交）
+
+- `MnaPreparedCircuit` 预分配多个输入端口电压源分支和多个输出测量节点；`Solve(std::span<const double>)` 不在实时路径分配，`OutputValue(index)` 返回最近一次已求解端口值。
+- 旧单输入电路继续使用 `Solve(double)`；多输入电路通过错误 `InvalidInputCount` 拒绝错误调用，非有限输入仍返回 `NonFinite`。
+- 当前证据是双输入双输出 passive fixture，不宣称外部 package、typed behavior、sidechain 或任意多端网络已经消费该接口。
 
 ## 当前状态补充：M20-A1
 

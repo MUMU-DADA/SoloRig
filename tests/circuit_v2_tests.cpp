@@ -798,7 +798,7 @@ TEST_CASE("MNA rejects non-finite prepared diode model values before Prepare") {
                         .diode_model = solo_rig::CircuitDiodeModel{.kind = "shockley",
                                                                      .saturation_current = std::numeric_limits<double>::infinity()}}},
         .solver = {}};
-    const auto compiled = solo_rig::CompileMnaCircuit(circuit);
+    auto compiled = solo_rig::CompileMnaCircuit(circuit);
     REQUIRE(!compiled.circuit.has_value());
     REQUIRE(compiled.error == solo_rig::MnaCompileError::InvalidModel);
 }
@@ -2181,4 +2181,45 @@ TEST_CASE("MNA rejects a non-finite inductor initial state before Prepare") {
     const auto compiled = solo_rig::CompileMnaCircuit(circuit);
     REQUIRE(!compiled.circuit.has_value());
     REQUIRE(compiled.error == solo_rig::MnaCompileError::InvalidValue);
+}
+
+TEST_CASE("MNA supports fixed-capacity multiple input and output ports") {
+    solo_rig::CircuitNetlist circuit{
+        .version = 2,
+        .schema = "circuit",
+        .reference_ground = "0",
+        .nodes = {"in1", "in2", "out1", "out2", "0"},
+        .ports = {
+            {.id = "input-a", .direction = solo_rig::CircuitPortDirection::Input, .node = "in1"},
+            {.id = "input-b", .direction = solo_rig::CircuitPortDirection::Input, .node = "in2"},
+            {.id = "output-a", .direction = solo_rig::CircuitPortDirection::Output, .node = "out1"},
+            {.id = "output-b", .direction = solo_rig::CircuitPortDirection::Output, .node = "out2"}},
+        .components = {
+            {.id = "input-a-divider", .type = solo_rig::CircuitComponentType::Resistor,
+             .pins = {"in1", "out1"}, .value = 1000.0},
+            {.id = "output-a-load", .type = solo_rig::CircuitComponentType::Resistor,
+             .pins = {"out1", "0"}, .value = 1000.0},
+            {.id = "input-b-divider", .type = solo_rig::CircuitComponentType::Resistor,
+             .pins = {"in2", "out2"}, .value = 1000.0},
+            {.id = "output-b-load", .type = solo_rig::CircuitComponentType::Resistor,
+             .pins = {"out2", "0"}, .value = 1000.0}},
+        .solver = {}};
+    auto compiled = solo_rig::CompileMnaCircuit(circuit);
+    REQUIRE(compiled.circuit.has_value());
+    REQUIRE(compiled.circuit->Prepare(192000.0));
+    REQUIRE(compiled.circuit->InputCount() == 2U);
+    REQUIRE(compiled.circuit->OutputCount() == 2U);
+    const std::array<double, 2> inputs{1.0, 0.5};
+    const auto solved = compiled.circuit->Solve(inputs);
+    REQUIRE(solved.Succeeded());
+    REQUIRE(std::fabs(solved.output_voltage - 0.5) < 1.0e-9);
+    REQUIRE(compiled.circuit->OutputValue(0).has_value());
+    REQUIRE(compiled.circuit->OutputValue(1).has_value());
+    REQUIRE(std::fabs(*compiled.circuit->OutputValue(0) - 0.5) < 1.0e-9);
+    REQUIRE(std::fabs(*compiled.circuit->OutputValue(1) - 0.25) < 1.0e-9);
+    REQUIRE(compiled.circuit->Solve(1.0).error == solo_rig::MnaSolveError::InvalidInputCount);
+    const std::array<double, 1> incomplete{1.0};
+    REQUIRE(compiled.circuit->Solve(incomplete).error == solo_rig::MnaSolveError::InvalidInputCount);
+    const std::array<double, 2> nonfinite{1.0, std::numeric_limits<double>::quiet_NaN()};
+    REQUIRE(compiled.circuit->Solve(nonfinite).error == solo_rig::MnaSolveError::NonFinite);
 }

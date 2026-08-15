@@ -1029,11 +1029,29 @@ void MnaPreparedCircuit::Reset() noexcept {
 }
 
 MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
+    if (!std::isfinite(input_voltage)) {
+        return {.error = MnaSolveError::NonFinite};
+    }
+    if (input_nodes_.empty()) {
+        return Solve(std::span<const double>{});
+    }
+    if (input_nodes_.size() != 1U) {
+        return {.error = MnaSolveError::InvalidInputCount};
+    }
+    return Solve(std::span<const double>(&input_voltage, 1U));
+}
+
+MnaSolveResult MnaPreparedCircuit::Solve(std::span<const double> input_voltages) noexcept {
     if (!prepared_) {
         return {.error = MnaSolveError::NotPrepared};
     }
-    if (!std::isfinite(input_voltage)) {
-        return {.error = MnaSolveError::NonFinite};
+    if (input_voltages.size() != input_nodes_.size()) {
+        return {.error = MnaSolveError::InvalidInputCount};
+    }
+    for (const auto input_voltage : input_voltages) {
+        if (!std::isfinite(input_voltage)) {
+            return {.error = MnaSolveError::NonFinite};
+        }
     }
     MnaSolveResult result;
     const double conductance_scale = sample_rate_hz_ * static_cast<double>(oversampling_);
@@ -1189,8 +1207,9 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     return {.error = MnaSolveError::NonFinite};
                 }
             }
-            if (input_branch_ != kNoIndex) {
-                StampVoltageSource(matrix_, rhs_, matrix_size_, input_node_, -1, input_branch_, input_voltage);
+            for (std::size_t input_index = 0; input_index < input_nodes_.size(); ++input_index) {
+                StampVoltageSource(matrix_, rhs_, matrix_size_, input_nodes_[input_index], -1,
+                                   input_branches_[input_index], input_voltages[input_index]);
             }
             result.error = SolveDense(matrix_, rhs_, solution_, matrix_size_);
             if (!result.Succeeded()) {
@@ -1510,12 +1529,29 @@ MnaSolveResult MnaPreparedCircuit::Solve(double input_voltage) noexcept {
                     state.next_illumination;
             }
         }
-        result.output_voltage = output_node_ >= 0 ? solution_[output_node_] : 0.0;
+        result.output_voltage = output_nodes_.empty() || output_nodes_[0] < 0
+            ? 0.0 : solution_[output_nodes_[0]];
     }
     if (!std::isfinite(result.output_voltage)) {
         result.error = MnaSolveError::NonFinite;
     }
     return result;
+}
+
+std::size_t MnaPreparedCircuit::InputCount() const noexcept {
+    return input_nodes_.size();
+}
+
+std::size_t MnaPreparedCircuit::OutputCount() const noexcept {
+    return output_nodes_.size();
+}
+
+std::optional<double> MnaPreparedCircuit::OutputValue(std::size_t output_index) const noexcept {
+    if (!prepared_ || output_index >= output_nodes_.size()) {
+        return std::nullopt;
+    }
+    const auto node = output_nodes_[output_index];
+    return node < 0 ? 0.0 : std::optional<double>(solution_[node]);
 }
 
 MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
@@ -1529,27 +1565,12 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
         circuit.solver.convergence.absolute_tolerance <= 0.0 || circuit.solver.convergence.relative_tolerance <= 0.0) {
         return {.circuit = std::nullopt, .error = MnaCompileError::InvalidConvergence};
     }
-    const auto output_port = std::find_if(circuit.ports.begin(), circuit.ports.end(), [](const CircuitPort& port) {
-        return port.direction == CircuitPortDirection::Output;
-    });
-    if (output_port == circuit.ports.end()) {
-        return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+    std::vector<const CircuitPort*> input_ports;
+    std::vector<const CircuitPort*> output_ports;
+    for (const auto& port : circuit.ports) {
+        (port.direction == CircuitPortDirection::Input ? input_ports : output_ports).push_back(&port);
     }
-    const auto second_output = std::find_if(std::next(output_port), circuit.ports.end(), [](const CircuitPort& port) {
-        return port.direction == CircuitPortDirection::Output;
-    });
-    if (second_output != circuit.ports.end()) {
-        return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
-    }
-    const auto input_port = std::find_if(circuit.ports.begin(), circuit.ports.end(), [](const CircuitPort& port) {
-        return port.direction == CircuitPortDirection::Input;
-    });
-    const auto second_input = input_port == circuit.ports.end()
-        ? circuit.ports.end()
-        : std::find_if(std::next(input_port), circuit.ports.end(), [](const CircuitPort& port) {
-              return port.direction == CircuitPortDirection::Input;
-          });
-    if (second_input != circuit.ports.end()) {
+    if (output_ports.empty()) {
         return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
     }
 
@@ -2066,7 +2087,8 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
     const auto voltage_source_count = static_cast<std::uint32_t>(std::count_if(
         circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
             return component.type == CircuitComponentType::VoltageSource;
-        })) + static_cast<std::uint32_t>(circuit.supplies.size()) + (input_port == circuit.ports.end() ? 0U : 1U);
+        })) + static_cast<std::uint32_t>(circuit.supplies.size()) +
+        static_cast<std::uint32_t>(input_ports.size());
     const auto inductor_count = static_cast<std::uint32_t>(std::count_if(
         circuit.components.begin(), circuit.components.end(), [](const CircuitComponent& component) {
             return component.type == CircuitComponentType::Inductor;
@@ -2103,15 +2125,21 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
     prepared.max_iterations_ = circuit.solver.convergence.max_iterations;
     prepared.absolute_tolerance_ = circuit.solver.convergence.absolute_tolerance;
     prepared.relative_tolerance_ = circuit.solver.convergence.relative_tolerance;
-    prepared.output_node_ = FindNode(circuit, output_port->node);
-    if (prepared.output_node_ == -2) {
-        return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
-    }
-    if (input_port != circuit.ports.end()) {
-        prepared.input_node_ = FindNode(circuit, input_port->node);
-        if (prepared.input_node_ < 0) {
+    prepared.output_nodes_.reserve(output_ports.size());
+    for (const auto* port : output_ports) {
+        const auto output_node = FindNode(circuit, port->node);
+        if (output_node == -2) {
             return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
         }
+        prepared.output_nodes_.push_back(output_node);
+    }
+    prepared.input_nodes_.reserve(input_ports.size());
+    for (const auto* port : input_ports) {
+        const auto input_node = FindNode(circuit, port->node);
+        if (input_node < 0) {
+            return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};
+        }
+        prepared.input_nodes_.push_back(input_node);
     }
     std::uint32_t branch{};
     std::uint32_t history{};
@@ -2787,8 +2815,10 @@ MnaCompileResult CompileMnaCircuit(const CircuitNetlist& circuit) {
                 .smoothing_seconds = binding->smoothing_seconds});
         }
     }
-    if (input_port != circuit.ports.end()) {
-        prepared.input_branch_ = non_ground_nodes + branch++;
+    prepared.input_branches_.reserve(input_ports.size());
+    for (std::size_t input_index = 0; input_index < input_ports.size(); ++input_index) {
+        static_cast<void>(input_index);
+        prepared.input_branches_.push_back(non_ground_nodes + branch++);
     }
     if (branch != branch_count) {
         return {.circuit = std::nullopt, .error = MnaCompileError::InvalidTopology};

@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <array>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,6 +44,7 @@ enum class MnaSolveError {
     SingularMatrix,
     NonFinite,
     NonConvergent,
+    InvalidInputCount,
 };
 
 struct MnaSolveResult {
@@ -67,6 +69,10 @@ public:
     // Compile/Prepare owns all storage; Solve is the real-time-safe sample step
     // and only mutates preallocated matrices, RHS, solution and dynamic histories.
     [[nodiscard]] MnaSolveResult Solve(double input_voltage) noexcept;
+    [[nodiscard]] MnaSolveResult Solve(std::span<const double> input_voltages) noexcept;
+    [[nodiscard]] std::size_t InputCount() const noexcept;
+    [[nodiscard]] std::size_t OutputCount() const noexcept;
+    [[nodiscard]] std::optional<double> OutputValue(std::size_t output_index) const noexcept;
     [[nodiscard]] std::size_t ControlCount() const noexcept;
     [[nodiscard]] std::optional<std::size_t> FindControl(std::string_view parameter_id) const noexcept;
     [[nodiscard]] std::optional<ControlRange> GetControlRange(std::size_t control_index) const noexcept;
@@ -196,9 +202,9 @@ private:
     std::vector<double> rhs_;
     std::vector<double> solution_;
     std::vector<double> newton_previous_;
-    std::int32_t input_node_{-1};
-    std::int32_t output_node_{-1};
-    std::uint32_t input_branch_{UINT32_MAX};
+    std::vector<std::int32_t> input_nodes_;
+    std::vector<std::uint32_t> input_branches_;
+    std::vector<std::int32_t> output_nodes_;
     std::uint32_t matrix_size_{};
     std::uint32_t oversampling_{1};
     double sample_rate_hz_{};
