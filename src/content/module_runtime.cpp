@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstddef>
 #include <memory>
+#include <new>
 #include <optional>
 #include <span>
 #include <string>
@@ -604,17 +605,36 @@ private:
 
 class NamedMnaPortProcessor final : public NamedAudioPortProcessor {
 public:
-    NamedMnaPortProcessor(MnaPreparedCircuit circuit, const CircuitNetlist& netlist)
-        : circuit_(std::move(circuit)) {
+    NamedMnaPortProcessor(std::uint32_t declared_latency_samples,
+                          MnaPreparedCircuit circuit,
+                          const CircuitNetlist& netlist,
+                          const EffectDescriptor& descriptor)
+        : declared_latency_samples_(declared_latency_samples), circuit_(std::move(circuit)) {
         for (const auto& port : netlist.ports) {
             auto& list = port.direction == CircuitPortDirection::Input ? inputs_ : outputs_;
+            auto& names = port.direction == CircuitPortDirection::Input ? input_names_ : output_names_;
+            auto& maximums = port.direction == CircuitPortDirection::Input
+                ? input_max_channels_ : output_max_channels_;
             if (list.count >= list.ports.size()) {
                 valid_ = false;
                 continue;
             }
-            list.ports[list.count++] = {port.id, port.direction == CircuitPortDirection::Input
+            const auto descriptor_port = std::find_if(
+                descriptor.ports.begin(), descriptor.ports.end(), [&port](const EffectPort& candidate) {
+                    const auto direction = port.direction == CircuitPortDirection::Input
+                        ? PortDirection::Input : PortDirection::Output;
+                    return candidate.id == port.id && candidate.direction == direction;
+                });
+            if (descriptor_port == descriptor.ports.end() || descriptor_port->max_channels == 0U) {
+                valid_ = false;
+                continue;
+            }
+            const auto index = list.count++;
+            names[index] = port.id;
+            maximums[index] = descriptor_port->max_channels;
+            list.ports[index] = {names[index], port.direction == CircuitPortDirection::Input
                     ? NamedAudioPortDirection::Input : NamedAudioPortDirection::Output,
-                NamedAudioPortDomain::AudioSignal, 1U};
+                NamedAudioPortDomain::AudioSignal, 0U};
         }
         valid_ = valid_ && inputs_.count > 0U && outputs_.count > 0U;
     }
@@ -624,50 +644,89 @@ public:
 
     bool Prepare(const AudioFormat& format, std::uint32_t oversampling) override {
         prepared_ = false;
+        lane_circuits_.clear();
         if (!valid_ || !format.Validate().empty() || oversampling == 0U || oversampling > 16U ||
-            circuit_.InputCount() != inputs_.count || circuit_.OutputCount() != outputs_.count) {
+            format.channel_count == 0U || circuit_.InputCount() != inputs_.count ||
+            circuit_.OutputCount() != outputs_.count) {
             return false;
         }
-        prepared_ = circuit_.Prepare(format.sample_rate_hz);
+        for (std::size_t index = 0U; index < inputs_.count; ++index) {
+            if (input_max_channels_[index] < format.channel_count) return false;
+        }
+        for (std::size_t index = 0U; index < outputs_.count; ++index) {
+            if (output_max_channels_[index] < format.channel_count) return false;
+        }
+        try {
+            lane_circuits_.reserve(format.channel_count);
+            for (std::uint32_t channel = 0U; channel < format.channel_count; ++channel) {
+                lane_circuits_.push_back(circuit_);
+                if (!lane_circuits_.back().Prepare(format.sample_rate_hz)) {
+                    lane_circuits_.clear();
+                    return false;
+                }
+            }
+        } catch (const std::bad_alloc&) {
+            lane_circuits_.clear();
+            return false;
+        }
+        prepared_ = lane_circuits_.size() == format.channel_count;
         return prepared_;
     }
 
     bool Process(std::span<const NamedAudioPortInput> inputs,
                  std::span<NamedAudioPortOutput> outputs,
                  std::uint32_t sample_count) noexcept override {
-        if (!prepared_ || inputs.size() != inputs_.count || outputs.size() != outputs_.count) return false;
+        if (!prepared_ || inputs.size() != inputs_.count || outputs.size() != outputs_.count ||
+            lane_circuits_.empty()) return false;
         for (std::size_t index = 0U; index < inputs.size(); ++index) {
-            if (inputs[index].buffer == nullptr || inputs[index].buffer->ChannelCount() != 1U ||
+            if (inputs[index].buffer == nullptr ||
+                inputs[index].buffer->ChannelCount() != lane_circuits_.size() ||
                 inputs[index].buffer->Capacity() < sample_count) return false;
         }
         for (std::size_t index = 0U; index < outputs.size(); ++index) {
-            if (outputs[index].buffer == nullptr || outputs[index].buffer->ChannelCount() != 1U ||
+            if (outputs[index].buffer == nullptr ||
+                outputs[index].buffer->ChannelCount() != lane_circuits_.size() ||
                 outputs[index].buffer->Capacity() < sample_count) return false;
         }
 
         std::array<double, kMaximumNamedAudioPorts> input_values{};
         for (std::uint32_t sample = 0U; sample < sample_count; ++sample) {
-            for (std::size_t index = 0U; index < inputs.size(); ++index) {
-                input_values[index] = inputs[index].buffer->ChannelData(0U)[sample];
-            }
-            const auto solved = circuit_.Solve(std::span<const double>(input_values.data(), inputs.size()));
-            if (!solved.Succeeded()) return false;
-            for (std::size_t index = 0U; index < outputs.size(); ++index) {
-                const auto value = circuit_.OutputValue(index);
-                if (!value.has_value() || !std::isfinite(*value)) return false;
-                outputs[index].buffer->ChannelData(0U)[sample] = static_cast<float>(*value);
+            for (std::size_t channel = 0U; channel < lane_circuits_.size(); ++channel) {
+                for (std::size_t index = 0U; index < inputs.size(); ++index) {
+                    input_values[index] = inputs[index].buffer->ChannelData(
+                        static_cast<std::uint32_t>(channel))[sample];
+                }
+                const auto solved = lane_circuits_[channel].Solve(
+                    std::span<const double>(input_values.data(), inputs.size()));
+                if (!solved.Succeeded()) return false;
+                for (std::size_t index = 0U; index < outputs.size(); ++index) {
+                    const auto value = lane_circuits_[channel].OutputValue(index);
+                    if (!value.has_value() || !std::isfinite(*value)) return false;
+                    outputs[index].buffer->ChannelData(static_cast<std::uint32_t>(channel))[sample] =
+                        static_cast<float>(*value);
+                }
             }
         }
         return true;
     }
 
-    [[nodiscard]] std::uint32_t DeclaredLatencySamples() const noexcept override { return 0U; }
-    void Reset() noexcept override { circuit_.Reset(); }
+    [[nodiscard]] std::uint32_t DeclaredLatencySamples() const noexcept override {
+        return declared_latency_samples_;
+    }
+    void Reset() noexcept override {
+        for (auto& circuit : lane_circuits_) circuit.Reset();
+    }
 
 private:
+    std::uint32_t declared_latency_samples_{};
     MnaPreparedCircuit circuit_;
     NamedAudioPortContractList inputs_;
     NamedAudioPortContractList outputs_;
+    std::array<std::string, kMaximumNamedAudioPorts> input_names_;
+    std::array<std::string, kMaximumNamedAudioPorts> output_names_;
+    std::array<std::uint32_t, kMaximumNamedAudioPorts> input_max_channels_{};
+    std::array<std::uint32_t, kMaximumNamedAudioPorts> output_max_channels_{};
+    std::vector<MnaPreparedCircuit> lane_circuits_;
     bool valid_{true};
     bool prepared_{};
 };
@@ -750,7 +809,7 @@ std::variant<std::unique_ptr<NamedAudioPortProcessor>, ModuleRuntimeError> Creat
                     ? PortDirection::Input : PortDirection::Output;
                 return port.id == circuit_port.id && port.direction == direction;
             });
-        if (descriptor_port == package.descriptor.ports.end() || descriptor_port->max_channels != 1U) {
+        if (descriptor_port == package.descriptor.ports.end() || descriptor_port->max_channels == 0U) {
             return ModuleRuntimeError::UnsupportedPortLayout;
         }
     }
@@ -758,7 +817,8 @@ std::variant<std::unique_ptr<NamedAudioPortProcessor>, ModuleRuntimeError> Creat
         return ModuleRuntimeError::UnsupportedPortLayout;
     }
     return std::unique_ptr<NamedAudioPortProcessor>(
-        std::make_unique<NamedMnaPortProcessor>(std::move(*compiled.circuit), circuit));
+        std::make_unique<NamedMnaPortProcessor>(package.descriptor.declared_latency_samples,
+                                                std::move(*compiled.circuit), circuit, package.descriptor));
 }
 
 std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateAnalogRuntime(const ModulePackage& package,

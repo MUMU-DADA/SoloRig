@@ -115,14 +115,19 @@ void AddAudioBoundary(solo_rig::NamedPortAudioGraph& graph) {
     REQUIRE(graph.AddOutputPort("audio", solo_rig::NamedAudioPortDomain::AudioSignal, 1U));
 }
 
-std::filesystem::path CreateDifferentIoMnaPackage() {
+std::filesystem::path CreateDifferentIoMnaPackage(std::uint32_t max_channels = 1U) {
     const auto directory = std::filesystem::temp_directory_path() / "SoloRigNamedMnaPackageTest";
     std::error_code error;
     std::filesystem::remove_all(directory, error);
     std::filesystem::create_directories(directory / "logic", error);
     {
         std::ofstream manifest(directory / "manifest.json", std::ios::binary | std::ios::trunc);
-        manifest << R"({"schemaVersion":1,"moduleId":"org.mumu-dada.solorig.named-mna-mixer","displayName":"Named MNA Mixer","category":"analog-circuit","logicFile":"logic/main.json","ports":[{"id":"in-a","direction":"input","maxChannels":1},{"id":"in-b","direction":"input","maxChannels":1},{"id":"out","direction":"output","maxChannels":1}]})";
+        manifest << R"({"schemaVersion":1,"moduleId":"org.mumu-dada.solorig.named-mna-mixer","displayName":"Named MNA Mixer","category":"analog-circuit","logicFile":"logic/main.json","ports":[{"id":"in-a","direction":"input","maxChannels":)"
+                << max_channels
+                << R"(},{"id":"in-b","direction":"input","maxChannels":)"
+                << max_channels
+                << R"(},{"id":"out","direction":"output","maxChannels":)"
+                << max_channels << R"(}]})";
     }
     {
         std::ofstream logic(directory / "logic" / "main.json", std::ios::binary | std::ios::trunc);
@@ -269,7 +274,7 @@ TEST_CASE("M22-B3 external MNA package maps different named I/O counts into the 
     std::filesystem::remove_all(directory, error);
 }
 
-TEST_CASE("M22-B3 external MNA factory rejects non-scalar descriptor ports") {
+TEST_CASE("M22-B4 external MNA negotiates the declared multichannel ceiling") {
     const auto directory = CreateDifferentIoMnaPackage();
     {
         std::ofstream manifest(directory / "manifest.json", std::ios::binary | std::ios::trunc);
@@ -277,10 +282,66 @@ TEST_CASE("M22-B3 external MNA factory rejects non-scalar descriptor ports") {
     }
     const auto package = solo_rig::LoadModulePackage(directory);
     REQUIRE(package.package.has_value());
-    const auto processor = solo_rig::CreateNamedMnaPortProcessor(*package.package);
-    REQUIRE(std::holds_alternative<solo_rig::ModuleRuntimeError>(processor));
-    REQUIRE(std::get<solo_rig::ModuleRuntimeError>(processor) ==
-            solo_rig::ModuleRuntimeError::UnsupportedPortLayout);
+    auto processor = solo_rig::CreateNamedMnaPortProcessor(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor));
+
+    solo_rig::NamedPortAudioGraph graph;
+    REQUIRE(graph.AddInputPort("a", solo_rig::NamedAudioPortDomain::AudioSignal));
+    REQUIRE(graph.AddInputPort("b", solo_rig::NamedAudioPortDomain::AudioSignal));
+    REQUIRE(graph.AddOutputPort("mix", solo_rig::NamedAudioPortDomain::AudioSignal));
+    REQUIRE(graph.AddNode("mna", std::move(std::get<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor))));
+    REQUIRE(graph.Connect({"input", "a", "mna", "in-a"}));
+    REQUIRE(graph.Connect({"input", "b", "mna", "in-b"}));
+    REQUIRE(graph.Connect({"mna", "out", "output", "mix"}));
+    const auto errors = graph.Prepare({.sample_rate_hz = 192000.0,
+                                       .max_block_size = 8U,
+                                       .channel_count = 2U}, 4U);
+    REQUIRE(!errors.empty());
+    REQUIRE(errors.front() == solo_rig::NamedAudioGraphPreparationError::ProcessorRejectedFormat);
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+}
+
+TEST_CASE("M22-B4 external MNA runs independent precompiled circuits per audio channel") {
+    const auto directory = CreateDifferentIoMnaPackage(2U);
+    auto package = solo_rig::LoadModulePackage(directory);
+    REQUIRE(package.package.has_value());
+    auto processor = solo_rig::CreateNamedMnaPortProcessor(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor));
+
+    auto named_processor = std::move(std::get<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor));
+    package.package.reset();
+
+    solo_rig::NamedPortAudioGraph graph;
+    REQUIRE(graph.AddInputPort("a", solo_rig::NamedAudioPortDomain::AudioSignal));
+    REQUIRE(graph.AddInputPort("b", solo_rig::NamedAudioPortDomain::AudioSignal));
+    REQUIRE(graph.AddOutputPort("mix", solo_rig::NamedAudioPortDomain::AudioSignal));
+    REQUIRE(graph.AddNode("mna", std::move(named_processor)));
+    REQUIRE(graph.Connect({"input", "a", "mna", "in-a"}));
+    REQUIRE(graph.Connect({"input", "b", "mna", "in-b"}));
+    REQUIRE(graph.Connect({"mna", "out", "output", "mix"}));
+    REQUIRE(graph.Prepare({.sample_rate_hz = 192000.0,
+                           .max_block_size = 8U,
+                           .channel_count = 2U}, 4U).empty());
+    REQUIRE(graph.InputPort(0U).channel_count == 2U);
+    REQUIRE(graph.OutputPort(0U).channel_count == 2U);
+
+    std::array<solo_rig::AudioBuffer, 2U> inputs{
+        solo_rig::AudioBuffer(2U, 8U), solo_rig::AudioBuffer(2U, 8U)};
+    std::array<solo_rig::AudioBuffer, 1U> outputs{solo_rig::AudioBuffer(2U, 8U)};
+    inputs[0].ChannelData(0U)[0] = 1.0F;
+    inputs[0].ChannelData(1U)[0] = 2.0F;
+    REQUIRE(graph.Process(std::span<const solo_rig::AudioBuffer>(inputs),
+                          std::span<solo_rig::AudioBuffer>(outputs), 1U));
+    REQUIRE(std::fabs(outputs[0].ChannelData(0U)[0] - (1.0F / 3.0F)) < 0.001F);
+    REQUIRE(std::fabs(outputs[0].ChannelData(1U)[0] - (2.0F / 3.0F)) < 0.001F);
+
+    graph.Reset();
+    REQUIRE(graph.Process(std::span<const solo_rig::AudioBuffer>(inputs),
+                          std::span<solo_rig::AudioBuffer>(outputs), 1U));
+    REQUIRE(std::fabs(outputs[0].ChannelData(0U)[0] - (1.0F / 3.0F)) < 0.001F);
+    REQUIRE(std::fabs(outputs[0].ChannelData(1U)[0] - (2.0F / 3.0F)) < 0.001F);
+
     std::error_code error;
     std::filesystem::remove_all(directory, error);
 }
