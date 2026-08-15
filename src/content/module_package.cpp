@@ -529,6 +529,48 @@ ModulePackageLoadResult LoadExternalModuleAsset(const std::filesystem::path& ass
         return {.package = std::nullopt, .errors = {ModulePackageLoadError::ExternalAssetInvalid}};
     }
     if (display_name.empty()) display_name = absolute_asset.filename().string();
+    if (source_kind == ExternalModuleSourceKind::AnalogCircuitFile) {
+        std::ifstream circuit_stream(absolute_asset, std::ios::binary);
+        if (!circuit_stream) {
+            return {.package = std::nullopt, .errors = {ModulePackageLoadError::ExternalAssetInvalid}};
+        }
+        const std::string circuit_source((std::istreambuf_iterator<char>(circuit_stream)),
+                                         std::istreambuf_iterator<char>());
+        const auto parsed = ParseCircuitV2Json(circuit_source);
+        if (!parsed.circuit.has_value() || !parsed.errors.empty() ||
+            !parsed.circuit->parameter_bindings.empty()) {
+            // A direct circuit file carries no manifest parameter metadata, so
+            // bindings must stay in the full package format rather than being
+            // silently exposed as uneditable parameters.
+            return {.package = std::nullopt, .errors = {ModulePackageLoadError::ExternalAssetInvalid}};
+        }
+        EffectDescriptor descriptor{
+            .module_id = std::move(module_id),
+            .display_name = std::move(display_name),
+            .api_version = 1U,
+            .category = EffectCategory::AnalogCircuit,
+            .logic_entry_point = absolute_asset.filename().string(),
+            .declared_latency_samples = 0U,
+        };
+        for (const auto& port : parsed.circuit->ports) {
+            descriptor.ports.push_back({
+                .id = port.id,
+                .direction = port.direction == CircuitPortDirection::Input
+                    ? PortDirection::Input : PortDirection::Output,
+                .max_channels = 2U,
+            });
+        }
+        if (!descriptor.Validate().empty()) {
+            return {.package = std::nullopt, .errors = {ModulePackageLoadError::DescriptorInvalid}};
+        }
+        return {.package = ModulePackage{
+                     .descriptor = std::move(descriptor),
+                     .root_directory = absolute_asset.parent_path(),
+                     .logic_path = absolute_asset,
+                     .logic = *parsed.circuit,
+                 },
+                 .errors = {}};
+    }
     EffectDescriptor descriptor{
         .module_id = std::move(module_id),
         .display_name = std::move(display_name),

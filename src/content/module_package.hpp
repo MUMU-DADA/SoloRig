@@ -13,6 +13,7 @@ namespace solo_rig {
 
 enum class ExternalModuleSourceKind {
     PackageDirectory,
+    AnalogCircuitFile,
     NeuralAmpModel,
     ImpulseResponse,
 };

@@ -424,7 +424,49 @@ TEST_CASE("RigEditor exposes deterministic performance and explicit resource rec
     REQUIRE(std::ranges::any_of(restored.Catalog(), [](const auto& entry) {
         return entry.category == "NAM";
     }));
+    const auto circuit_path = std::filesystem::temp_directory_path() / "solorig-test-circuit.json";
+    {
+        std::ofstream circuit(circuit_path, std::ios::binary | std::ios::trunc);
+        circuit << R"({
+            "version": 2,
+            "schema": "circuit",
+            "referenceGround": "0",
+            "nodes": ["in", "out", "0"],
+            "ports": [
+                {"id":"input","direction":"input","node":"in"},
+                {"id":"output","direction":"output","node":"out"}
+            ],
+            "supplies": [],
+            "components": [
+                {"id":"series","type":"resistor","pins":["in","out"],"value":1000},
+                {"id":"load","type":"resistor","pins":["out","0"],"value":1000}
+            ],
+            "solver": {
+                "method":"modified-nodal-analysis",
+                "integration":"backward-euler",
+                "oversampling":1,
+                "convergence":{"maxIterations":16,"absoluteTolerance":1e-9,"relativeTolerance":1e-6}
+            }
+        })";
+    }
+    const auto imported_circuit = editor.ImportResource(circuit_path);
+    REQUIRE(imported_circuit.success);
+    REQUIRE(editor.ExportPreset().external_module_packages.size() == 2U);
+    REQUIRE(editor.Catalog().size() == 4U);
+    REQUIRE(std::ranges::any_of(editor.Catalog(), [](const auto& entry) {
+        return entry.category == "Analog" && entry.display_name == "external circuit: solorig-test-circuit.json";
+    }));
+    const auto circuit_preset_path = std::filesystem::temp_directory_path() / "solorig-direct-circuit.srig";
+    REQUIRE(editor.SaveTo(circuit_preset_path).success);
+    solo_rig::RigEditorViewModel restored_circuit;
+    REQUIRE(restored_circuit.LoadFrom(circuit_preset_path).success);
+    REQUIRE(restored_circuit.Catalog().size() == 4U);
+    REQUIRE(std::ranges::any_of(restored_circuit.Catalog(), [](const auto& entry) {
+        return entry.category == "Analog" && entry.display_name == "solorig-test-circuit.json";
+    }));
     std::error_code cleanup;
     std::filesystem::remove(path, cleanup);
+    std::filesystem::remove(circuit_path, cleanup);
     std::filesystem::remove(preset_path, cleanup);
+    std::filesystem::remove(circuit_preset_path, cleanup);
 }

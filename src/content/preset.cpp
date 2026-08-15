@@ -46,6 +46,8 @@ std::string ExternalModuleSourceKindName(ExternalModuleSourceKind source_kind) {
     switch (source_kind) {
     case ExternalModuleSourceKind::PackageDirectory:
         return "package";
+    case ExternalModuleSourceKind::AnalogCircuitFile:
+        return "circuit";
     case ExternalModuleSourceKind::NeuralAmpModel:
         return "nam";
     case ExternalModuleSourceKind::ImpulseResponse:
@@ -56,6 +58,7 @@ std::string ExternalModuleSourceKindName(ExternalModuleSourceKind source_kind) {
 
 std::optional<ExternalModuleSourceKind> ParseExternalModuleSourceKind(std::string_view text) {
     if (text == "package") return ExternalModuleSourceKind::PackageDirectory;
+    if (text == "circuit") return ExternalModuleSourceKind::AnalogCircuitFile;
     if (text == "nam") return ExternalModuleSourceKind::NeuralAmpModel;
     if (text == "ir") return ExternalModuleSourceKind::ImpulseResponse;
     return std::nullopt;

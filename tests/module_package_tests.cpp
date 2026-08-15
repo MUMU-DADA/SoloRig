@@ -64,6 +64,46 @@ TEST_CASE("LoadModulePackage loads metadata and optional custom pedal appearance
     REQUIRE(result.package->custom_skin_path.has_value());
 }
 
+TEST_CASE("LoadExternalModuleAsset validates and packages a direct Circuit v2 file") {
+    const auto path = std::filesystem::temp_directory_path() / "solorig-direct-circuit.json";
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << R"({
+            "version": 2,
+            "schema": "circuit",
+            "referenceGround": "0",
+            "nodes": ["in", "out", "0"],
+            "ports": [
+                {"id":"input","direction":"input","node":"in"},
+                {"id":"output","direction":"output","node":"out"}
+            ],
+            "supplies": [],
+            "components": [
+                {"id":"series","type":"resistor","pins":["in","out"],"value":1000},
+                {"id":"load","type":"resistor","pins":["out","0"],"value":1000}
+            ],
+            "solver": {
+                "method":"modified-nodal-analysis",
+                "integration":"backward-euler",
+                "oversampling":1,
+                "convergence":{"maxIterations":16,"absoluteTolerance":1e-9,"relativeTolerance":1e-6}
+            }
+        })";
+    }
+    const auto result = solo_rig::LoadExternalModuleAsset(
+        path,
+        solo_rig::ExternalModuleSourceKind::AnalogCircuitFile,
+        "org.mumu-dada.solorig.imported.direct-circuit",
+        "Direct Circuit");
+    REQUIRE(result.errors.empty());
+    REQUIRE(result.package.has_value());
+    REQUIRE(result.package->descriptor.category == solo_rig::EffectCategory::AnalogCircuit);
+    REQUIRE(result.package->descriptor.ports.size() == 2U);
+    REQUIRE(std::holds_alternative<solo_rig::CircuitNetlist>(result.package->logic));
+    std::error_code cleanup_error;
+    std::filesystem::remove(path, cleanup_error);
+}
+
 TEST_CASE("LoadModulePackage parses an analog circuit topology for component simulation") {
     const auto directory = CreateTestPackage(R"({
         "schemaVersion": 1,

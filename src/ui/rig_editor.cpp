@@ -637,6 +637,7 @@ EditorFileResult RigEditorViewModel::ImportResource(const std::filesystem::path&
         source_kind = ExternalModuleSourceKind::ImpulseResponse;
     } else if (extension == ".json") {
         label = "external circuit";
+        source_kind = ExternalModuleSourceKind::AnalogCircuitFile;
     } else {
         SetFileStatus("Resource import failed: unsupported resource type.");
         return {.success = false, .error = EditorFileError::InvalidExtension, .message = file_status_};
