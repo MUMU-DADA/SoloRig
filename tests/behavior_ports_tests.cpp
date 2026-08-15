@@ -126,3 +126,17 @@ TEST_CASE("M18-D2e3 rejects unauthorized models and capacity atomically") {
     REQUIRE(solo_rig::CompileTypedBehaviorGraph(nodes, routes).error ==
             solo_rig::BehaviorPortCompileError::CapacityExceeded);
 }
+
+TEST_CASE("M20-A1 typed graph accepts distinct explicit boundary domains") {
+    const auto nodes = std::vector<solo_rig::BehaviorGraphNodeSpec>{
+        Node("envelope", "envelope", "generic-envelope-v1"),
+        Node("opto", "optocoupler", "generic-optocoupler-v1")};
+    const auto routes = std::vector<solo_rig::BehaviorPortRouteSpec>{
+        {"input", "detector", "envelope", "detector"},
+        {"envelope", "out", "output", "control"},
+        {"input", "emitter", "opto", "emitter"},
+        {"opto", "out", "output", "resistance"}};
+    const auto result = solo_rig::CompileTypedBehaviorGraph(nodes, routes);
+    REQUIRE(result.error == solo_rig::BehaviorPortCompileError::None);
+    REQUIRE(result.plan.has_value());
+}

@@ -1,7 +1,12 @@
 #pragma once
 
 #include "content/behavior_ports.hpp"
+#include "dsp/generic_bbd.hpp"
+#include "dsp/generic_envelope.hpp"
 #include "dsp/generic_lfo.hpp"
+#include "dsp/generic_optocoupler.hpp"
+#include "dsp/generic_spring.hpp"
+#include "dsp/generic_vco.hpp"
 #include "dsp/generic_vca.hpp"
 
 #include <array>
@@ -23,6 +28,19 @@ enum class TypedBehaviorRuntimeError {
     CapacityExceeded,
 };
 
+struct TypedBehaviorInput final {
+    double audio{};
+    double control{};
+    double detector{};
+    double emitter{};
+};
+
+struct TypedBehaviorOutput final {
+    double audio{};
+    double control{};
+    double resistance{};
+};
+
 class TypedBehaviorGraphRuntime final {
 public:
     TypedBehaviorGraphRuntime() = default;
@@ -35,6 +53,8 @@ public:
                                                     double sample_rate_hz,
                                                     std::uint32_t oversampling) noexcept;
     [[nodiscard]] TypedBehaviorRuntimeError SetSampleRate(double sample_rate_hz) noexcept;
+    [[nodiscard]] TypedBehaviorRuntimeError Process(const TypedBehaviorInput& input,
+                                                    TypedBehaviorOutput& output) noexcept;
     [[nodiscard]] TypedBehaviorRuntimeError Process(double audio_input,
                                                     double& audio_output) noexcept;
     void Reset() noexcept;
@@ -43,28 +63,30 @@ public:
     [[nodiscard]] std::size_t Size() const noexcept { return size_; }
 
 private:
-    using Block = std::variant<GenericLfoRuntime, GenericVcaRuntime>;
+    using Block = std::variant<GenericBbdRuntime, GenericVcoRuntime, GenericVcaRuntime,
+        GenericEnvelopeRuntime, GenericLfoRuntime, GenericOptocouplerRuntime,
+        GenericSpringRuntime>;
     static constexpr std::size_t kExternal = static_cast<std::size_t>(-1);
+    static constexpr std::size_t kMissing = kExternal - 1U;
+
+    struct Connection final {
+        std::size_t source{kMissing};
+        BehaviorPortDomain domain{BehaviorPortDomain::AudioSignal};
+    };
 
     struct Slot {
         Block block{};
         BehaviorKind kind{BehaviorKind::Lfo};
-        std::size_t audio_source{kExternal};
-        std::size_t control_source{kExternal};
+        std::array<Connection, 4U> inputs{};
     };
 
     [[nodiscard]] TypedBehaviorRuntimeError PrepareSlot(Slot& slot,
                                                         const BehaviorGraphPlanNode& node,
                                                         double sample_rate_hz,
                                                         std::uint32_t oversampling) noexcept;
-    [[nodiscard]] TypedBehaviorRuntimeError ProcessSlot(Slot& slot,
-                                                        double audio_input,
-                                                        double control_input,
-                                                        double& output) noexcept;
-
     std::array<Slot, kMaximumBehaviorGraphNodes> slots_{};
+    std::array<Connection, 3U> outputs_{};
     std::size_t size_{};
-    std::size_t output_index_{};
     bool prepared_{};
 };
 

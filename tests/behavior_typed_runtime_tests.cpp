@@ -73,14 +73,78 @@ TEST_CASE("M18-D2e4 typed runtime rejects wrong domains, unsupported blocks and 
     REQUIRE(runtime.Process(std::numeric_limits<double>::quiet_NaN(), output) ==
             solo_rig::TypedBehaviorRuntimeError::NonFinite);
     plan = VcaPlan();
-    plan.nodes[0].lowering.kind = solo_rig::BehaviorKind::Envelope;
-    plan.nodes[0].lowering.model_id = "generic-envelope-v1";
+    plan.nodes[0].lowering.model_id = "blocked.lfo.template";
     REQUIRE(runtime.Prepare(plan, 48000.0, 1U) ==
             solo_rig::TypedBehaviorRuntimeError::UnsupportedBlock);
     plan = VcaPlan();
     plan.nodes[1].lowering.model_id = "blocked.lfo.template";
     REQUIRE(runtime.Prepare(plan, 48000.0, 1U) ==
             solo_rig::TypedBehaviorRuntimeError::UnsupportedBlock);
+}
+
+TEST_CASE("M20-A1 typed runtime executes explicit audio and detector sidechain") {
+    const auto nodes = std::vector<solo_rig::BehaviorGraphNodeSpec>{
+        Node("envelope", "envelope", "generic-envelope-v1"),
+        Node("vca", "vca", "generic-vca-v1")};
+    const auto routes = std::vector<solo_rig::BehaviorPortRouteSpec>{
+        {"input", "audio", "vca", "audio_in"},
+        {"input", "detector", "envelope", "detector"},
+        {"envelope", "out", "vca", "control"},
+        {"vca", "out", "output", "audio"}};
+    const auto compiled = solo_rig::CompileTypedBehaviorGraph(nodes, routes);
+    REQUIRE(compiled.error == solo_rig::BehaviorPortCompileError::None);
+    solo_rig::TypedBehaviorGraphRuntime runtime;
+    REQUIRE(runtime.Prepare(*compiled.plan, 192000.0, 4U) ==
+            solo_rig::TypedBehaviorRuntimeError::None);
+    solo_rig::TypedBehaviorInput input{.audio = 0.5, .detector = 0.75};
+    solo_rig::TypedBehaviorOutput first{};
+    solo_rig::TypedBehaviorOutput second{};
+    REQUIRE(runtime.Process(input, first) == solo_rig::TypedBehaviorRuntimeError::None);
+    runtime.Reset();
+    REQUIRE(runtime.Process(input, second) == solo_rig::TypedBehaviorRuntimeError::None);
+    REQUIRE(first.audio == second.audio);
+    REQUIRE(std::isfinite(first.audio));
+}
+
+TEST_CASE("M20-A1 typed runtime executes VCO to BBD and explicit control input") {
+    const auto nodes = std::vector<solo_rig::BehaviorGraphNodeSpec>{
+        Node("vco", "vco", "generic-vco-v1"),
+        Node("bbd", "bbd", "generic-bbd-v1")};
+    const auto routes = std::vector<solo_rig::BehaviorPortRouteSpec>{
+        {"input", "control", "vco", "control"},
+        {"vco", "out", "bbd", "in"},
+        {"bbd", "out", "output", "audio"}};
+    const auto compiled = solo_rig::CompileTypedBehaviorGraph(nodes, routes);
+    REQUIRE(compiled.error == solo_rig::BehaviorPortCompileError::None);
+    solo_rig::TypedBehaviorGraphRuntime runtime;
+    REQUIRE(runtime.Prepare(*compiled.plan, 48000.0, 1U) ==
+            solo_rig::TypedBehaviorRuntimeError::None);
+    solo_rig::TypedBehaviorOutput output{};
+    REQUIRE(runtime.Process({.control = 0.0}, output) ==
+            solo_rig::TypedBehaviorRuntimeError::None);
+    REQUIRE(std::isfinite(output.audio));
+}
+
+TEST_CASE("M20-A1 typed runtime exposes explicit control and resistance outputs") {
+    const auto nodes = std::vector<solo_rig::BehaviorGraphNodeSpec>{
+        Node("envelope", "envelope", "generic-envelope-v1"),
+        Node("opto", "optocoupler", "generic-optocoupler-v1")};
+    const auto routes = std::vector<solo_rig::BehaviorPortRouteSpec>{
+        {"input", "detector", "envelope", "detector"},
+        {"envelope", "out", "output", "control"},
+        {"input", "emitter", "opto", "emitter"},
+        {"opto", "out", "output", "resistance"}};
+    const auto compiled = solo_rig::CompileTypedBehaviorGraph(nodes, routes);
+    REQUIRE(compiled.error == solo_rig::BehaviorPortCompileError::None);
+    solo_rig::TypedBehaviorGraphRuntime runtime;
+    REQUIRE(runtime.Prepare(*compiled.plan, 96000.0, 2U) ==
+            solo_rig::TypedBehaviorRuntimeError::None);
+    solo_rig::TypedBehaviorOutput output{};
+    REQUIRE(runtime.Process({.detector = 0.5, .emitter = 2.0}, output) ==
+            solo_rig::TypedBehaviorRuntimeError::None);
+    REQUIRE(std::isfinite(output.control));
+    REQUIRE(std::isfinite(output.resistance));
+    REQUIRE(output.resistance > 0.0);
 }
 
 TEST_CASE("M18-D2e4 typed runtime rejects malformed routes atomically") {

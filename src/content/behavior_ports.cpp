@@ -37,6 +37,21 @@ const BehaviorPortContract* FindPort(const BehaviorPortContractList& ports,
     return nullptr;
 }
 
+std::optional<std::size_t> BoundaryInputIndex(std::string_view name) noexcept {
+    if (name == "audio") return 0U;
+    if (name == "control") return 1U;
+    if (name == "detector") return 2U;
+    if (name == "emitter") return 3U;
+    return std::nullopt;
+}
+
+std::optional<std::size_t> BoundaryOutputIndex(std::string_view name) noexcept {
+    if (name == "audio") return 0U;
+    if (name == "control") return 1U;
+    if (name == "resistance") return 2U;
+    return std::nullopt;
+}
+
 bool Compatible(BehaviorPortDomain source, BehaviorPortDomain destination) noexcept {
     if (source == destination) return true;
     return source == BehaviorPortDomain::AudioSignal &&
@@ -99,8 +114,8 @@ BehaviorPortCompileResult CompileTypedBehaviorGraph(
     std::vector<std::size_t> indegree(nodes.size(), 0U);
     std::vector<std::size_t> incoming(nodes.size() * kMaximumTypedPorts, 0U);
     std::vector<std::size_t> outgoing(nodes.size() * kMaximumTypedPorts, 0U);
-    bool external_input_seen = false;
-    bool external_output_seen = false;
+    std::array<bool, 4U> external_input_seen{};
+    std::array<bool, 3U> external_output_seen{};
     for (std::size_t route_index = 0U; route_index < routes.size(); ++route_index) {
         const auto& route = routes[route_index];
         if (route.source.empty() || route.source_port.empty() || route.destination.empty() ||
@@ -130,17 +145,17 @@ BehaviorPortCompileResult CompileTypedBehaviorGraph(
         BehaviorPortContract source_port{};
         BehaviorPortContract destination_port{};
         if (route.source == "input") {
-            if (route.source_port == "audio") {
-                source_port = {"audio", BehaviorPortDirection::Output,
-                    BehaviorPortDomain::AudioSignal};
-            } else if (route.source_port == "emitter") {
-                source_port = {"emitter", BehaviorPortDirection::Output,
-                    BehaviorPortDomain::EmitterDrive};
-            } else {
-                return {.error = BehaviorPortCompileError::UnknownPort};
+            const auto input_index = BoundaryInputIndex(route.source_port);
+            if (!input_index.has_value()) return {.error = BehaviorPortCompileError::UnknownPort};
+            const auto domain = route.source_port == "audio" ? BehaviorPortDomain::AudioSignal :
+                route.source_port == "control" ? BehaviorPortDomain::ControlSignal :
+                route.source_port == "detector" ? BehaviorPortDomain::DetectorInput :
+                    BehaviorPortDomain::EmitterDrive;
+            source_port = {route.source_port, BehaviorPortDirection::Output, domain};
+            if (external_input_seen[*input_index]) {
+                return {.error = BehaviorPortCompileError::FanOutUnsupported};
             }
-            if (external_input_seen) return {.error = BehaviorPortCompileError::FanOutUnsupported};
-            external_input_seen = true;
+            external_input_seen[*input_index] = true;
         } else {
             const auto ports = BehaviorPortsForKind(candidate.nodes[*source_index].lowering.kind);
             const auto* found = FindPort(ports, route.source_port);
@@ -155,16 +170,18 @@ BehaviorPortCompileResult CompileTypedBehaviorGraph(
             }
         }
         if (route.destination == "output") {
-            if (route.destination_port != "audio" && route.destination_port != "control" &&
-                route.destination_port != "resistance") {
+            const auto output_index = BoundaryOutputIndex(route.destination_port);
+            if (!output_index.has_value()) {
                 return {.error = BehaviorPortCompileError::UnknownPort};
             }
             destination_port = {route.destination_port, BehaviorPortDirection::Input,
                 route.destination_port == "audio" ? BehaviorPortDomain::AudioSignal :
                 route.destination_port == "control" ? BehaviorPortDomain::ControlSignal :
                     BehaviorPortDomain::Resistance};
-            if (external_output_seen) return {.error = BehaviorPortCompileError::FanInUnsupported};
-            external_output_seen = true;
+            if (external_output_seen[*output_index]) {
+                return {.error = BehaviorPortCompileError::FanInUnsupported};
+            }
+            external_output_seen[*output_index] = true;
         } else {
             const auto ports = BehaviorPortsForKind(candidate.nodes[*destination_index].lowering.kind);
             const auto* found = FindPort(ports, route.destination_port);
@@ -184,7 +201,13 @@ BehaviorPortCompileResult CompileTypedBehaviorGraph(
         }
     }
 
-    if (!external_input_seen || !external_output_seen) {
+    const auto has_external_input = std::any_of(external_input_seen.begin(),
+                                                external_input_seen.end(),
+                                                [](bool seen) { return seen; });
+    const auto has_external_output = std::any_of(external_output_seen.begin(),
+                                                 external_output_seen.end(),
+                                                 [](bool seen) { return seen; });
+    if (!has_external_input || !has_external_output) {
         return {.error = BehaviorPortCompileError::DisconnectedNode};
     }
     std::vector<std::size_t> ready;
