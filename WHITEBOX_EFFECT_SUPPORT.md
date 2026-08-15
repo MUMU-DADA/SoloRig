@@ -90,7 +90,7 @@
 - `NamedPortAudioGraph::Process` 和 `NamedAudioPortProcessor::Process` 的 `noexcept` 边界已用编译期断言锁定；MNA `ProcessContract` 继续明确禁止分配、锁、文件读取和 JSON 解析，Compile/Prepare 负责全部电路存储与状态准备。
 - 命名 MNA 图在未 Prepare、非法 oversampling（0/17）、超过预分配 block、非有限输入时稳定返回失败；下层 MNA 的 singular matrix 与 non-convergent 结果通过命名端口处理器向 graph 调用方传播，不输出静默替代值。
 - 测试继续使用 192 kHz / Float32 / 4x oversampling，并保留有限输入成功路径；与 M22-B4 的动态电源/扬声器负载和 Reset 测试共同覆盖 Compile → Prepare → Process → Reset 的真实边界。
-- 提交验证：核心 `569/569`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI 和 C# contract 全部通过；本轮构建 manifest MD5 为 `56ce310300830bbf02a3b31c3b60ca2a`。该阶段仍不宣称硬件实时负载、真实 ASIO 或参考等价验证。
+- 提交验证：核心 `569/569`、CTest `5/5`、VST3 Validator `47/47`、Windows UI、backend ABI 和 C# contract 全部通过；当前复验构建 manifest MD5 为 `AF296503E4F4A3BF9BBC4ED859BA5242`。该阶段仍不宣称硬件实时负载、真实 ASIO 或参考等价验证。
 
 ## 当前状态补充：M20-A1
 
