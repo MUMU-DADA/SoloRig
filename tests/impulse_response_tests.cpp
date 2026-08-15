@@ -136,6 +136,24 @@ TEST_CASE("Wave IR import decodes IEEE Float32 samples without changing amplitud
     REQUIRE(impulse.mono_samples[1] == -0.5F);
 }
 
+TEST_CASE("Impulse response import resamples a 48 kHz cabinet for a 96 kHz processing format") {
+    solo_rig::ImpulseResponseConvolver convolver;
+    solo_rig::ImportedImpulseResponse imported{
+        .sample_rate_hz = 48000.0,
+        .mono_samples = {1.0F, 0.5F},
+    };
+    solo_rig::AudioBuffer input(1, 8);
+    solo_rig::AudioBuffer output(1, 8);
+    input.ChannelData(0)[0] = 1.0F;
+
+    REQUIRE(convolver.LoadImportedImpulseResponse(imported).empty());
+    REQUIRE(convolver.Prepare({.sample_rate_hz = 96000.0, .max_block_size = 8, .channel_count = 1}));
+    convolver.Process(input, output, 3);
+    REQUIRE(output.ChannelData(0)[0] == 1.0F);
+    REQUIRE(std::fabs(output.ChannelData(0)[1] - 0.75F) < 0.0001F);
+    REQUIRE(output.ChannelData(0)[2] == 0.5F);
+}
+
 TEST_CASE("Wave IR import rejects malformed, unsupported and oversized external files") {
     const auto malformed = std::filesystem::temp_directory_path() / "SoloRigMalformedIrTest.wav";
     {

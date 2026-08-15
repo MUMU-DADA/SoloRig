@@ -61,7 +61,16 @@ struct DigitalAlgorithmLogic {
     std::vector<DigitalAlgorithmOperation> operations;
 };
 
-using ModuleLogic = std::variant<std::monostate, AnalogCircuitLogic, CircuitNetlist, DigitalAlgorithmLogic>;
+struct NeuralAmpModelLogic {
+    std::filesystem::path model_path;
+};
+
+struct ImpulseResponseLogic {
+    std::filesystem::path impulse_response_path;
+};
+
+using ModuleLogic = std::variant<std::monostate, AnalogCircuitLogic, CircuitNetlist, DigitalAlgorithmLogic,
+                                 NeuralAmpModelLogic, ImpulseResponseLogic>;
 
 enum class ModulePackageLoadError {
     MissingManifest,

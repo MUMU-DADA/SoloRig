@@ -55,6 +55,7 @@ private:
     std::optional<NamModelInfo> model_info_;
     std::vector<float*> input_channels_;
     std::vector<float*> output_channels_;
+    bool prepared_{};
 };
 
 } // namespace solo_rig

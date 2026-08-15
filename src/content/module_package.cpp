@@ -2,6 +2,8 @@
 
 #include "content/json.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <iterator>
@@ -285,6 +287,34 @@ std::optional<DigitalAlgorithmLogic> ParseDigitalAlgorithmLogic(const JsonValue:
 std::optional<ModulePackageLoadError> ParseModuleLogic(const std::filesystem::path& logic_path,
                                                        const EffectDescriptor& descriptor,
                                                        ModuleLogic& logic) {
+    if (descriptor.category == EffectCategory::NeuralAmpModel) {
+        if (!std::filesystem::is_regular_file(logic_path)) {
+            return ModulePackageLoadError::MissingLogicFile;
+        }
+        auto extension = logic_path.extension().string();
+        std::ranges::transform(extension, extension.begin(), [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+        if (extension != ".nam") {
+            return ModulePackageLoadError::InvalidLogicDefinition;
+        }
+        logic = NeuralAmpModelLogic{.model_path = logic_path};
+        return std::nullopt;
+    }
+    if (descriptor.category == EffectCategory::ImpulseResponse) {
+        if (!std::filesystem::is_regular_file(logic_path)) {
+            return ModulePackageLoadError::MissingLogicFile;
+        }
+        auto extension = logic_path.extension().string();
+        std::ranges::transform(extension, extension.begin(), [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+        if (extension != ".wav") {
+            return ModulePackageLoadError::InvalidLogicDefinition;
+        }
+        logic = ImpulseResponseLogic{.impulse_response_path = logic_path};
+        return std::nullopt;
+    }
     if (descriptor.category != EffectCategory::AnalogCircuit && descriptor.category != EffectCategory::DigitalAlgorithm) {
         logic = std::monostate{};
         return std::nullopt;

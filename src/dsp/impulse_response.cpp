@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <new>
 
 namespace solo_rig {
 
@@ -149,6 +150,7 @@ ImpulseResponseConvolver::ImpulseResponseConvolver(std::uint32_t maximum_ir_leng
     : maximum_ir_length_(maximum_ir_length) {}
 
 std::vector<ImpulseResponseLoadError> ImpulseResponseConvolver::LoadMonoImpulseResponse(std::span<const float> samples) {
+    prepared_ = false;
     std::vector<ImpulseResponseLoadError> errors;
     if (samples.empty()) {
         errors.push_back(ImpulseResponseLoadError::EmptyImpulseResponse);
@@ -166,25 +168,72 @@ std::vector<ImpulseResponseLoadError> ImpulseResponseConvolver::LoadMonoImpulseR
         return errors;
     }
 
+    source_sample_rate_hz_ = 0.0;
+    source_impulse_response_.assign(samples.begin(), samples.end());
     impulse_response_.assign(samples.begin(), samples.end());
     history_.clear();
     history_position_ = 0;
     return {};
 }
 
+std::vector<ImpulseResponseLoadError> ImpulseResponseConvolver::LoadImportedImpulseResponse(
+    const ImportedImpulseResponse& imported) {
+    if (!std::isfinite(imported.sample_rate_hz) || imported.sample_rate_hz <= 0.0) {
+        return {ImpulseResponseLoadError::InvalidSampleRate};
+    }
+    const auto errors = LoadMonoImpulseResponse(imported.mono_samples);
+    if (!errors.empty()) {
+        return errors;
+    }
+    source_sample_rate_hz_ = imported.sample_rate_hz;
+    return {};
+}
+
 bool ImpulseResponseConvolver::Prepare(const AudioFormat& format) {
+    prepared_ = false;
     if (!format.Validate().empty() || impulse_response_.empty()) {
         return false;
     }
-    channel_count_ = format.channel_count;
-    history_.assign(static_cast<std::size_t>(channel_count_) * impulse_response_.size(), 0.0F);
-    history_position_ = 0;
-    return true;
+    try {
+        if (source_sample_rate_hz_ > 0.0 &&
+            std::fabs(source_sample_rate_hz_ - format.sample_rate_hz) > 0.001) {
+            const auto source_length = source_impulse_response_.size();
+            if (source_length == 0U) return false;
+            const auto target_length = static_cast<std::size_t>(
+                std::floor((static_cast<double>(source_length - 1U) * format.sample_rate_hz /
+                            source_sample_rate_hz_))) + 1U;
+            if (target_length == 0U || target_length > maximum_ir_length_) return false;
+            impulse_response_.resize(target_length);
+            const auto ratio = source_sample_rate_hz_ / format.sample_rate_hz;
+            for (std::size_t index = 0U; index < target_length; ++index) {
+                const auto source_position = static_cast<double>(index) * ratio;
+                const auto left = static_cast<std::size_t>(std::floor(source_position));
+                const auto right = std::min(left + 1U, source_length - 1U);
+                const auto fraction = static_cast<float>(source_position - static_cast<double>(left));
+                impulse_response_[index] = source_impulse_response_[left] +
+                    (source_impulse_response_[right] - source_impulse_response_[left]) * fraction;
+            }
+        } else if (source_sample_rate_hz_ > 0.0) {
+            impulse_response_ = source_impulse_response_;
+        }
+        channel_count_ = format.channel_count;
+        history_.assign(static_cast<std::size_t>(channel_count_) * impulse_response_.size(), 0.0F);
+        history_position_ = 0;
+        prepared_ = true;
+        return true;
+    } catch (const std::bad_alloc&) {
+        prepared_ = false;
+        return false;
+    }
 }
 
 void ImpulseResponseConvolver::Process(const AudioBuffer& input,
                                        AudioBuffer& output,
                                        std::uint32_t sample_count) noexcept {
+    if (!prepared_ || sample_count == 0U || sample_count > input.Capacity() || sample_count > output.Capacity() ||
+        input.ChannelCount() != channel_count_ || output.ChannelCount() != channel_count_) {
+        return;
+    }
     const auto ir_size = static_cast<std::uint32_t>(impulse_response_.size());
     for (std::uint32_t sample = 0; sample < sample_count; ++sample) {
         for (std::uint32_t channel = 0; channel < channel_count_; ++channel) {

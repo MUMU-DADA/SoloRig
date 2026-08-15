@@ -15,6 +15,7 @@ enum class ImpulseResponseLoadError {
     EmptyImpulseResponse,
     TooLong,
     NonFiniteSample,
+    InvalidSampleRate,
 };
 
 enum class ImpulseResponseFileLoadError {
@@ -47,6 +48,8 @@ public:
     explicit ImpulseResponseConvolver(std::uint32_t maximum_ir_length = 8192);
 
     [[nodiscard]] std::vector<ImpulseResponseLoadError> LoadMonoImpulseResponse(std::span<const float> samples);
+    [[nodiscard]] std::vector<ImpulseResponseLoadError> LoadImportedImpulseResponse(
+        const ImportedImpulseResponse& imported);
 
     bool Prepare(const AudioFormat& format) override;
     void Process(const AudioBuffer& input, AudioBuffer& output, std::uint32_t sample_count) noexcept override;
@@ -55,10 +58,13 @@ public:
 
 private:
     std::uint32_t maximum_ir_length_;
+    double source_sample_rate_hz_{};
+    std::vector<float> source_impulse_response_;
     std::vector<float> impulse_response_;
     std::vector<float> history_;
     std::uint32_t history_position_{};
     std::uint32_t channel_count_{};
+    bool prepared_{};
 };
 
 } // namespace solo_rig

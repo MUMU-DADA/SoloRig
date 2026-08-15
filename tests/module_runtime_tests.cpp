@@ -5,11 +5,15 @@
 #include "test_framework.hpp"
 
 #include <cmath>
+#include <array>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 namespace {
 
@@ -34,6 +38,37 @@ void RemoveRuntimePackage(const std::filesystem::path& directory) {
     std::filesystem::remove_all(directory, error);
 }
 
+void AppendU16(std::vector<std::uint8_t>& bytes, std::uint16_t value) {
+    bytes.push_back(static_cast<std::uint8_t>(value & 0xFFU));
+    bytes.push_back(static_cast<std::uint8_t>((value >> 8U) & 0xFFU));
+}
+
+void AppendU32(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
+    for (std::uint32_t index = 0U; index < 4U; ++index) {
+        bytes.push_back(static_cast<std::uint8_t>((value >> (index * 8U)) & 0xFFU));
+    }
+}
+
+void WriteMonoPcm16Wave(const std::filesystem::path& path, std::span<const std::int16_t> samples) {
+    std::vector<std::uint8_t> bytes;
+    const auto data_size = static_cast<std::uint32_t>(samples.size() * sizeof(std::int16_t));
+    bytes.insert(bytes.end(), {'R', 'I', 'F', 'F'});
+    AppendU32(bytes, 36U + data_size);
+    bytes.insert(bytes.end(), {'W', 'A', 'V', 'E', 'f', 'm', 't', ' '});
+    AppendU32(bytes, 16U);
+    AppendU16(bytes, 1U);
+    AppendU16(bytes, 1U);
+    AppendU32(bytes, 48000U);
+    AppendU32(bytes, 96000U);
+    AppendU16(bytes, 2U);
+    AppendU16(bytes, 16U);
+    bytes.insert(bytes.end(), {'d', 'a', 't', 'a'});
+    AppendU32(bytes, data_size);
+    for (const auto sample : samples) AppendU16(bytes, static_cast<std::uint16_t>(sample));
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+}
+
 solo_rig::AudioFormat TestFormat() {
     return {.sample_rate_hz = 48000.0, .max_block_size = 8, .channel_count = 1};
 }
@@ -45,6 +80,80 @@ std::string ReadWhiteboxFixture(std::string_view name) {
 }
 
 } // namespace
+
+TEST_CASE("External NAM package loads an A2 asset through the module runtime") {
+    const auto directory = std::filesystem::temp_directory_path() / "SoloRigNamModulePackageTest";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    std::filesystem::create_directories(directory, error);
+    const auto source_root = std::filesystem::path(SOLO_RIG_SOURCE_DIRECTORY) / "third_party" /
+        "NeuralAmpModelerCore" / "example_models";
+    std::filesystem::copy_file(source_root / "wavenet_a2_max.nam", directory / "model.nam",
+                               std::filesystem::copy_options::overwrite_existing, error);
+    {
+        std::ofstream manifest(directory / "manifest.json", std::ios::binary | std::ios::trunc);
+        manifest << R"({"schemaVersion":1,"moduleId":"org.mumu-dada.solorig.external-nam-a2","displayName":"External NAM A2","category":"neural-amp-model","logicFile":"model.nam","ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}]})";
+    }
+    const auto package = solo_rig::LoadModulePackage(directory);
+    REQUIRE(package.package.has_value());
+    auto runtime = solo_rig::CreateModuleRuntime(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    solo_rig::AudioBuffer input(1, 8);
+    solo_rig::AudioBuffer output(1, 8);
+    input.ChannelData(0)[0] = 0.1F;
+    REQUIRE(processor->Prepare(TestFormat()));
+    processor->Process(input, output, 8);
+    REQUIRE(std::isfinite(output.ChannelData(0)[0]));
+    REQUIRE(!processor->SetParameter("missing", 0.0F));
+    RemoveRuntimePackage(directory);
+}
+
+TEST_CASE("External impulse-response package loads a WAV asset through the module runtime") {
+    const auto directory = std::filesystem::temp_directory_path() / "SoloRigIrModulePackageTest";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    std::filesystem::create_directories(directory, error);
+    WriteMonoPcm16Wave(directory / "cabinet.wav", std::array<std::int16_t, 2>{32767, 16384});
+    {
+        std::ofstream manifest(directory / "manifest.json", std::ios::binary | std::ios::trunc);
+        manifest << R"({"schemaVersion":1,"moduleId":"org.mumu-dada.solorig.external-cabinet","displayName":"External Cabinet","category":"impulse-response","logicFile":"cabinet.wav","ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}]})";
+    }
+    const auto package = solo_rig::LoadModulePackage(directory);
+    REQUIRE(package.package.has_value());
+    auto runtime = solo_rig::CreateModuleRuntime(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    solo_rig::AudioBuffer input(1, 8);
+    solo_rig::AudioBuffer output(1, 8);
+    input.ChannelData(0)[0] = 1.0F;
+    REQUIRE(processor->Prepare(TestFormat()));
+    processor->Process(input, output, 2);
+    REQUIRE(std::fabs(output.ChannelData(0)[0] - 32767.0F / 32768.0F) < 0.0001F);
+    REQUIRE(std::fabs(output.ChannelData(0)[1] - 0.5F) < 0.0001F);
+    REQUIRE(!processor->SetParameter("missing", 0.0F));
+    RemoveRuntimePackage(directory);
+}
+
+TEST_CASE("External NAM and impulse-response packages reject missing or wrong asset extensions") {
+    const auto missing_nam = CreateRuntimePackage(
+        R"({"schemaVersion":1,"moduleId":"org.mumu-dada.solorig.missing-nam","displayName":"Missing NAM","category":"neural-amp-model","logicFile":"missing.nam","ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}]})",
+        "{}");
+    const auto missing_result = solo_rig::LoadModulePackage(missing_nam);
+    REQUIRE(!missing_result.package.has_value());
+    REQUIRE(missing_result.errors.size() == 1U);
+    REQUIRE(missing_result.errors[0] == solo_rig::ModulePackageLoadError::MissingLogicFile);
+    RemoveRuntimePackage(missing_nam);
+
+    const auto wrong_ir = CreateRuntimePackage(
+        R"({"schemaVersion":1,"moduleId":"org.mumu-dada.solorig.wrong-ir","displayName":"Wrong IR","category":"impulse-response","logicFile":"logic/main.json","ports":[{"id":"input","direction":"input","maxChannels":1},{"id":"output","direction":"output","maxChannels":1}]})",
+        "{}");
+    const auto wrong_result = solo_rig::LoadModulePackage(wrong_ir);
+    REQUIRE(!wrong_result.package.has_value());
+    REQUIRE(wrong_result.errors.size() == 1U);
+    REQUIRE(wrong_result.errors[0] == solo_rig::ModulePackageLoadError::InvalidLogicDefinition);
+    RemoveRuntimePackage(wrong_ir);
+}
 
 TEST_CASE("External digital module package instantiates and executes its declared gain algorithm") {
     const auto directory = CreateRuntimePackage(R"({

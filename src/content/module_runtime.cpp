@@ -5,7 +5,9 @@
 #include "dsp/digital_filter.hpp"
 #include "dsp/digital_pitch_shift.hpp"
 #include "dsp/diode_clipper.hpp"
+#include "dsp/impulse_response.hpp"
 #include "dsp/mna_solver.hpp"
+#include "dsp/nam_processor.hpp"
 
 #include <algorithm>
 #include <array>
@@ -543,6 +545,112 @@ private:
     bool prepared_{};
 };
 
+class NeuralAmpModelRuntime final : public ModuleRuntimeProcessor {
+public:
+    NeuralAmpModelRuntime(std::uint32_t declared_latency_samples, std::unique_ptr<NamProcessor> processor)
+        : declared_latency_samples_(declared_latency_samples), processor_(std::move(processor)) {}
+
+    bool Prepare(const AudioFormat& format) override {
+        return processor_ != nullptr && processor_->Prepare(format);
+    }
+
+    void Process(const AudioBuffer& input, AudioBuffer& output, std::uint32_t sample_count) noexcept override {
+        if (processor_ != nullptr) processor_->Process(input, output, sample_count);
+    }
+
+    [[nodiscard]] std::uint32_t DeclaredLatencySamples() const noexcept override {
+        return declared_latency_samples_;
+    }
+
+    [[nodiscard]] bool SetParameter(std::string_view, float) noexcept override { return false; }
+
+    [[nodiscard]] std::optional<float> ParameterValue(std::string_view) const noexcept override {
+        return std::nullopt;
+    }
+
+private:
+    std::uint32_t declared_latency_samples_{};
+    std::unique_ptr<NamProcessor> processor_;
+};
+
+class ImpulseResponseRuntime final : public ModuleRuntimeProcessor {
+public:
+    ImpulseResponseRuntime(std::uint32_t declared_latency_samples,
+                           std::unique_ptr<ImpulseResponseConvolver> convolver)
+        : declared_latency_samples_(declared_latency_samples), convolver_(std::move(convolver)) {}
+
+    bool Prepare(const AudioFormat& format) override {
+        return convolver_ != nullptr && convolver_->Prepare(format);
+    }
+
+    void Process(const AudioBuffer& input, AudioBuffer& output, std::uint32_t sample_count) noexcept override {
+        if (convolver_ != nullptr) convolver_->Process(input, output, sample_count);
+    }
+
+    [[nodiscard]] std::uint32_t DeclaredLatencySamples() const noexcept override {
+        return declared_latency_samples_;
+    }
+
+    [[nodiscard]] bool SetParameter(std::string_view, float) noexcept override { return false; }
+
+    [[nodiscard]] std::optional<float> ParameterValue(std::string_view) const noexcept override {
+        return std::nullopt;
+    }
+
+private:
+    std::uint32_t declared_latency_samples_{};
+    std::unique_ptr<ImpulseResponseConvolver> convolver_;
+};
+
+bool HasSinglePortPair(const EffectDescriptor& descriptor) {
+    std::size_t inputs{};
+    std::size_t outputs{};
+    for (const auto& port : descriptor.ports) {
+        if (port.direction == PortDirection::Input) ++inputs;
+        if (port.direction == PortDirection::Output) ++outputs;
+    }
+    return inputs == 1U && outputs == 1U;
+}
+
+std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateNamRuntime(
+    const ModulePackage& package, const NeuralAmpModelLogic& logic) {
+    if (!HasSinglePortPair(package.descriptor)) {
+        return ModuleRuntimeError::UnsupportedPortLayout;
+    }
+    auto input_port = std::find_if(package.descriptor.ports.begin(), package.descriptor.ports.end(),
+        [](const EffectPort& port) { return port.direction == PortDirection::Input; });
+    auto output_port = std::find_if(package.descriptor.ports.begin(), package.descriptor.ports.end(),
+        [](const EffectPort& port) { return port.direction == PortDirection::Output; });
+    auto processor = std::make_unique<NamProcessor>();
+    if (processor->LoadModel(logic.model_path).has_value() || !processor->ModelInfo().has_value()) {
+        return ModuleRuntimeError::ExternalAssetLoadFailed;
+    }
+    const auto& info = *processor->ModelInfo();
+    if (input_port->max_channels != info.input_channels || output_port->max_channels != info.output_channels ||
+        info.input_channels != info.output_channels) {
+        return ModuleRuntimeError::UnsupportedPortLayout;
+    }
+    return std::unique_ptr<ModuleRuntimeProcessor>(std::make_unique<NeuralAmpModelRuntime>(
+        package.descriptor.declared_latency_samples, std::move(processor)));
+}
+
+std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateImpulseResponseRuntime(
+    const ModulePackage& package, const ImpulseResponseLogic& logic) {
+    if (!HasSinglePortPair(package.descriptor)) {
+        return ModuleRuntimeError::UnsupportedPortLayout;
+    }
+    const auto imported = LoadWaveImpulseResponse(logic.impulse_response_path);
+    if (!std::holds_alternative<ImportedImpulseResponse>(imported)) {
+        return ModuleRuntimeError::ExternalAssetLoadFailed;
+    }
+    auto convolver = std::make_unique<ImpulseResponseConvolver>();
+    if (!convolver->LoadImportedImpulseResponse(std::get<ImportedImpulseResponse>(imported)).empty()) {
+        return ModuleRuntimeError::ExternalAssetLoadFailed;
+    }
+    return std::unique_ptr<ModuleRuntimeProcessor>(std::make_unique<ImpulseResponseRuntime>(
+        package.descriptor.declared_latency_samples, std::move(convolver)));
+}
+
 std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateAnalogRuntime(const ModulePackage& package,
                                                                                                const AnalogCircuitLogic& logic) {
     std::optional<float> resistance;
@@ -761,6 +869,15 @@ std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> Create
     if (const auto* circuit = std::get_if<CircuitNetlist>(&package.logic)) {
         return package.descriptor.category == EffectCategory::AnalogCircuit ? CreateMnaRuntime(package, *circuit)
                                                                              : ModuleRuntimeError::LogicCategoryMismatch;
+    }
+    if (const auto* model = std::get_if<NeuralAmpModelLogic>(&package.logic)) {
+        return package.descriptor.category == EffectCategory::NeuralAmpModel ? CreateNamRuntime(package, *model)
+                                                                               : ModuleRuntimeError::LogicCategoryMismatch;
+    }
+    if (const auto* impulse = std::get_if<ImpulseResponseLogic>(&package.logic)) {
+        return package.descriptor.category == EffectCategory::ImpulseResponse
+            ? CreateImpulseResponseRuntime(package, *impulse)
+            : ModuleRuntimeError::LogicCategoryMismatch;
     }
     return package.logic.index() == 0U ? ModuleRuntimeError::MissingLogic : ModuleRuntimeError::UnsupportedCategory;
 }

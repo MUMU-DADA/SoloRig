@@ -33,6 +33,7 @@ NamProcessor::~NamProcessor() = default;
 NamProcessor::NamProcessor() = default;
 
 std::optional<NamModelLoadError> NamProcessor::LoadModel(const std::filesystem::path& source) {
+    prepared_ = false;
     if (!std::filesystem::is_regular_file(source)) {
         return NamModelLoadError::MissingFile;
     }
@@ -77,6 +78,7 @@ std::optional<NamModelInfo> NamProcessor::ModelInfo() const {
 }
 
 bool NamProcessor::Prepare(const AudioFormat& format) {
+    prepared_ = false;
     if (model_ == nullptr || !model_info_.has_value() || !format.Validate().empty() ||
         format.channel_count != model_info_->input_channels || format.channel_count != model_info_->output_channels) {
         return false;
@@ -88,13 +90,16 @@ bool NamProcessor::Prepare(const AudioFormat& format) {
     }
     input_channels_.assign(format.channel_count, nullptr);
     output_channels_.assign(format.channel_count, nullptr);
+    prepared_ = true;
     return true;
 }
 
 void NamProcessor::Process(const AudioBuffer& input,
                            AudioBuffer& output,
                            std::uint32_t sample_count) noexcept {
-    if (model_ == nullptr || sample_count == 0 || sample_count > input.Capacity() || sample_count > output.Capacity()) {
+    if (!prepared_ || model_ == nullptr || sample_count == 0 || sample_count > input.Capacity() ||
+        sample_count > output.Capacity() || input.ChannelCount() != input_channels_.size() ||
+        output.ChannelCount() != output_channels_.size()) {
         return;
     }
     for (std::uint32_t channel = 0; channel < input.ChannelCount(); ++channel) {
