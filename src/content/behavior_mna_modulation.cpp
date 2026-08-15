@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace solo_rig {
 
@@ -44,11 +45,30 @@ TypedLfoMnaRuntimeError TypedLfoMnaRuntime::Prepare(
     MnaPreparedCircuit circuit, std::string_view parameter_id,
     const TypedLfoMnaModel& model, double sample_rate_hz,
     std::uint32_t oversampling) noexcept {
+    return Prepare(std::move(circuit), std::span<const std::string_view>(&parameter_id, 1U),
+        model, sample_rate_hz, oversampling);
+}
+
+TypedLfoMnaRuntimeError TypedLfoMnaRuntime::Prepare(
+    MnaPreparedCircuit circuit, std::span<const std::string_view> parameter_ids,
+    const TypedLfoMnaModel& model, double sample_rate_hz,
+    std::uint32_t oversampling) noexcept {
     prepared_ = false;
+    control_count_ = 0U;
+    control_indices_.fill(kInvalidControl);
     control_index_ = kInvalidControl;
     current_modulation_value_ = 0.0;
-    if (parameter_id.empty() || !std::isfinite(sample_rate_hz) || sample_rate_hz <= 0.0) {
-        return parameter_id.empty() ? TypedLfoMnaRuntimeError::MissingControl :
+    if (parameter_ids.empty()) {
+        return TypedLfoMnaRuntimeError::MissingControl;
+    }
+    if (parameter_ids.size() > control_indices_.size()) {
+        return TypedLfoMnaRuntimeError::CapacityExceeded;
+    }
+    for (const auto parameter_id : parameter_ids) {
+        if (parameter_id.empty()) return TypedLfoMnaRuntimeError::MissingControl;
+    }
+    if (!std::isfinite(sample_rate_hz) || sample_rate_hz <= 0.0) {
+        return
             TypedLfoMnaRuntimeError::InvalidSampleRate;
     }
     if (oversampling == 0U || oversampling > 16U) {
@@ -59,8 +79,16 @@ TypedLfoMnaRuntimeError TypedLfoMnaRuntime::Prepare(
         model.modulation_min == model.modulation_max) {
         return TypedLfoMnaRuntimeError::InvalidModel;
     }
-    const auto control = circuit.FindControl(parameter_id);
-    if (!control.has_value()) return TypedLfoMnaRuntimeError::MissingControl;
+    for (std::size_t index = 0U; index < parameter_ids.size(); ++index) {
+        const auto control = circuit.FindControl(parameter_ids[index]);
+        if (!control.has_value()) return TypedLfoMnaRuntimeError::MissingControl;
+        for (std::size_t prior = 0U; prior < index; ++prior) {
+            if (control_indices_[prior] == *control) {
+                return TypedLfoMnaRuntimeError::InvalidCircuit;
+            }
+        }
+        control_indices_[index] = *control;
+    }
     const auto lfo_result = lfo_.Prepare(model.lfo, sample_rate_hz, oversampling);
     if (lfo_result != GenericLfoError::None) return MapLfoError(lfo_result);
     if (!circuit.Prepare(sample_rate_hz)) {
@@ -68,9 +96,8 @@ TypedLfoMnaRuntimeError TypedLfoMnaRuntime::Prepare(
     }
     circuit_ = std::move(circuit);
     model_ = model;
-    control_index_ = *control;
-    sample_rate_hz_ = sample_rate_hz;
-    oversampling_ = oversampling;
+    control_count_ = parameter_ids.size();
+    control_index_ = control_indices_[0U];
     prepared_ = true;
     Reset();
     return TypedLfoMnaRuntimeError::None;
@@ -84,8 +111,10 @@ TypedLfoMnaRuntimeError TypedLfoMnaRuntime::SetSampleRate(
     }
     const auto lfo_result = lfo_.SetSampleRate(sample_rate_hz);
     if (lfo_result != GenericLfoError::None) return MapLfoError(lfo_result);
-    if (!circuit_.Prepare(sample_rate_hz)) return TypedLfoMnaRuntimeError::InvalidCircuit;
-    sample_rate_hz_ = sample_rate_hz;
+    if (!circuit_.Prepare(sample_rate_hz)) {
+        prepared_ = false;
+        return TypedLfoMnaRuntimeError::InvalidCircuit;
+    }
     Reset();
     return TypedLfoMnaRuntimeError::None;
 }
@@ -101,9 +130,13 @@ TypedLfoMnaRuntimeError TypedLfoMnaRuntime::Process(
     const double normalized = 0.5 * (std::clamp(control, -1.0, 1.0) + 1.0);
     current_modulation_value_ = model_.modulation_min + normalized *
         (model_.modulation_max - model_.modulation_min);
-    if (!std::isfinite(current_modulation_value_) ||
-        !circuit_.SetControlTarget(control_index_, current_modulation_value_)) {
-        return TypedLfoMnaRuntimeError::InvalidCircuit;
+    if (!std::isfinite(current_modulation_value_)) {
+        return TypedLfoMnaRuntimeError::NonFinite;
+    }
+    for (std::size_t index = 0U; index < control_count_; ++index) {
+        if (!circuit_.SetControlTarget(control_indices_[index], current_modulation_value_)) {
+            return TypedLfoMnaRuntimeError::InvalidCircuit;
+        }
     }
     const auto result = circuit_.Solve(audio_input);
     if (!result.Succeeded()) return MapMnaError(result.error);

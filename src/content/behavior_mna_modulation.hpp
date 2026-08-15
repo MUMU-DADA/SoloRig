@@ -4,8 +4,10 @@
 #include "dsp/generic_lfo.hpp"
 #include "dsp/mna_solver.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 namespace solo_rig {
@@ -16,6 +18,7 @@ enum class TypedLfoMnaRuntimeError {
     InvalidModel,
     InvalidSampleRate,
     InvalidOversampling,
+    CapacityExceeded,
     MissingControl,
     NotPrepared,
     NonFinite,
@@ -40,6 +43,10 @@ public:
         MnaPreparedCircuit circuit, std::string_view parameter_id,
         const TypedLfoMnaModel& model, double sample_rate_hz,
         std::uint32_t oversampling) noexcept;
+    [[nodiscard]] TypedLfoMnaRuntimeError Prepare(
+        MnaPreparedCircuit circuit, std::span<const std::string_view> parameter_ids,
+        const TypedLfoMnaModel& model, double sample_rate_hz,
+        std::uint32_t oversampling) noexcept;
     [[nodiscard]] TypedLfoMnaRuntimeError SetSampleRate(double sample_rate_hz) noexcept;
     [[nodiscard]] TypedLfoMnaRuntimeError Process(double audio_input,
                                                   double& audio_output) noexcept;
@@ -47,6 +54,10 @@ public:
 
     [[nodiscard]] bool IsPrepared() const noexcept { return prepared_; }
     [[nodiscard]] std::size_t ControlIndex() const noexcept { return control_index_; }
+    [[nodiscard]] std::size_t ControlCount() const noexcept { return control_count_; }
+    [[nodiscard]] std::size_t ControlIndex(std::size_t index) const noexcept {
+        return index < control_count_ ? control_indices_[index] : kInvalidControl;
+    }
     [[nodiscard]] double CurrentModulationValue() const noexcept {
         return current_modulation_value_;
     }
@@ -60,9 +71,9 @@ private:
     GenericLfoRuntime lfo_{};
     MnaPreparedCircuit circuit_{};
     TypedLfoMnaModel model_{};
+    std::array<std::size_t, 8U> control_indices_{};
+    std::size_t control_count_{};
     std::size_t control_index_{kInvalidControl};
-    double sample_rate_hz_{};
-    std::uint32_t oversampling_{};
     double current_modulation_value_{};
     bool prepared_{};
 };

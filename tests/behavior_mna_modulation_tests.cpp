@@ -80,3 +80,26 @@ TEST_CASE("M20-B2 LFO/MNA composition is deterministic and rejects missing or in
     REQUIRE(runtime.SetSampleRate(std::numeric_limits<double>::infinity()) ==
         solo_rig::TypedLfoMnaRuntimeError::InvalidSampleRate);
 }
+
+TEST_CASE("M20-B3 caller-owned LFO updates two MNA phase-shift controls") {
+    auto circuit = solo_rig::m19c_fixtures::PhaserTone(4U);
+    const auto compiled = solo_rig::CompileMnaCircuit(circuit);
+    REQUIRE(compiled.circuit.has_value());
+    const std::array<std::string_view, 2U> parameters{"stage1", "stage2"};
+    solo_rig::TypedLfoMnaRuntime runtime;
+    REQUIRE(runtime.Prepare(std::move(*compiled.circuit), parameters, WahModel(),
+        192000.0, 4U) == solo_rig::TypedLfoMnaRuntimeError::None);
+    REQUIRE(runtime.ControlCount() == 2U);
+    REQUIRE(runtime.ControlIndex(0U) == 0U);
+    REQUIRE(runtime.ControlIndex(1U) == 1U);
+    double first{};
+    REQUIRE(runtime.Process(0.3, first) == solo_rig::TypedLfoMnaRuntimeError::None);
+    REQUIRE(std::isfinite(first));
+    double second{};
+    REQUIRE(runtime.Process(-0.3, second) == solo_rig::TypedLfoMnaRuntimeError::None);
+    REQUIRE(std::isfinite(second));
+    runtime.Reset();
+    double reset{};
+    REQUIRE(runtime.Process(0.3, reset) == solo_rig::TypedLfoMnaRuntimeError::None);
+    REQUIRE(reset == first);
+}

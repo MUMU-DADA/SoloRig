@@ -160,4 +160,34 @@ CircuitNetlist DynamicOpampDrive(std::uint32_t oversampling) {
     return circuit;
 }
 
+CircuitNetlist PhaserTone(std::uint32_t oversampling) {
+    auto circuit = Base({"in", "stage1", "stage2", "out", "0"}, "in", "out", oversampling);
+    CircuitComponent stage1{};
+    stage1.id = "stage1_pot";
+    stage1.type = CircuitComponentType::Potentiometer;
+    stage1.pins = {"in", "0", "stage1"};
+    stage1.value = 10000.0;
+    stage1.potentiometer = CircuitPotentiometerSpec{.position = 0.5,
+        .minimum = 0.0, .maximum = 1.0};
+    CircuitComponent stage2{};
+    stage2.id = "stage2_pot";
+    stage2.type = CircuitComponentType::Potentiometer;
+    stage2.pins = {"stage1", "0", "stage2"};
+    stage2.value = 10000.0;
+    stage2.potentiometer = CircuitPotentiometerSpec{.position = 0.5,
+        .minimum = 0.0, .maximum = 1.0};
+    circuit.components = {stage1, Capacitor("stage1_cap", "stage1", "0", 100.0e-9),
+        stage2, Capacitor("stage2_cap", "stage2", "0", 47.0e-9),
+        Resistor("dry_mix", "in", "out", 10000.0),
+        Resistor("wet_mix", "stage2", "out", 10000.0),
+        Resistor("out_load", "out", "0", 10000.0)};
+    circuit.parameter_bindings = {
+        {.model_version = 1U, .parameter_id = "stage1", .target_id = "stage1_pot",
+            .property = CircuitParameterBindingProperty::PotentiometerPosition},
+        {.model_version = 1U, .parameter_id = "stage2", .target_id = "stage2_pot",
+            .property = CircuitParameterBindingProperty::PotentiometerPosition},
+    };
+    return circuit;
+}
+
 } // namespace solo_rig::m19c_fixtures

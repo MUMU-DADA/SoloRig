@@ -255,6 +255,53 @@ RepresentativeEvidence ValidateWah() {
     return evidence;
 }
 
+RepresentativeEvidence ValidatePhaser() {
+    RepresentativeEvidence evidence{.category = RepresentativeCategory::Phaser,
+        .status = RepresentativeStatus::RunnableGeneric};
+    const auto circuit = m19c_fixtures::PhaserTone(4U);
+    const auto compiled = CompileMnaCircuit(circuit);
+    evidence.compiled = compiled.circuit.has_value();
+    if (!evidence.compiled) return evidence;
+    const std::array<std::string_view, 2U> parameters{"stage1", "stage2"};
+    TypedLfoMnaModel model{};
+    model.lfo.frequency_hz = 0.8;
+    model.modulation_min = 0.0;
+    model.modulation_max = 1.0;
+    TypedLfoMnaRuntime runtime;
+    evidence.prepared = runtime.Prepare(std::move(*compiled.circuit), parameters, model,
+        48000.0, 4U) == TypedLfoMnaRuntimeError::None;
+    if (!evidence.prepared) return evidence;
+    std::array<double, 32U> first{};
+    bool finite = true;
+    for (std::size_t index = 0U; index < first.size(); ++index) {
+        const auto result = runtime.Process(index == 0U ? 0.25 : -0.1, first[index]);
+        finite = finite && result == TypedLfoMnaRuntimeError::None &&
+            std::isfinite(first[index]);
+    }
+    evidence.finite_nontrivial = finite && first[0] != first[1];
+    runtime.Reset();
+    evidence.reset_deterministic = true;
+    for (std::size_t index = 0U; index < first.size(); ++index) {
+        double output{};
+        if (runtime.Process(index == 0U ? 0.25 : -0.1, output) !=
+                TypedLfoMnaRuntimeError::None || output != first[index]) {
+            evidence.reset_deterministic = false;
+            break;
+        }
+    }
+    evidence.sample_rate_and_oversampling = runtime.SetSampleRate(192000.0) ==
+        TypedLfoMnaRuntimeError::None;
+    double output{};
+    evidence.rejection_boundary = runtime.Process(std::numeric_limits<double>::quiet_NaN(), output) ==
+        TypedLfoMnaRuntimeError::NonFinite;
+    if (!(evidence.finite_nontrivial && evidence.reset_deterministic &&
+          evidence.sample_rate_and_oversampling && evidence.rejection_boundary)) {
+        evidence.status = RepresentativeStatus::StableRefusal;
+        evidence.refusal_reason = "two-stage Phaser LFO/MNA evidence refused";
+    }
+    return evidence;
+}
+
 RepresentativeEvidence ValidateTubeAmp() {
     RepresentativeEvidence evidence{.category = RepresentativeCategory::TubeAmp,
         .status = RepresentativeStatus::RunnableGeneric};
@@ -302,9 +349,7 @@ ValidateRepresentativeCoverage() {
                   m19a1_validation::ValidateEnvelopeDetector()),
         FromChain(RepresentativeCategory::OptocouplerResistance,
                   m19a1_validation::ValidateOptocouplerResistance()),
-        ValidateFeedback(), ValidateTubeAmp(), ValidateWah(),
-        Refusal(RepresentativeCategory::Phaser,
-                "no complete generic Phaser multi-stage modulation contract"),
+        ValidateFeedback(), ValidateTubeAmp(), ValidateWah(), ValidatePhaser(),
         ValidateClocked(),
         Refusal(RepresentativeCategory::OpticalHardware,
                 "no real optical electrical hardware model contract")};

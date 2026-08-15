@@ -28,7 +28,7 @@ TEST_CASE("M19-C representative generic coverage keeps remaining refusal categor
     REQUIRE(evidence[static_cast<std::size_t>(solo_rig::m19c_validation::RepresentativeCategory::Wah)].status ==
         solo_rig::m19c_validation::RepresentativeStatus::RunnableGeneric);
     REQUIRE(evidence[static_cast<std::size_t>(solo_rig::m19c_validation::RepresentativeCategory::Phaser)].status ==
-        solo_rig::m19c_validation::RepresentativeStatus::StableRefusal);
+        solo_rig::m19c_validation::RepresentativeStatus::RunnableGeneric);
     REQUIRE(evidence[static_cast<std::size_t>(solo_rig::m19c_validation::RepresentativeCategory::ChorusFlanger)].status ==
         solo_rig::m19c_validation::RepresentativeStatus::RunnableGeneric);
     REQUIRE(evidence[static_cast<std::size_t>(solo_rig::m19c_validation::RepresentativeCategory::OpticalHardware)].status ==

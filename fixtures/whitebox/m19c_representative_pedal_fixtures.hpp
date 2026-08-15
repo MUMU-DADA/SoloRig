@@ -15,5 +15,6 @@ namespace solo_rig::m19c_fixtures {
 [[nodiscard]] CircuitNetlist JfetBoostFuzz(std::uint32_t oversampling = 1U);
 [[nodiscard]] CircuitNetlist MosfetBoostFuzz(std::uint32_t oversampling = 1U);
 [[nodiscard]] CircuitNetlist DynamicOpampDrive(std::uint32_t oversampling = 1U);
+[[nodiscard]] CircuitNetlist PhaserTone(std::uint32_t oversampling = 1U);
 
 } // namespace solo_rig::m19c_fixtures

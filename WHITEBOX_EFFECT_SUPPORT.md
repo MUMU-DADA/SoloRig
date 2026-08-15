@@ -23,6 +23,7 @@
 - M20-A2b 已提交：新增 `circuit.json v2` → `CircuitNetlist` → `CompileMnaCircuit` → `Prepare` 的真实 MNA 边界；最新验证为核心 `530/530`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过，manifest `1fffc91f29044f4d88bb2d980261cde7`。
 - M20-B1 已提交：`TypedVcoBbdClockedModel` 支持 caller-owned VCO/clocked BBD 模型与有界内部延迟反馈；最新验证为核心 `531/531`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过，manifest `7d64aa3710da46eca439c98450c6107d`。
 - M20-B2 已提交：`TypedLfoMnaRuntime` 支持 caller-owned generic LFO 通过 parameter binding 调制真实 MNA 电位器网络；最新验证为核心 `533/533`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过，manifest `6ad672c7e6824178b344d23ccea13a85`。
+- M20-B3 已提交：`TypedLfoMnaRuntime` 支持固定容量多 parameter binding，并驱动两级 caller-owned R/C Phaser MNA 网络；Phaser 已从 StableRefusal 提升为 RunnableGeneric；最新验证为核心 `534/534`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过，manifest `c99dfc1983874a6aaa2d63d2f4889d33`。
 - 通用 fan-out、延迟反馈、JSON 和自动 MNA 绑定仍排除；D3b/M19-A2 单延迟反馈继续由专用路径承担。
 
 ## 状态口径
@@ -154,8 +155,9 @@
 | M20-A2a | 版本化 typed behavior JSON lowering | 已提交：`solorig-behavior-graph` JSON 解析到已验证多域 typed plan；核心 `527/527`、CTest `5/5`、Validator `47/47`、manifest `3cd2c978bf4748d588496fa386b5b79e`。参数自动合成、外部模型加载和 JSON 到 CircuitNetlist/MNA 仍排除。 |
 | M20-A2b | caller-owned circuit v2 JSON 到实际 MNA | 已提交：JSON 解析、MNA Compile、Prepare 和实际 Solve 已串通；核心 `530/530`、CTest `5/5`、Validator `47/47`、manifest `1fffc91f29044f4d88bb2d980261cde7`。typed behavior 自动转电路、通用反馈、商业模型和参考等价仍排除。 |
 | M20-B1 | caller-owned 动态时钟 BBD 与有界反馈组合 | 已提交：显式 VCO/BBD model payload、动态 clock、内部延迟 feedback、Reset 和非法模型拒绝；M19-C Chorus/Flanger 代表类提升为 RunnableGeneric；核心 `531/531`、CTest `5/5`、Validator `47/47`、manifest `7d64aa3710da46eca439c98450c6107d`。 |
-| M20-B2 | Wah/Phaser caller-owned 调制组合 | 已提交：Wah 已通过 `TypedLfoMnaRuntime` 完成 LFO → parameter binding → MNA Solve 的真实组合；M19-C 拆分为 16 类后 14 类 RunnableGeneric，Phaser/真实 optical hardware 仍拒绝；核心 `533/533`、CTest `5/5`、Validator `47/47`、manifest `6ad672c7e6824178b344d23ccea13a85`。 |
-| M20-B3 | Phaser 多级调制组合与 optical hardware 电气边界 | 准备开工：需要多级相位/滤波网络、明确调制状态与真实 optical electrical model 的独立契约。 |
+| M20-B2 | Wah/Phaser caller-owned 调制组合 | 已提交：Wah 已通过 `TypedLfoMnaRuntime` 完成 LFO → parameter binding → MNA Solve 的真实组合；M20-B2 时 M19-C 拆分为 16 类后 14 类 RunnableGeneric。 |
+| M20-B3 | Phaser 多级调制组合与 optical hardware 电气边界 | 已提交：固定容量多 binding 驱动两级 R/C dry/wet MNA 网络，Phaser 已提升为 RunnableGeneric；核心 `534/534`、CTest `5/5`、Validator `47/47`、manifest `c99dfc1983874a6aaa2d63d2f4889d33`。 |
+| M20-B4 | optical hardware 电气模型与代表性组合 | 准备开工：需要 emitter 电气端、LDR 受光电阻端和 MNA 联合求解的独立契约，不能复用单独 resistance 输出作为完成证据。 |
 | M20 | 性能与产品全量回归 | 192 kHz/过采样、CPU、延迟、无分配、稳定性、C ABI、VST3、UI 和 Validator 全量通过。 |
 
 ## 本地候选：M19-C 代表性 generic 单块/箱头覆盖审计
