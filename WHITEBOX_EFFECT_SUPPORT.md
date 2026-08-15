@@ -16,6 +16,28 @@
 - M20-C1 已提交：typed behavior graph 的 signal 端口支持固定容量多连接；同域 fan-in 在 runtime 求和，fan-out 复制到多个下游/边界输出；编译阶段仍拒绝非法域、循环、缺端口和容量超限。最新验证为核心 `540/540`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `a179267303ca48b196fa93a57e806bc7`。
 - M20-C2 已提交：通用 typed behavior → MNA control binding composite 将 control/resistance 输出经调用方显式范围映射写入预编译 MNA 控制槽，覆盖 envelope/LFO/optocoupler 类跨域组合；未宣称任意多端 MNA 或商业 sidechain。最新验证为核心 `545/545`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `ed44119e36484516814c808b0bbd9d39`。
 
+## M20-C3 产品级审计与白盒完成计划（当前进行中）
+
+本阶段先锁定“已验证、部分完成、阻塞”三种口径，再按门禁逐项补齐。当前代码基线不能把静态性能估算、路由验证器或证据 schema 写成真实产品功能。
+
+### 已验证的基础能力
+
+- 图级声明延迟、固定容量实时边界、192 kHz/过采样专项、Reset/非有限/稳定拒绝，以及核心、CTest、VST3 Validator、Windows UI、backend ABI 和 C# contract 回归均有证据；M20-C2 最近一次基线为核心 `545/545`、CTest `5/5`、Validator `47/47`。
+- `RealtimeLoadMeter` 已有无锁读写和单元测试，但尚未接入 VST3 或独立程序的真实音频回调；当前 UI 的 `estimated_cpu_percent` 是模块目录静态估算，只能作为设计期提示，不能作为实测 CPU 占用。
+- ASIO 路由层可以验证任意通道映射、采样率转换和异步时钟需求，但尚无真实 ASIO SDK 后端、设备枚举、打开/关闭、回调和多设备重采样。
+- 外部 Circuit v2 包可以进入受限 MNA 组件运行时；外部数字逻辑目前只实现 Gain、Delay、Feedback、Mix、Waveshaper、Bypass，Filter、Dynamics、PitchShift 虽可解析但运行时稳定拒绝。
+- reference/golden 目前只有 schema、解析器、评估器和“缺少授权资料时拒绝”的测试；仓库没有可授权的 SPICE、golden waveform 或实机测量数据，因此不能标记 `reference-1to1`。
+
+### 完成白盒的计划目标与验收门禁
+
+1. **M20-C3：产品性能与宿主真实性**。把实测 block load 接入真实音频回调，并在控制线程提供最近值/峰值/过载状态；明确区分图级实测与模块目录估算。补齐 VST3/独立程序生命周期、ASIO 设备枚举与真实回调；没有 SDK 或硬件条件时只能保留 `blocked`，不能用模拟路由测试替代。
+2. **M21：外部模块可运行闭环**。定义并冻结模块包版本、逻辑/电路/皮肤三层契约；补齐已解析但未运行的数字操作，或把其拒绝边界正式列入支持矩阵。每个外部包必须经过 Parse → Compile/Prepare → Process → Reset，并验证参数、文件、错误和实时线程边界。
+3. **M22：通用白盒拓扑**。将当前受限单输入/单输出 MNA 边界扩展为经过审计的多端口/阶段化接口，覆盖串联、并联、控制、sidechain、反馈和电源/负载组合；每个不支持的拓扑必须稳定拒绝，不能靠固定产品识别或静默数字替代。
+4. **M23：参考与覆盖集**。为选定的失真、滤波/调制、压缩、BBD、混响、电子管前后级和箱头负载建立可授权的网表、元件/模型版本、供电/负载条件和测量基线；预先固定静态、频响、动态、谐波/互调、旋钮扫动误差阈值，逐类生成 golden/SPICE/实机证据。
+5. **Release 白盒门**。只有在支持矩阵中的每一类同时具备可运行路径、稳定拒绝边界、实时无分配/无锁/无文件证明、独立参考证据和全量回归，且真实宿主/ASIO 条件通过时，才可称为“白盒完成”。generic self-authored 模型仍需明确标注为 generic，不得自动升级为商业型号 `reference-1to1`。
+
+上述目标是完成条件，不是当前完成声明；M20-C3 仍是进行中，M21-M23 尚未开始验收。
+
 ## 当前状态补充：M20-A1
 
 - M19-C 已提交为 `6c0d46e`：15 个代表性类别中 12 类具有可运行 generic 证据，Wah/Phaser、Chorus/Flanger 和真实 optical hardware 三类保持 stable refusal。
@@ -161,7 +183,7 @@
 | M20-B2 | Wah/Phaser caller-owned 调制组合 | 已提交：Wah 已通过 `TypedLfoMnaRuntime` 完成 LFO → parameter binding → MNA Solve 的真实组合；M20-B2 时 M19-C 拆分为 16 类后 14 类 RunnableGeneric。 |
 | M20-B3 | Phaser 多级调制组合与 optical hardware 电气边界 | 已提交：固定容量多 binding 驱动两级 R/C dry/wet MNA 网络，Phaser 已提升为 RunnableGeneric；核心 `534/534`、CTest `5/5`、Validator `47/47`、manifest `c99dfc1983874a6aaa2d63d2f4889d33`。 |
 | M20-B4 | optical hardware 电气模型与代表性组合 | 已提交：四端 `Optocoupler` 进入 Circuit v2 parser/Compile/Prepare/Solve/Reset；emitter 电气端驱动 LDR 受光电阻端，代表性 fixture 覆盖 192 kHz/4x 和稳定拒绝；不宣称商业光耦校准、SPICE/golden 或 reference-1to-1。 |
-| M20 | 性能与产品全量回归 | 192 kHz/过采样、CPU、延迟、无分配、稳定性、C ABI、VST3、UI 和 Validator 全量通过。 |
+| M20-C3 | 性能与产品全量回归 | 部分完成：192 kHz/过采样、延迟、实时契约、C ABI、VST3、UI 和 Validator 有回归证据；CPU 目前仅有静态目录估算与未接入产品的计量核心，真实 ASIO、外部数字操作补齐和 SPICE/golden/实机证据仍未完成。 |
 
 ## 本地候选：M19-C 代表性 generic 单块/箱头覆盖审计
 
