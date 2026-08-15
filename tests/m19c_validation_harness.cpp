@@ -10,6 +10,7 @@
 #include "content/behavior_clocked_runtime.hpp"
 #include "content/behavior_envelope_runtime.hpp"
 #include "content/behavior_feedback_runtime.hpp"
+#include "content/behavior_mna_modulation.hpp"
 #include "content/behavior_optocoupler_runtime.hpp"
 #include "content/behavior_runtime.hpp"
 #include "content/behavior_typed_runtime.hpp"
@@ -21,6 +22,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <utility>
 
 namespace solo_rig::m19c_validation {
 namespace {
@@ -202,6 +204,57 @@ RepresentativeEvidence ValidateClocked() {
     return evidence;
 }
 
+RepresentativeEvidence ValidateWah() {
+    RepresentativeEvidence evidence{.category = RepresentativeCategory::Wah,
+        .status = RepresentativeStatus::RunnableGeneric};
+    auto circuit = m19c_fixtures::PassiveTone(4U, 0.5);
+    circuit.parameter_bindings = {{.model_version = 1U, .parameter_id = "wah",
+        .target_id = "tone_pot",
+        .property = CircuitParameterBindingProperty::PotentiometerPosition,
+        .smoothing_seconds = 0.0}};
+    const auto compiled = CompileMnaCircuit(circuit);
+    evidence.compiled = compiled.circuit.has_value();
+    if (!evidence.compiled) return evidence;
+
+    TypedLfoMnaModel model{};
+    model.lfo.frequency_hz = 2.0;
+    model.modulation_min = 0.0;
+    model.modulation_max = 1.0;
+    TypedLfoMnaRuntime runtime;
+    evidence.prepared = runtime.Prepare(std::move(*compiled.circuit), "wah", model,
+        48000.0, 4U) == TypedLfoMnaRuntimeError::None;
+    if (!evidence.prepared) return evidence;
+    std::array<double, 32U> first{};
+    bool finite = true;
+    for (std::size_t index = 0U; index < first.size(); ++index) {
+        const auto result = runtime.Process(index == 0U ? 0.25 : -0.1, first[index]);
+        finite = finite && result == TypedLfoMnaRuntimeError::None &&
+            std::isfinite(first[index]);
+    }
+    evidence.finite_nontrivial = finite && first[0] != first[1];
+    runtime.Reset();
+    evidence.reset_deterministic = true;
+    for (std::size_t index = 0U; index < first.size(); ++index) {
+        double output{};
+        if (runtime.Process(index == 0U ? 0.25 : -0.1, output) !=
+                TypedLfoMnaRuntimeError::None || output != first[index]) {
+            evidence.reset_deterministic = false;
+            break;
+        }
+    }
+    evidence.sample_rate_and_oversampling = runtime.SetSampleRate(192000.0) ==
+        TypedLfoMnaRuntimeError::None;
+    double output{};
+    evidence.rejection_boundary = runtime.Process(std::numeric_limits<double>::quiet_NaN(), output) ==
+        TypedLfoMnaRuntimeError::NonFinite;
+    if (!(evidence.finite_nontrivial && evidence.reset_deterministic &&
+          evidence.sample_rate_and_oversampling && evidence.rejection_boundary)) {
+        evidence.status = RepresentativeStatus::StableRefusal;
+        evidence.refusal_reason = "LFO to MNA potentiometer modulation evidence refused";
+    }
+    return evidence;
+}
+
 RepresentativeEvidence ValidateTubeAmp() {
     RepresentativeEvidence evidence{.category = RepresentativeCategory::TubeAmp,
         .status = RepresentativeStatus::RunnableGeneric};
@@ -249,9 +302,9 @@ ValidateRepresentativeCoverage() {
                   m19a1_validation::ValidateEnvelopeDetector()),
         FromChain(RepresentativeCategory::OptocouplerResistance,
                   m19a1_validation::ValidateOptocouplerResistance()),
-        ValidateFeedback(), ValidateTubeAmp(),
-        Refusal(RepresentativeCategory::WahPhaser,
-                "no complete generic Wah/Phaser composite contract"),
+        ValidateFeedback(), ValidateTubeAmp(), ValidateWah(),
+        Refusal(RepresentativeCategory::Phaser,
+                "no complete generic Phaser multi-stage modulation contract"),
         ValidateClocked(),
         Refusal(RepresentativeCategory::OpticalHardware,
                 "no real optical electrical hardware model contract")};

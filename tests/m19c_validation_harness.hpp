@@ -24,12 +24,13 @@ enum class RepresentativeCategory : std::uint8_t {
     OptocouplerResistance,
     BbdVcoFeedback,
     TubeAmp,
-    WahPhaser,
+    Wah,
+    Phaser,
     ChorusFlanger,
     OpticalHardware,
 };
 
-inline constexpr std::size_t kRepresentativeCategoryCount = 15U;
+inline constexpr std::size_t kRepresentativeCategoryCount = 16U;
 
 struct RepresentativeEvidence final {
     RepresentativeCategory category{};
