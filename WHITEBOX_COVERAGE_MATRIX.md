@@ -87,7 +87,7 @@ M23-A 只有在以下证据同时存在时才算完成：
 - 受阻项记录了缺失的外部前置条件，但不把受阻状态隐藏为已完成；
 - 后续提交只允许依据新的实现、测试或外部证据更新状态。
 
-本矩阵是收口门禁，不是白盒完成声明。M23-B 已完成首个完整 generic 组合样例，M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b/C3c 已完成 self-authored mathematical golden 的可复验门禁，M23-D1/D2 已完成单设备真实 ASIO 主机、Standalone 设备控制、设备原生率同步重采样和 Drive+Delay 图回调探针；本轮又补齐了单设备显式物理通道路由入口与最多四个并发 ASIO callback 槽位。白盒完成仍需通过 M23-C 的授权/实测参考证据、M23-D2 的多设备异步协调/故障恢复子门禁和最终 Release gate。
+本矩阵是收口门禁，不是白盒完成声明。M23-B 已完成首个完整 generic 组合样例，M23-C1/C2a/C2b/C2c/C2d/C2e/C2f/C2g/C2h/C3a/C3b/C3c 已完成 self-authored mathematical golden 的可复验门禁，M23-D1/D2 已完成单设备真实 ASIO 主机、Standalone 设备控制、设备原生率同步重采样和 Drive+Delay 图回调探针；本轮又补齐了最多四个并发 ASIO host、固定容量跨设备缓冲、受限时钟伺服、恢复 API、任意 I/O 路由文本和 UI 入口。多设备真实硬件尚未完成实测，白盒完成仍需通过 M23-C 的授权/实测参考证据、M23-D2 的多设备硬件/故障恢复子门禁和最终 Release gate。
 
 ## M23-B 首个完整外部 generic 管线
 
@@ -124,8 +124,10 @@ M23-A 只有在以下证据同时存在时才算完成：
 ## M23-D2：Standalone 完整效果图接入（第一阶段已完成）
 
 - 新增 `src/standalone/standalone_audio_engine.*`，控制线程完成驱动探测、192 kHz/Float32 `AudioFormat`、当前编辑器 preset 的 `RigRuntimeBuilder → RigRuntime::Prepare`，再创建 ASIO buffers；ASIO callback 只复制预分配缓冲并调用无分配 `RigRuntime::Process`。
-- `StandaloneAudioEngine::OpenWithRouting` 接受显式单设备物理输入/输出到 processing channel 的路由表，复用同一套验证、原生设备 block size 和同步重采样路径；默认 UI 仍提供 2 入/2 出快捷配置，任意通道的控制面入口已具备但尚未扩展为多设备 UI。
-- `AsioHost` 的 ASIO callback 分发已从单全局槽位扩展为最多四个并发 host 槽位，解决多个 host 同时存在时的静态回调寻址冲突；这只是多设备协调的底层前置，不等于已经完成跨设备时钟同步、聚合处理或独立输出节拍。
+- `StandaloneAudioEngine::OpenWithRouting` 接受显式单设备物理输入/输出到 processing channel 的路由表；`OpenWithDevices` 与路由文本进一步支持多设备物理映射，均复用同一套验证、原生设备 block size 和同步重采样路径。
+- `AsioHost` 的 ASIO callback 分发已从单全局槽位扩展为最多四个并发 host 槽位，`AsioDeviceCoordinator` 在其上完成跨设备 ring、聚合处理和独立输出节拍；代码门禁已具备，真实多设备硬件证据仍待补齐。
+- `AsioDeviceCoordinator` 已接入 `StandaloneAudioEngine::OpenWithDevices`：每个被路由设备独立完成 probe/open/start，主输出设备在内部 192 kHz 图上处理，其他输入/输出通过固定容量 SPSC frame ring 与有界 ±2% fill-level clock servo 对齐；ASIO reset/overload 状态可由 `RecoverAudio` 重新打开保存的设备组。
+- Win32 路由编辑框支持 `设备索引:in=物理通道列表;out=物理通道列表`，多个设备用 `|` 分隔，例如 `0:in=0,1;out=0,1|1:in=0;out=1`；解析和重复/越界前的结构拒绝均有单元测试。
 - Win32 Standalone 工具栏新增 ASIO Refresh/Open/Start/Close 与设备选择；显式 Open 才访问驱动，关闭窗口按 `Stop → Close → RigRuntime::Shutdown` 顺序释放，打开新 preset 后会在停机边界重建效果图。
-- 真实验证：`SoloRigAsioProbe.exe --stream "Midiplus USB Audio"` 经 Drive+Delay 图运行 1000 ms，`callbacks=3000`、`samplesPerCallback=64`、`reset=0`、`dropout=0`；核心 `602/602`、CTest `5/5`、VST3 Validator `47/47`、Windows UI/backend ABI/C# contract 全通过；同步重采样与 block-size 计算另有单元测试，但当前硬件为 192 kHz，尚无非 192 kHz 硬件实测。
-- 剩余边界：多设备异步时钟协调、跨设备聚合处理与独立输出节拍、设备断连/ASIO reset 恢复、任意 I/O 的 Win32 控制面、VST3 与 Standalone 图配置统一，以及授权 SPICE/golden/实机参考仍未完成；单设备原生采样率同步重采样已接入，但尚未有非 192 kHz 硬件实测。
+- 真实验证：`SoloRigAsioProbe.exe --stream "Midiplus USB Audio"` 经 Drive+Delay 图运行 1000 ms，`callbacks=3000`、`samplesPerCallback=64`、`reset=0`、`dropout=0`；核心 `606/606`、CTest `5/5`、VST3 Validator `47/47`、Windows UI/backend ABI/C# contract 全通过。当前只有单设备 192 kHz 硬件实测，多设备异步时钟、非 192 kHz 和断连恢复仍缺真实设备证据。
+- 剩余边界：多设备异步协调的真实硬件实测、设备断连/ASIO reset 的真实恢复演练、VST3 与 Standalone 图配置统一，以及授权 SPICE/golden/实机参考仍未完成；代码路径和离线门禁已具备，但不能替代外部设备证据。

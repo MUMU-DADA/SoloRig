@@ -27,6 +27,11 @@ struct PhysicalChannelRoute {
     std::uint32_t processing_channel{};
 };
 
+struct AsioDeviceBufferConfig {
+    std::string device_id;
+    std::uint32_t buffer_size{};
+};
+
 struct StandaloneAudioRouting {
     AudioFormat processing_format{.sample_rate_hz = 192000.0,
                                   .max_block_size = 256,
@@ -35,6 +40,9 @@ struct StandaloneAudioRouting {
     // Optional physical-device block size. When zero, the host uses the
     // processing block size for backwards-compatible single-rate routes.
     std::uint32_t device_buffer_size{};
+    // Optional per-device overrides used by the multi-ASIO coordinator. When
+    // absent, each device's probed preferred size is selected independently.
+    std::vector<AsioDeviceBufferConfig> device_buffers;
     std::vector<PhysicalChannelRoute> inputs;
     std::vector<PhysicalChannelRoute> outputs;
 };
@@ -54,6 +62,9 @@ enum class AudioRoutingError {
     DuplicateInputPhysicalChannel,
     DuplicateInputProcessingChannel,
     DuplicateOutputPhysicalChannel,
+    UnknownDeviceBufferDevice,
+    DuplicateDeviceBufferConfig,
+    InvalidDeviceBufferSize,
 };
 
 struct AudioRoutingAnalysis {

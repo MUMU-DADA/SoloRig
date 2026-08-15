@@ -2,7 +2,7 @@
 
 #include "core/audio_buffer.hpp"
 #include "core/rig_runtime.hpp"
-#include "standalone/asio_host.hpp"
+#include "standalone/asio_device_coordinator.hpp"
 
 #include <windows.h>
 
@@ -32,10 +32,15 @@ public:
                                        HWND system_window,
                                        RigPreset preset,
                                        StandaloneAudioRouting routing);
+    [[nodiscard]] bool OpenWithDevices(std::vector<AsioDriverInfo> drivers,
+                                       HWND system_window,
+                                       RigPreset preset,
+                                       StandaloneAudioRouting routing);
     [[nodiscard]] bool Start();
     void Stop();
     void Close() noexcept;
     [[nodiscard]] bool ReloadPreset(RigPreset preset);
+    [[nodiscard]] bool RecoverAudio();
 
     [[nodiscard]] bool IsOpen() const noexcept;
     [[nodiscard]] bool IsRunning() const noexcept;
@@ -52,7 +57,7 @@ public:
     [[nodiscard]] const StandaloneAudioRouting& Routing() const noexcept;
 
 private:
-    [[nodiscard]] bool OpenInternal(const AsioDriverInfo& driver,
+    [[nodiscard]] bool OpenInternal(std::vector<AsioDriverInfo> drivers,
                                     HWND system_window,
                                     RigPreset preset,
                                     StandaloneAudioRouting routing);
@@ -71,7 +76,7 @@ private:
                       std::uint32_t sample_count) noexcept;
 
     std::vector<AsioDriverInfo> drivers_;
-    AsioHost asio_host_;
+    AsioDeviceCoordinator asio_coordinator_;
     RigModuleRegistry module_registry_;
     RealtimePresetMailbox mailbox_;
     std::optional<PreparedPreset> prepared_runtime_;

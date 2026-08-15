@@ -64,6 +64,7 @@ public:
     [[nodiscard]] bool TriggerAsioOpen();
     [[nodiscard]] bool TriggerAsioStart();
     [[nodiscard]] bool TriggerAsioClose();
+    [[nodiscard]] bool TriggerAsioRecover();
 
     [[nodiscard]] static bool RunSmokeTest(HINSTANCE instance);
 
@@ -79,6 +80,7 @@ private:
     void LayoutToolbarButtons();
     void RefreshMidiMappingControls();
     void RefreshAsioControls();
+    [[nodiscard]] std::optional<StandaloneAudioRouting> SelectedAsioRouting() const;
     [[nodiscard]] std::optional<std::size_t> SelectedAsioDriverIndex() const;
     void UpdateAudioStatus();
     [[nodiscard]] std::optional<std::string> SelectedMidiTarget() const;
@@ -104,6 +106,9 @@ private:
     HWND asio_open_button_{};
     HWND asio_start_button_{};
     HWND asio_close_button_{};
+    HWND asio_recover_button_{};
+    HWND asio_route_label_{};
+    HWND asio_route_edit_{};
     HWND asio_driver_combo_{};
     HWND midi_refresh_button_{};
     HWND midi_open_button_{};

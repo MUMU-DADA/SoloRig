@@ -69,3 +69,23 @@ TEST_CASE("Standalone ASIO routing rejects unsupported formats and invalid chann
     REQUIRE(result.errors.contains(solo_rig::AudioRoutingError::ProcessingChannelOutOfRange));
     REQUIRE(result.errors.contains(solo_rig::AudioRoutingError::UnknownOutputDevice));
 }
+
+TEST_CASE("Standalone ASIO routing validates per-device buffer overrides") {
+    const std::vector<solo_rig::AsioDeviceDescriptor> devices{
+        {.device_id = "interface", .display_name = "Interface", .input_channel_count = 1,
+         .output_channel_count = 1, .native_sample_rate_hz = 48000.0, .clock_domain_id = "clock"},
+    };
+    solo_rig::StandaloneAudioRouting routing{
+        .processing_format = CreateInternalFormat(),
+        .device_buffers = {{.device_id = "interface", .buffer_size = 64U}},
+        .inputs = {{.device_id = "interface", .device_channel = 0, .processing_channel = 0}},
+        .outputs = {{.device_id = "interface", .device_channel = 0, .processing_channel = 0}},
+    };
+    REQUIRE(ValidateStandaloneAudioRouting(devices, routing).errors.empty());
+    routing.device_buffers.push_back({.device_id = "interface", .buffer_size = 128U});
+    REQUIRE(ValidateStandaloneAudioRouting(devices, routing).errors.contains(
+        solo_rig::AudioRoutingError::DuplicateDeviceBufferConfig));
+    routing.device_buffers = {{.device_id = "missing", .buffer_size = 64U}};
+    REQUIRE(ValidateStandaloneAudioRouting(devices, routing).errors.contains(
+        solo_rig::AudioRoutingError::UnknownDeviceBufferDevice));
+}

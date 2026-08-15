@@ -65,6 +65,15 @@ TEST_CASE("Win32 standalone editor registers creates renders resizes and destroy
     REQUIRE(window.Create(instance, editor, false));
     REQUIRE(window.InitializeRenderResources());
     REQUIRE(window.Handle() != nullptr);
+    const auto asio_route_label = GetDlgItem(window.Handle(), 1019);
+    const auto asio_route_edit = GetDlgItem(window.Handle(), 1020);
+    const auto asio_recover_button = GetDlgItem(window.Handle(), 1023);
+    REQUIRE(asio_route_label != nullptr);
+    REQUIRE(asio_route_edit != nullptr);
+    REQUIRE(asio_recover_button != nullptr);
+    wchar_t route_text[128]{};
+    REQUIRE(GetWindowTextW(asio_route_edit, route_text, static_cast<int>(std::size(route_text))) > 0);
+    REQUIRE(std::wstring(route_text).find(L"0:in=0,1;out=0,1") != std::wstring::npos);
     window.Resize(1024, 768, 1.25F);
     window.Paint();
     REQUIRE(window.LastPaintSucceeded());

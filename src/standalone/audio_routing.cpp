@@ -46,6 +46,19 @@ AudioRoutingValidationResult ValidateStandaloneAudioRouting(
         }
     }
 
+    std::set<std::string> configured_buffer_devices;
+    for (const auto& config : routing.device_buffers) {
+        if (config.buffer_size == 0U) {
+            result.errors.insert(AudioRoutingError::InvalidDeviceBufferSize);
+        }
+        if (device_by_id.find(config.device_id) == device_by_id.end()) {
+            result.errors.insert(AudioRoutingError::UnknownDeviceBufferDevice);
+        }
+        if (!configured_buffer_devices.insert(config.device_id).second) {
+            result.errors.insert(AudioRoutingError::DuplicateDeviceBufferConfig);
+        }
+    }
+
     std::set<std::string> active_device_ids;
     std::set<std::string> input_physical_channels;
     std::set<std::uint32_t> input_processing_channels;

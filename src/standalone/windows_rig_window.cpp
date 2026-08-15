@@ -1,4 +1,5 @@
 #include "standalone/windows_rig_window.hpp"
+#include "standalone/asio_route_text.hpp"
 
 #include <d2d1.h>
 #include <dwrite.h>
@@ -87,6 +88,20 @@ std::wstring MidiBindingText(const MidiBinding& binding) {
     return Widen(std::string(kind) + " ch" + std::to_string(binding.channel + 1U) +
                  " #" + std::to_string(binding.number) + " -> " + binding.target_id +
                  " [" + std::to_string(binding.minimum) + ".." + std::to_string(binding.maximum) + "]");
+}
+
+std::wstring EditText(HWND edit) {
+    if (edit == nullptr) {
+        return {};
+    }
+    const auto length = GetWindowTextLengthW(edit);
+    if (length <= 0) {
+        return {};
+    }
+    std::wstring text(static_cast<std::size_t>(length) + 1U, L'\0');
+    const auto copied = GetWindowTextW(edit, text.data(), length + 1);
+    text.resize(static_cast<std::size_t>(copied));
+    return text;
 }
 
 } // namespace
@@ -316,6 +331,18 @@ void Win32RigWindow::Destroy() noexcept {
         DestroyWindow(asio_close_button_);
         asio_close_button_ = nullptr;
     }
+    if (asio_recover_button_ != nullptr) {
+        DestroyWindow(asio_recover_button_);
+        asio_recover_button_ = nullptr;
+    }
+    if (asio_route_label_ != nullptr) {
+        DestroyWindow(asio_route_label_);
+        asio_route_label_ = nullptr;
+    }
+    if (asio_route_edit_ != nullptr) {
+        DestroyWindow(asio_route_edit_);
+        asio_route_edit_ = nullptr;
+    }
     if (asio_start_button_ != nullptr) {
         DestroyWindow(asio_start_button_);
         asio_start_button_ = nullptr;
@@ -465,11 +492,26 @@ bool Win32RigWindow::TriggerAsioOpen() {
     if (audio_engine_ == nullptr || editor_ == nullptr) {
         return false;
     }
-    const auto selected = SelectedAsioDriverIndex();
-    if (!selected.has_value() || *selected >= audio_engine_->Drivers().size()) {
+    const auto routing = SelectedAsioRouting();
+    if (!routing.has_value()) {
+        editor_->SetAudioStatus("ASIO routing rejected: use comma-separated physical channel numbers");
+        InvalidateRect(window_, nullptr, FALSE);
         return false;
     }
-    const auto opened = audio_engine_->Open(audio_engine_->Drivers()[*selected], window_, editor_->ExportPreset());
+    std::vector<AsioDriverInfo> selected_drivers;
+    for (const auto& driver : audio_engine_->Drivers()) {
+        const auto referenced = std::any_of(routing->inputs.begin(), routing->inputs.end(),
+                                            [&driver](const auto& route) { return route.device_id == driver.driver_id; }) ||
+            std::any_of(routing->outputs.begin(), routing->outputs.end(),
+                        [&driver](const auto& route) { return route.device_id == driver.driver_id; });
+        if (referenced) {
+            selected_drivers.push_back(driver);
+        }
+    }
+    const auto opened = audio_engine_->OpenWithDevices(std::move(selected_drivers),
+                                                       window_,
+                                                       editor_->ExportPreset(),
+                                                       *routing);
     UpdateAudioStatus();
     InvalidateRect(window_, nullptr, FALSE);
     return opened;
@@ -493,6 +535,54 @@ bool Win32RigWindow::TriggerAsioClose() {
     UpdateAudioStatus();
     InvalidateRect(window_, nullptr, FALSE);
     return true;
+}
+
+bool Win32RigWindow::TriggerAsioRecover() {
+    if (audio_engine_ == nullptr) {
+        return false;
+    }
+    const auto recovered = audio_engine_->RecoverAudio();
+    UpdateAudioStatus();
+    InvalidateRect(window_, nullptr, FALSE);
+    return recovered;
+}
+
+std::optional<StandaloneAudioRouting> Win32RigWindow::SelectedAsioRouting() const {
+    if (audio_engine_ == nullptr || asio_driver_combo_ == nullptr) {
+        return std::nullopt;
+    }
+    const auto entries = ParseAsioRouteText(EditText(asio_route_edit_), audio_engine_->Drivers().size());
+    if (!entries.has_value()) {
+        return std::nullopt;
+    }
+    std::size_t maximum_channel = 0U;
+    for (const auto& entry : *entries) {
+        maximum_channel = std::max(maximum_channel, entry.inputs.size());
+        maximum_channel = std::max(maximum_channel, entry.outputs.size());
+    }
+    if (maximum_channel == 0U || maximum_channel > std::numeric_limits<std::uint32_t>::max()) {
+        return std::nullopt;
+    }
+    StandaloneAudioRouting routing{
+        .processing_format = {.sample_rate_hz = 192000.0,
+                              .max_block_size = 1U,
+                              .channel_count = static_cast<std::uint32_t>(maximum_channel),
+                              .sample_representation = SampleRepresentation::Float32},
+        .device_buffer_size = 0U};
+    for (const auto& entry : *entries) {
+        const auto& driver = audio_engine_->Drivers().at(entry.driver_index);
+        for (std::size_t index = 0U; index < entry.inputs.size(); ++index) {
+            routing.inputs.push_back({.device_id = driver.driver_id,
+                                      .device_channel = entry.inputs[index],
+                                      .processing_channel = static_cast<std::uint32_t>(index)});
+        }
+        for (std::size_t index = 0U; index < entry.outputs.size(); ++index) {
+            routing.outputs.push_back({.device_id = driver.driver_id,
+                                       .device_channel = entry.outputs[index],
+                                       .processing_channel = static_cast<std::uint32_t>(index)});
+        }
+    }
+    return routing;
 }
 
 bool Win32RigWindow::TriggerMidiRefresh() {
@@ -808,6 +898,8 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
                 static_cast<void>(TriggerAsioStart());
             } else if (LOWORD(w_param) == 1017) {
                 static_cast<void>(TriggerAsioClose());
+            } else if (LOWORD(w_param) == 1023) {
+                static_cast<void>(TriggerAsioRecover());
             }
             if (LOWORD(w_param) == 1007) {
                 InvalidateRect(window_, nullptr, FALSE);
@@ -838,6 +930,13 @@ void Win32RigWindow::CreateToolbarButtons() {
                                          424, 50, 84, 30, window_, reinterpret_cast<HMENU>(1016), instance_, nullptr);
     asio_close_button_ = CreateWindowExW(0, L"BUTTON", L"ASIO Close", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                          514, 50, 84, 30, window_, reinterpret_cast<HMENU>(1017), instance_, nullptr);
+    asio_route_label_ = CreateWindowExW(0, L"STATIC", L"Routes:", WS_CHILD | WS_VISIBLE | SS_LEFT,
+                                        118, 56, 46, 20, window_, reinterpret_cast<HMENU>(1019), instance_, nullptr);
+    asio_route_edit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"0:in=0,1;out=0,1",
+                                       WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                                       164, 50, 190, 30, window_, reinterpret_cast<HMENU>(1020), instance_, nullptr);
+    asio_recover_button_ = CreateWindowExW(0, L"BUTTON", L"ASIO Recover", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                           884, 50, 98, 30, window_, reinterpret_cast<HMENU>(1023), instance_, nullptr);
     midi_refresh_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Refresh", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                            256, 16, 98, 30, window_, reinterpret_cast<HMENU>(1004), instance_, nullptr);
     midi_open_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Open", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
@@ -879,17 +978,20 @@ void Win32RigWindow::LayoutToolbarButtons() {
     move(save_as_button_, 92, 16, 80, 30);
     move(open_button_, 178, 16, 70, 30);
     move(asio_refresh_button_, 16, 50, 96, 30);
-    move(asio_driver_combo_, 118, 50, 210, 220);
-    move(asio_open_button_, 334, 50, 84, 30);
-    move(asio_start_button_, 424, 50, 84, 30);
-    move(asio_close_button_, 514, 50, 84, 30);
+    move(asio_route_label_, 118, 56, 46, 20);
+    move(asio_route_edit_, 164, 50, 190, 30);
+    move(asio_driver_combo_, 360, 50, 120, 220);
+    move(asio_open_button_, 486, 50, 84, 30);
+    move(asio_start_button_, 576, 50, 84, 30);
+    move(asio_close_button_, 666, 50, 84, 30);
+    move(asio_recover_button_, 756, 50, 98, 30);
     move(midi_refresh_button_, 256, 16, 98, 30);
     move(midi_open_button_, 360, 16, 88, 30);
     move(midi_close_button_, 454, 16, 92, 30);
     RECT client{};
     GetClientRect(window_, &client);
     const auto width = std::max<LONG>(1, client.right - client.left);
-    const auto panel_left = std::max<LONG>(560, width - 440);
+    const auto panel_left = std::max<LONG>(880, width - 440);
     move(midi_target_combo_, panel_left, 16, 180, 240);
     move(midi_learn_button_, panel_left + 188, 16, 72, 30);
     move(midi_cancel_learn_button_, panel_left + 264, 16, 70, 30);

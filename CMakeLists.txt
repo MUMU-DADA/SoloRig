@@ -146,6 +146,7 @@ add_library(solo_rig_core STATIC
     src/control/shortcut_registry.cpp
     src/standalone/audio_routing.cpp
     src/standalone/audio_resampler.cpp
+    src/standalone/asio_route_text.cpp
     src/ui/pedal_layout.cpp
     src/ui/rig_editor.cpp
 )
@@ -153,6 +154,7 @@ if(WIN32)
     target_sources(solo_rig_core PRIVATE
         src/control/midi_input.cpp
         src/standalone/asio_host.cpp
+        src/standalone/asio_device_coordinator.cpp
         src/standalone/asio_sample_conversion.cpp
     )
     target_link_libraries(solo_rig_core PUBLIC winmm ole32 advapi32)
@@ -441,6 +443,8 @@ if(BUILD_TESTING)
         tests/midi_mapping_tests.cpp
         tests/shortcut_registry_tests.cpp
         tests/audio_routing_tests.cpp
+        tests/asio_route_text_tests.cpp
+        tests/asio_device_coordinator_tests.cpp
         tests/audio_resampler_tests.cpp
         tests/pedal_layout_tests.cpp
         tests/rig_editor_tests.cpp
