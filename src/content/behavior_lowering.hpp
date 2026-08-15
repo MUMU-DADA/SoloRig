@@ -15,6 +15,7 @@ enum class BehaviorKind {
     Vca,
     Envelope,
     Lfo,
+    Optocoupler,
     Spring,
 };
 
