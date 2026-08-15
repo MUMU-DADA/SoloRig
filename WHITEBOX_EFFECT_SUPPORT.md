@@ -4,7 +4,7 @@
 
 ## 结论
 
-当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 generic dynamic diode/Zener、BJT、JFET、MOSFET、dynamic opamp、bounded OTA、triode、pentode、beam tetrode、vari-mu、lossy-linear coupled-inductor 和 saturating-hysteretic transformer/core 模型。C8b-C9e 已由 `9b06c70` 提交；C10a/C10b、D1a/D1b1/D1b2/D1b3 和 D2a generic clocked BBD/delay 已由 `9dc9368` 提交，D2b1 VCO、D2b2 VCA、D2c1 envelope follower、D2c2 generic LFO、D2d1 optocoupler/LDR response 已分别由 `4774d79`、`4a4bfa1`、`dc2f1b6`、`ebd2438`、`f4c5b14` 提交。D2d2 generic modal spring response 已形成通过统一门禁的本地候选，D2e1 behavior graph Compile/lowering route contract 也已形成本地候选。这些仍只构成 self-authored clean-room generic 能力，不构成商业器件或 1:1 证据。
+当前白盒运行时已经具备常见无源器件、独立电源、基础受控源，以及 generic dynamic diode/Zener、BJT、JFET、MOSFET、dynamic opamp、bounded OTA、triode、pentode、beam tetrode、vari-mu、lossy-linear coupled-inductor 和 saturating-hysteretic transformer/core 模型。C8b-C9e 已由 `9b06c70` 提交；C10a/C10b、D1a/D1b1/D1b2/D1b3 和 D2a generic clocked BBD/delay 已由 `9dc9368` 提交，D2b1 VCO、D2b2 VCA、D2c1 envelope follower、D2c2 generic LFO、D2d1 optocoupler/LDR response 已分别由 `4774d79`、`4a4bfa1`、`dc2f1b6`、`ebd2438`、`f4c5b14` 提交。D2d2 generic modal spring response、D2e1 behavior graph Compile/lowering route contract、D2e2 fixed-capacity block runtime、D2e3 typed port/route Compile contract、D2e4 typed control runtime、D2e5 typed envelope detector runtime、D2e6 typed optocoupler resistance runtime 和 D2e7 envelope + VCA typed composite route/runtime 当前均为未提交本地候选。这些仍只构成 self-authored clean-room generic 能力，不构成商业器件或 1:1 证据。
 
 当前仍不能宣称覆盖“绝大多数单块效果器和箱头”。主要阻塞不只是元件数量，还包括实时旋钮/开关、行为模块、复杂拓扑编译、器件高阶物理、功放与电源/负载交互，以及 SPICE/golden/实机误差验证。
 
@@ -74,10 +74,10 @@
 | 晶体管 Fuzz、Boost、简单失真级 | 通用模型可实现 | BJT/JFET/MOSFET 已交付；高阶寄生、温度、容差和实机校准未完成。 |
 | 运放 Overdrive/Distortion、基础有源滤波 | 结构上可实现 | bounded/dynamic opamp 已交付有限主极点、slew、阻抗、限流和内部轨边界；没有显式供电脚、复杂多极点或商业模型。 |
 | OTA/VCA 压缩、滤波和调制 | 部分可表达 | OTA、D2b2 generic VCA 和 D2c1 envelope follower 已交付；完整 sidechain、控制馈通和具体芯片行为仍不完整。 |
-| Wah、Phaser、Tremolo | 部分可表达 | 基础滤波、D1a 实时控制和 D2c2 generic LFO 已交付；光学耦合及完整行为图仍缺失。 |
-| 光学压缩、光学 Tremolo、Uni-Vibe | 部分可表达 | D2d1 已交付 generic emitter/LDR 非线性映射及 attack/release 记忆；仍缺真实 LED/灯泡电气语义、自动电路连接和完整行为图。 |
-| Chorus、Flanger、Analog Delay | 部分可表达 | D2a generic clocked BBD/delay、D2b1 VCO 和 D2c2 LFO 已交付；尚未形成 BBD clock 联接、clock feedthrough、抗混叠或完整行为图。 |
-| Spring Reverb | 部分可表达 | D2d2 已有固定容量 generic modal spring ringing/decay 本地候选；不含 drive/pickup coil 电气阻抗、逐段传播、非线性碰撞、商业 tank 校准或完整行为图。 |
+| Wah、Phaser、Tremolo | 部分可表达 | 基础滤波、D1a 实时控制和 D2c2 generic LFO 已交付；当前仅有独立 runtime 与 D2e4/D2e7 的受限 typed 控制/组合路径，光学耦合及完整行为图仍缺失。 |
+| 光学压缩、光学 Tremolo、Uni-Vibe | 部分可表达 | D2d1 已交付 generic emitter/LDR 非线性映射及 attack/release 记忆，D2e6 提供受限 emitter -> resistance typed runtime；仍缺真实 LED/灯泡电气语义、自动电路连接和完整行为图。 |
+| Chorus、Flanger、Analog Delay | 部分可表达 | D2a generic clocked BBD/delay、D2b1 VCO 和 D2c2 LFO 已交付，D2e2/D2e4 提供受限 single-signal/typed runtime；尚未形成 BBD clock 联接、clock feedthrough、抗混叠或完整行为图。 |
+| Spring Reverb | 部分可表达 | D2d2 已有固定容量 generic modal spring ringing/decay，D2e2 提供严格单 signal BBD/VCO/spring block 的固定容量单速率串联执行；当前仍只有独立 runtime 与受限组合路径，不含 drive/pickup coil 电气阻抗、逐段传播、非线性碰撞、商业 tank 校准或完整行为图。 |
 | 真空管前级单块/前级通道 | 通用模型初步能力 | generic triode/pentode/beam tetrode/vari-mu 已交付；真实栅流、极间电容、供电和具体管型尚未完成。 |
 
 上述“可实现”表示通用模型具备搭建条件，不表示仓库已经交付相应产品模块，也不表示声音达到具体设备的 1:1 精度。
@@ -105,7 +105,7 @@
 - WDF 非线性联合求解、DC 工作点和 K-method 增量优化；
 - 外部/递归/主动/多端 subcircuit macro-model、跨实例状态共享和完整运行时行为绑定；D1b2 仅覆盖显式端口映射的 inline R/C/L 编译期扁平化；
 - 无锁、无分配的实时参数邮箱，以及电位器、开关、继电器和供电变化；
-- 行为岛之间的完整路由；D2a-D2d2 已交付彼此独立的 BBD/VCO/VCA/envelope/LFO/optocoupler/modal spring，D2e1 仅推进图级 Compile/lowering 契约，均不代表完整效果器模拟；
+- 行为岛之间的完整任意路由；当前已具备 D2e2-D2e7 的受限 single-signal、typed port/route、控制域、detector、emitter -> resistance 及 envelope -> VCA composite 路径和独立 runtime，但 feedback、sidechain、动态端口、跨图状态、JSON 图加载与完整效果器语义仍缺失；
 - 完整且授权可审计的型号数据库；
 - 每个模块的 DC、频响、静态曲线、谐波/互调、动态响应、参数扫动、采样率、收敛及误差阈值证据。
 
@@ -125,9 +125,9 @@
 | M18-C9b+ | 其余半导体与运放高阶物理 | C9b-C9e generic BJT/JFET/MOSFET/dynamic opamp 已由 `9b06c70` 交付；更复杂载流子存储、显式供电脚、自热、噪声与商业模型仍排除。 |
 | M18-C10 | 电源与负载交互 | C10a/C10b 已由 `9dc9368` 交付 generic 整流储能/Sag 与 electrodynamic speaker/feedback；不构成完整箱头能量闭环。 |
 | M18-D1 | 实时控制和跨网络语义 | D1a、D1b1/D1b3 relay、D1b2 inline passive flattening 已由 `9dc9368` 交付；外部/递归 macro-model 仍待后续。 |
-| M18-D2 | 行为模块 | D2a-D2d2 已交付独立 BBD/VCO/VCA/envelope/LFO/optocoupler/modal spring；D2e1 固定容量 graph Compile/lowering 为本地候选，块级执行、真实换能器和完整行为图仍待逐项推进。 |
+| M18-D2 | 行为模块 | D2a-D2d2 已交付独立 BBD/VCO/VCA/envelope/LFO/optocoupler/modal spring；D2e1 Compile/lowering、D2e2 固定容量单速率 block runtime、D2e3 typed port/route Compile contract、D2e4 typed control runtime、D2e5 typed envelope detector runtime、D2e6 typed optocoupler resistance runtime 与 D2e7 envelope + VCA typed composite route/runtime 均为未提交本地候选。D2e4 仅支持 LFO -> VCA.control、audio -> VCA.audio_in、VCA.out -> output.audio；D2e5 仅支持 audio -> envelope.detector、envelope.out -> output.control；D2e6 仅支持 emitter-drive -> optocoupler.emitter、optocoupler.out -> output.resistance；D2e7 仅支持独立 `input.audio`、`input.detector` 加 envelope -> VCA 的四路显式链路，不做隐式域转换或外部输入 fan-out。feedback、sidechain、动态端口、跨图状态、JSON 外部加载和商业/SPICE/1:1 语义仍明确排除。 |
 | M18-B 后续收口 | 通用拓扑编译与混合求解 | canonical SPQR/rigid、多端口 R、WDF/MNA 混合树、非线性联合求解和 DC/K-method 闭环。 |
-| M19 | 代表性单块与箱头验证 | 先以 generic 模块验证覆盖面，再对资料完整的目标做 SPICE/golden/实机校准；资料不足保持 `blocked`。 |
+| M19 | 代表性单块与箱头验证 | M19-A1 已形成未提交本地候选：以 self-authored generic fixture 验证 D2e2-D2e7 五条受限效果链的 Compile/Prepare、Reset、采样率/oversampling、确定性和拒绝边界；核心 `489/489`、CTest `5/5`、Validator `47/47` 及宿主/UI/C ABI/C# contract 全通过，manifest `75151e09517543caa45357ec695cf122`。完整 SPICE/golden/实机校准、商业效果器和 `reference-1to1` 仍需后续资料，资料不足保持 `blocked`。 |
 | M20 | 性能与产品全量回归 | 192 kHz/过采样、CPU、延迟、无分配、稳定性、C ABI、VST3、UI 和 Validator 全量通过。 |
 
 ## 覆盖完成口径

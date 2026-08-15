@@ -20,6 +20,11 @@ bool IsReserved(std::string_view id) noexcept {
     return id == "input" || id == "output";
 }
 
+bool IsSingleSignalCompatible(BehaviorKind kind) noexcept {
+    return kind == BehaviorKind::Bbd || kind == BehaviorKind::Vco ||
+        kind == BehaviorKind::Spring;
+}
+
 } // namespace
 
 BehaviorGraphCompileResult CompileBehaviorGraph(
@@ -42,6 +47,9 @@ BehaviorGraphCompileResult CompileBehaviorGraph(
         const auto lowered = LowerBehaviorModule(node.binding);
         if (!lowered.plan.has_value() || lowered.error.has_value()) {
             return {.error = BehaviorGraphError::BlockedNode};
+        }
+        if (!IsSingleSignalCompatible(lowered.plan->kind)) {
+            return {.error = BehaviorGraphError::IncompatibleBlock};
         }
         candidate.nodes.push_back({.id = node.id, .lowering = *lowered.plan});
     }

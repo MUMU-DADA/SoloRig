@@ -46,6 +46,7 @@ enum class BehaviorGraphError {
     CycleDetected,
     CapacityExceeded,
     BlockedNode,
+    IncompatibleBlock,
 };
 
 struct BehaviorGraphCompileResult {

@@ -102,6 +102,13 @@ add_library(solo_rig_core STATIC
     src/content/topology_decomposition.cpp
     src/content/behavior_lowering.cpp
     src/content/behavior_graph.cpp
+    src/content/behavior_runtime.cpp
+    src/content/behavior_ports.cpp
+    src/content/behavior_typed_runtime.cpp
+    src/content/behavior_envelope_runtime.cpp
+    src/content/behavior_optocoupler_runtime.cpp
+    src/content/behavior_composite.cpp
+    src/content/behavior_composite_runtime.cpp
     src/content/generic_bbd_binding.cpp
     src/content/generic_vco_binding.cpp
     src/content/generic_vca_binding.cpp
@@ -297,6 +304,16 @@ if(BUILD_TESTING)
         tests/generic_spring_binding_tests.cpp
         tests/generic_spring_runtime_tests.cpp
         tests/behavior_graph_tests.cpp
+        tests/behavior_runtime_tests.cpp
+        tests/behavior_ports_tests.cpp
+        tests/behavior_typed_runtime_tests.cpp
+        tests/behavior_envelope_runtime_tests.cpp
+        tests/behavior_optocoupler_runtime_tests.cpp
+        tests/behavior_composite_tests.cpp
+        tests/behavior_composite_runtime_tests.cpp
+        fixtures/whitebox/m19a1_behavior_chain_fixtures.cpp
+        tests/m19a1_validation_harness.cpp
+        tests/m19a1_behavior_validation_tests.cpp
         tests/coupled_inductor_tests.cpp
         tests/nonlinear_transformer_core_tests.cpp
         tests/nonlinear_amplifier_tests.cpp

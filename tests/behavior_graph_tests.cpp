@@ -14,10 +14,6 @@ std::vector<solo_rig::BehaviorGraphNodeSpec> AuthorizedNodes() {
     return {
         Node("bbd", "bbd", "generic-bbd-v1"),
         Node("vco", "vco", "generic-vco-v1"),
-        Node("vca", "vca", "generic-vca-v1"),
-        Node("envelope", "envelope", "generic-envelope-v1"),
-        Node("lfo", "lfo", "generic-lfo-v1"),
-        Node("optocoupler", "optocoupler", "generic-optocoupler-v1"),
         Node("spring", "spring", "generic-spring-v1"),
     };
 }
@@ -26,7 +22,7 @@ std::vector<solo_rig::BehaviorGraphNodeSpec> AuthorizedNodes() {
 
 TEST_CASE("M18-D2e1 behavior graph lowers authorized nodes in deterministic route order") {
     const std::vector<solo_rig::BehaviorGraphNodeSpec> nodes{
-        Node("second", "vca", "generic-vca-v1"),
+        Node("second", "spring", "generic-spring-v1"),
         Node("first", "vco", "generic-vco-v1"),
     };
     const std::vector<solo_rig::BehaviorGraphRouteSpec> routes{
@@ -41,11 +37,14 @@ TEST_CASE("M18-D2e1 behavior graph lowers authorized nodes in deterministic rout
     REQUIRE(result.plan->routes[0].source == "input");
     REQUIRE(result.plan->routes[2].destination == "output");
     REQUIRE(result.plan->nodes[0].lowering.kind == solo_rig::BehaviorKind::Vco);
-    REQUIRE(result.plan->nodes[1].lowering.kind == solo_rig::BehaviorKind::Vca);
+    REQUIRE(result.plan->nodes[1].lowering.kind == solo_rig::BehaviorKind::Spring);
 }
 
-TEST_CASE("M18-D2e1 behavior graph accepts every currently authorized behavior family") {
-    const auto nodes = AuthorizedNodes();
+TEST_CASE("M18-D2e1 behavior graph accepts single-signal behavior families") {
+    const auto nodes = std::vector<solo_rig::BehaviorGraphNodeSpec>{
+        Node("bbd", "bbd", "generic-bbd-v1"),
+        Node("vco", "vco", "generic-vco-v1"),
+        Node("spring", "spring", "generic-spring-v1")};
     std::vector<solo_rig::BehaviorGraphRouteSpec> routes;
     routes.push_back({"input", nodes.front().id});
     for (std::size_t index = 1U; index < nodes.size(); ++index) {
@@ -57,6 +56,18 @@ TEST_CASE("M18-D2e1 behavior graph accepts every currently authorized behavior f
     REQUIRE(result.plan.has_value());
     REQUIRE(result.plan->nodes.size() == nodes.size());
     REQUIRE(result.plan->topological_order.size() == nodes.size());
+}
+
+TEST_CASE("M18-D2e2 compile rejects behavior blocks without a single-signal contract") {
+    const auto nodes = std::vector<solo_rig::BehaviorGraphNodeSpec>{
+        Node("vca", "vca", "generic-vca-v1"),
+        Node("envelope", "envelope", "generic-envelope-v1"),
+        Node("lfo", "lfo", "generic-lfo-v1"),
+        Node("optocoupler", "optocoupler", "generic-optocoupler-v1")};
+    for (const auto& node : nodes) {
+        REQUIRE(solo_rig::CompileBehaviorGraph({node}, {{"input", node.id}, {node.id, "output"}}).error ==
+                solo_rig::BehaviorGraphError::IncompatibleBlock);
+    }
 }
 
 TEST_CASE("M18-D2e1 behavior graph rejects duplicate, unknown and malformed endpoints") {
@@ -78,8 +89,8 @@ TEST_CASE("M18-D2e1 behavior graph rejects duplicate, unknown and malformed endp
 
 TEST_CASE("M18-D2e1 behavior graph rejects missing ports, fan-in, fan-out and cycles") {
     const auto nodes = std::vector<solo_rig::BehaviorGraphNodeSpec>{
-        Node("a", "vco", "generic-vco-v1"), Node("b", "vca", "generic-vca-v1"),
-        Node("c", "lfo", "generic-lfo-v1")};
+        Node("a", "vco", "generic-vco-v1"), Node("b", "spring", "generic-spring-v1"),
+        Node("c", "bbd", "generic-bbd-v1")};
     REQUIRE(CompileBehaviorGraph(nodes, {}).error ==
             solo_rig::BehaviorGraphError::MissingOutputRoute);
     REQUIRE(CompileBehaviorGraph(nodes, {{"input", "a"}, {"b", "a"}, {"a", "output"}}).error ==
@@ -112,7 +123,7 @@ TEST_CASE("M18-D2e1 behavior graph rejects blocked nodes and capacity overflow a
 
 TEST_CASE("M18-D2e1 behavior graph rejects nonfinite and unsupported port semantics") {
     const auto nodes = std::vector<solo_rig::BehaviorGraphNodeSpec>{
-        Node("a", "vco", "generic-vco-v1"), Node("b", "vca", "generic-vca-v1")};
+        Node("a", "vco", "generic-vco-v1"), Node("b", "spring", "generic-spring-v1")};
     REQUIRE(CompileBehaviorGraph(nodes, {{"input", "a"}, {"a", "input"},
         {"a", "output"}}).error == solo_rig::BehaviorGraphError::InvalidRoute);
     REQUIRE(CompileBehaviorGraph(nodes, {{"input", "a"}, {"a", "b"},
