@@ -14,6 +14,7 @@
 - M19-C/M20-B4 当前已提交：16 个代表性类别全部具有可运行 generic 证据，包含 Wah、Phaser、Chorus/Flanger 和 caller-owned optical hardware 电气组合；这不等于商业型号或任意拓扑覆盖。
 - M20-B4 已提交时的验证为核心 `538/538`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `ba897feda5a24b1782ae2da3901a6ec9`。
 - M20-C1 已提交：typed behavior graph 的 signal 端口支持固定容量多连接；同域 fan-in 在 runtime 求和，fan-out 复制到多个下游/边界输出；编译阶段仍拒绝非法域、循环、缺端口和容量超限。最新验证为核心 `540/540`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `a179267303ca48b196fa93a57e806bc7`。
+- M20-C2 已提交：通用 typed behavior → MNA control binding composite 将 control/resistance 输出经调用方显式范围映射写入预编译 MNA 控制槽，覆盖 envelope/LFO/optocoupler 类跨域组合；未宣称任意多端 MNA 或商业 sidechain。最新验证为核心 `545/545`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `ed44119e36484516814c808b0bbd9d39`。
 
 ## 当前状态补充：M20-A1
 

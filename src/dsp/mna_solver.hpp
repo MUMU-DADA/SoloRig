@@ -56,6 +56,11 @@ struct MnaSolveResult {
 
 class MnaPreparedCircuit final {
 public:
+    struct ControlRange final {
+        double minimum{};
+        double maximum{};
+    };
+
     MnaPreparedCircuit() = default;
 
     [[nodiscard]] bool Prepare(double sample_rate_hz) noexcept;
@@ -64,6 +69,7 @@ public:
     [[nodiscard]] MnaSolveResult Solve(double input_voltage) noexcept;
     [[nodiscard]] std::size_t ControlCount() const noexcept;
     [[nodiscard]] std::optional<std::size_t> FindControl(std::string_view parameter_id) const noexcept;
+    [[nodiscard]] std::optional<ControlRange> GetControlRange(std::size_t control_index) const noexcept;
     [[nodiscard]] bool SetControlTarget(std::size_t control_index, double value) noexcept;
     [[nodiscard]] std::optional<double> ControlValue(std::size_t control_index) const noexcept;
     [[nodiscard]] static constexpr RealtimeContract ProcessContract() noexcept {

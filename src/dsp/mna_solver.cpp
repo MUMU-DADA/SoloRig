@@ -835,6 +835,15 @@ std::optional<std::size_t> MnaPreparedCircuit::FindControl(std::string_view para
     return std::nullopt;
 }
 
+std::optional<MnaPreparedCircuit::ControlRange> MnaPreparedCircuit::GetControlRange(
+    std::size_t control_index) const noexcept {
+    if (control_index >= controls_.size()) {
+        return std::nullopt;
+    }
+    return ControlRange{.minimum = controls_[control_index].minimum,
+                        .maximum = controls_[control_index].maximum};
+}
+
 bool MnaPreparedCircuit::SetControlTarget(std::size_t control_index, double value) noexcept {
     if (control_index >= controls_.size() || !std::isfinite(value)) {
         return false;
