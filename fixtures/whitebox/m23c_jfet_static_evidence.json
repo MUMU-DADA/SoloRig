@@ -1,0 +1,27 @@
+{
+    "evidenceSchemaVersion": 1,
+    "moduleId": "solorig.m23c.jfet-static-reference.v1",
+    "moduleVersion": "m23c-jfet-golden-1",
+    "status": "blocked",
+    "netlist": {
+        "schemaVersion": 2,
+        "sourceRef": "fixtures/whitebox/m23c_jfet_static_circuit.json",
+        "inputHash": "sha256:solorig-m23c-jfet-static-v1"
+    },
+    "modelAuditRefs": ["self-authored-square-law-jfet-v1"],
+    "dcOperatingPoint": {"status": "passed", "sampleCount": 5, "maxAbsError": 0.0, "threshold": 1e-9},
+    "frequencyResponse": {"status": "schema-only", "sampleCount": 0},
+    "staticCurve": {"status": "passed", "sampleCount": 5, "maxAbsError": 0.0, "threshold": 1e-9},
+    "dynamicResponse": {"status": "schema-only", "sampleCount": 0},
+    "spiceComparison": {"status": "blocked", "sampleCount": 0, "referenceRef": "no-authorized-spice-data"},
+    "goldenComparison": {
+        "status": "passed", "sampleCount": 5, "maxAbsError": 0.0, "threshold": 1e-9,
+        "referenceRef": "m23c_jfet_static_golden.json"
+    },
+    "convergence": {"status": "passed", "cases": [
+        {"id": "nominal", "status": "passed", "iterations": 8},
+        {"id": "reset", "status": "passed", "iterations": 8}
+    ]},
+    "errorThresholds": {"dcAbsolute": 1e-9, "frequencyMagnitude": 1e-8, "dynamicAbsolute": 1e-9},
+    "run": {"toolVersion": "solorig-evidence-tool-m23c2e", "sampleRateHz": 192000.0, "oversampling": 1, "randomSeed": 0}
+}

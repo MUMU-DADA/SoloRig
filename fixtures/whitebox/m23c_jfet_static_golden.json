@@ -1,0 +1,27 @@
+{
+    "schemaVersion": 1,
+    "kind": "self-authored-mathematical-golden",
+    "caseId": "solorig.m23c.jfet-static.v1",
+    "circuitSourceRef": "fixtures/whitebox/m23c_jfet_static_circuit.json",
+    "inputHash": "sha256:solorig-m23c-jfet-static-v1",
+    "formula": {
+        "type": "square-law-n-channel-jfet-common-source",
+        "pinchOffVoltage": 1.0,
+        "transconductanceParameter": 0.001,
+        "maxCurrent": 0.01,
+        "drainSupply": 5.0,
+        "drainOhms": 1000.0,
+        "sourceOhms": 1000.0
+    },
+    "run": {"sampleRateHz": 192000.0, "oversampling": 1, "randomSeed": 0},
+    "inputs": [0.0, 0.5, 1.0, 1.5, 2.0],
+    "expectedOutputs": [
+        4.61803398874989,
+        4.32287565553229,
+        4.0,
+        3.6583123951777,
+        3.30277563773199
+    ],
+    "absoluteTolerance": 1e-9,
+    "referenceStatus": "self-authored-mathematical-only"
+}
