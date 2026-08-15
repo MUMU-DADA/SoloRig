@@ -60,6 +60,8 @@ using AsioProcessCallback = void (*)(void* user,
 
 class AsioHost final {
 public:
+    static constexpr std::size_t kMaximumActiveHosts = 4U;
+
     AsioHost() = default;
     ~AsioHost();
 
@@ -113,7 +115,26 @@ private:
     static void BufferSwitch(long double_buffer_index, long direct_process) noexcept;
     static void SampleRateDidChange(double sample_rate) noexcept;
     static long AsioMessage(long selector, long value, void* message, double* optional) noexcept;
-    static void* ActiveHost() noexcept;
+    static void BufferSwitch0(long double_buffer_index, long direct_process) noexcept;
+    static void BufferSwitch1(long double_buffer_index, long direct_process) noexcept;
+    static void BufferSwitch2(long double_buffer_index, long direct_process) noexcept;
+    static void BufferSwitch3(long double_buffer_index, long direct_process) noexcept;
+    static void SampleRateDidChange0(double sample_rate) noexcept;
+    static void SampleRateDidChange1(double sample_rate) noexcept;
+    static void SampleRateDidChange2(double sample_rate) noexcept;
+    static void SampleRateDidChange3(double sample_rate) noexcept;
+    static long AsioMessage0(long selector, long value, void* message, double* optional) noexcept;
+    static long AsioMessage1(long selector, long value, void* message, double* optional) noexcept;
+    static long AsioMessage2(long selector, long value, void* message, double* optional) noexcept;
+    static long AsioMessage3(long selector, long value, void* message, double* optional) noexcept;
+    static void BufferSwitchSlot(std::size_t slot, long double_buffer_index, long direct_process) noexcept;
+    static void SampleRateDidChangeSlot(std::size_t slot, double sample_rate) noexcept;
+    static long AsioMessageSlot(std::size_t slot, long selector, long value, void* message, double* optional) noexcept;
+    static AsioHost* ActiveHost(std::size_t slot) noexcept;
+    [[nodiscard]] bool AcquireActiveSlot() noexcept;
+    void ReleaseActiveSlot() noexcept;
+
+    static constexpr std::size_t kNoActiveSlot = static_cast<std::size_t>(-1);
 
     AsioDriverInfo driver_info_;
     AsioDeviceDescriptor device_;
@@ -145,6 +166,7 @@ private:
     AsioProcessCallback callback_{};
     void* callback_user_{};
     asio_abi::ASIOCallbacks callbacks_{};
+    std::size_t active_slot_{kNoActiveSlot};
 };
 
 } // namespace solo_rig::standalone

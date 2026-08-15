@@ -20,7 +20,7 @@ using asio_abi::ASIOError;
 using asio_abi::ASIOSampleRate;
 using asio_abi::IASIO;
 
-std::atomic<AsioHost*> g_active_host{nullptr};
+std::array<std::atomic<AsioHost*>, AsioHost::kMaximumActiveHosts> g_active_hosts{};
 
 std::optional<std::wstring> ReadRegistryString(HKEY key, std::wstring_view value_name) {
     DWORD type = 0U;
@@ -483,14 +483,35 @@ bool AsioHost::Start() {
     if (running_.load(std::memory_order_acquire)) {
         return true;
     }
-    AsioHost* expected = nullptr;
-    if (!g_active_host.compare_exchange_strong(expected, this, std::memory_order_acq_rel)) {
-        return SetError(AsioHostError::StartFailed, "another ASIO host is already receiving callbacks");
+    if (!AcquireActiveSlot()) {
+        return SetError(AsioHostError::StartFailed, "maximum concurrent ASIO host callback slots are active");
+    }
+    switch (active_slot_) {
+    case 0U:
+        callbacks_.bufferSwitch = &AsioHost::BufferSwitch0;
+        callbacks_.sampleRateDidChange = &AsioHost::SampleRateDidChange0;
+        callbacks_.asioMessage = &AsioHost::AsioMessage0;
+        break;
+    case 1U:
+        callbacks_.bufferSwitch = &AsioHost::BufferSwitch1;
+        callbacks_.sampleRateDidChange = &AsioHost::SampleRateDidChange1;
+        callbacks_.asioMessage = &AsioHost::AsioMessage1;
+        break;
+    case 2U:
+        callbacks_.bufferSwitch = &AsioHost::BufferSwitch2;
+        callbacks_.sampleRateDidChange = &AsioHost::SampleRateDidChange2;
+        callbacks_.asioMessage = &AsioHost::AsioMessage2;
+        break;
+    default:
+        callbacks_.bufferSwitch = &AsioHost::BufferSwitch3;
+        callbacks_.sampleRateDidChange = &AsioHost::SampleRateDidChange3;
+        callbacks_.asioMessage = &AsioHost::AsioMessage3;
+        break;
     }
     auto* asio = static_cast<IASIO*>(driver_);
     const auto error = asio->start();
     if (error != asio_abi::kOk) {
-        g_active_host.store(nullptr, std::memory_order_release);
+        ReleaseActiveSlot();
         return SetError(AsioHostError::StartFailed, AsioDriverError(asio, "ASIO start", error));
     }
     running_.store(true, std::memory_order_release);
@@ -499,23 +520,18 @@ bool AsioHost::Start() {
 
 void AsioHost::Stop() noexcept {
     if (!running_.exchange(false, std::memory_order_acq_rel)) {
+        ReleaseActiveSlot();
         return;
     }
     if (driver_ != nullptr) {
         static_cast<IASIO*>(driver_)->stop();
     }
-    AsioHost* expected = this;
-    static_cast<void>(g_active_host.compare_exchange_strong(expected,
-                                                             nullptr,
-                                                             std::memory_order_acq_rel));
+    ReleaseActiveSlot();
 }
 
 void AsioHost::Close() noexcept {
     Stop();
-    AsioHost* expected = this;
-    static_cast<void>(g_active_host.compare_exchange_strong(expected,
-                                                             nullptr,
-                                                             std::memory_order_acq_rel));
+    ReleaseActiveSlot();
     if (driver_ != nullptr) {
         auto* asio = static_cast<IASIO*>(driver_);
         if (buffers_created_) {
@@ -723,20 +739,80 @@ void AsioHost::ReleaseDriver() noexcept {
     Close();
 }
 
-void AsioHost::BufferSwitch(long double_buffer_index, long) noexcept {
-    if (auto* host = static_cast<AsioHost*>(ActiveHost()); host != nullptr) {
+void AsioHost::BufferSwitch(long double_buffer_index, long direct_process) noexcept {
+    BufferSwitchSlot(0U, double_buffer_index, direct_process);
+}
+
+void AsioHost::BufferSwitch0(long double_buffer_index, long direct_process) noexcept {
+    BufferSwitchSlot(0U, double_buffer_index, direct_process);
+}
+
+void AsioHost::BufferSwitch1(long double_buffer_index, long direct_process) noexcept {
+    BufferSwitchSlot(1U, double_buffer_index, direct_process);
+}
+
+void AsioHost::BufferSwitch2(long double_buffer_index, long direct_process) noexcept {
+    BufferSwitchSlot(2U, double_buffer_index, direct_process);
+}
+
+void AsioHost::BufferSwitch3(long double_buffer_index, long direct_process) noexcept {
+    BufferSwitchSlot(3U, double_buffer_index, direct_process);
+}
+
+void AsioHost::BufferSwitchSlot(std::size_t slot, long double_buffer_index, long) noexcept {
+    if (auto* host = ActiveHost(slot); host != nullptr) {
         host->HandleBufferSwitch(double_buffer_index);
     }
 }
 
 void AsioHost::SampleRateDidChange(double sample_rate) noexcept {
-    if (auto* host = static_cast<AsioHost*>(ActiveHost()); host != nullptr) {
+    SampleRateDidChangeSlot(0U, sample_rate);
+}
+
+void AsioHost::SampleRateDidChange0(double sample_rate) noexcept {
+    SampleRateDidChangeSlot(0U, sample_rate);
+}
+
+void AsioHost::SampleRateDidChange1(double sample_rate) noexcept {
+    SampleRateDidChangeSlot(1U, sample_rate);
+}
+
+void AsioHost::SampleRateDidChange2(double sample_rate) noexcept {
+    SampleRateDidChangeSlot(2U, sample_rate);
+}
+
+void AsioHost::SampleRateDidChange3(double sample_rate) noexcept {
+    SampleRateDidChangeSlot(3U, sample_rate);
+}
+
+void AsioHost::SampleRateDidChangeSlot(std::size_t slot, double sample_rate) noexcept {
+    if (auto* host = ActiveHost(slot); host != nullptr) {
         host->sample_rate_changed_to_.store(sample_rate, std::memory_order_release);
     }
 }
 
 long AsioHost::AsioMessage(long selector, long value, void*, double*) noexcept {
-    auto* host = static_cast<AsioHost*>(ActiveHost());
+    return AsioMessageSlot(0U, selector, value, nullptr, nullptr);
+}
+
+long AsioHost::AsioMessage0(long selector, long value, void* message, double* optional) noexcept {
+    return AsioMessageSlot(0U, selector, value, message, optional);
+}
+
+long AsioHost::AsioMessage1(long selector, long value, void* message, double* optional) noexcept {
+    return AsioMessageSlot(1U, selector, value, message, optional);
+}
+
+long AsioHost::AsioMessage2(long selector, long value, void* message, double* optional) noexcept {
+    return AsioMessageSlot(2U, selector, value, message, optional);
+}
+
+long AsioHost::AsioMessage3(long selector, long value, void* message, double* optional) noexcept {
+    return AsioMessageSlot(3U, selector, value, message, optional);
+}
+
+long AsioHost::AsioMessageSlot(std::size_t slot, long selector, long value, void*, double*) noexcept {
+    auto* host = ActiveHost(slot);
     switch (selector) {
     case asio_abi::kSelectorSupported:
         return value == asio_abi::kEngineVersion || value == asio_abi::kResetRequest || value == asio_abi::kOverload
@@ -761,8 +837,37 @@ long AsioHost::AsioMessage(long selector, long value, void*, double*) noexcept {
     }
 }
 
-void* AsioHost::ActiveHost() noexcept {
-    return g_active_host.load(std::memory_order_acquire);
+AsioHost* AsioHost::ActiveHost(std::size_t slot) noexcept {
+    return slot < g_active_hosts.size() ? g_active_hosts[slot].load(std::memory_order_acquire) : nullptr;
+}
+
+bool AsioHost::AcquireActiveSlot() noexcept {
+    if (active_slot_ != kNoActiveSlot) {
+        return true;
+    }
+    for (std::size_t slot = 0U; slot < g_active_hosts.size(); ++slot) {
+        AsioHost* expected = nullptr;
+        if (g_active_hosts[slot].compare_exchange_strong(expected,
+                                                         this,
+                                                         std::memory_order_acq_rel,
+                                                         std::memory_order_acquire)) {
+            active_slot_ = slot;
+            return true;
+        }
+    }
+    return false;
+}
+
+void AsioHost::ReleaseActiveSlot() noexcept {
+    if (active_slot_ == kNoActiveSlot) {
+        return;
+    }
+    AsioHost* expected = this;
+    static_cast<void>(g_active_hosts[active_slot_].compare_exchange_strong(expected,
+                                                                            nullptr,
+                                                                            std::memory_order_acq_rel,
+                                                                            std::memory_order_acquire));
+    active_slot_ = kNoActiveSlot;
 }
 
 } // namespace solo_rig::standalone

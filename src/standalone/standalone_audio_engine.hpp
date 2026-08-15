@@ -28,6 +28,10 @@ public:
     [[nodiscard]] bool RefreshDrivers();
     [[nodiscard]] const std::vector<AsioDriverInfo>& Drivers() const noexcept;
     [[nodiscard]] bool Open(const AsioDriverInfo& driver, HWND system_window, RigPreset preset);
+    [[nodiscard]] bool OpenWithRouting(const AsioDriverInfo& driver,
+                                       HWND system_window,
+                                       RigPreset preset,
+                                       StandaloneAudioRouting routing);
     [[nodiscard]] bool Start();
     void Stop();
     void Close() noexcept;
@@ -45,8 +49,13 @@ public:
     [[nodiscard]] bool DropoutReported() const noexcept;
     [[nodiscard]] std::uint64_t CallbackCount() const noexcept;
     [[nodiscard]] std::uint32_t LastCallbackSampleCount() const noexcept;
+    [[nodiscard]] const StandaloneAudioRouting& Routing() const noexcept;
 
 private:
+    [[nodiscard]] bool OpenInternal(const AsioDriverInfo& driver,
+                                    HWND system_window,
+                                    RigPreset preset,
+                                    StandaloneAudioRouting routing);
     [[nodiscard]] bool BuildRuntime(const RigPreset& preset, const AudioFormat& format);
     void ReleaseRuntime() noexcept;
     void SetStatus(std::string status);
@@ -68,6 +77,7 @@ private:
     std::optional<PreparedPreset> prepared_runtime_;
     std::optional<RigRuntime> rig_runtime_;
     AudioFormat format_{};
+    StandaloneAudioRouting routing_{};
     AudioBuffer processing_input_;
     AudioBuffer processing_output_;
     std::string status_text_{"ASIO backend not configured/available"};

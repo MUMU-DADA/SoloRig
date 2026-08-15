@@ -23,32 +23,17 @@ const std::vector<AsioDriverInfo>& StandaloneAudioEngine::Drivers() const noexce
 }
 
 bool StandaloneAudioEngine::Open(const AsioDriverInfo& driver, HWND system_window, RigPreset preset) {
-    Close();
     const auto probe = AsioHost::ProbeDriver(driver, system_window);
     if (!probe.succeeded) {
+        Close();
         error_text_ = probe.driver_error;
         SetErrorStatus("ASIO probe failed");
         return false;
     }
-    if (probe.device.input_channel_count < 2U || probe.device.output_channel_count < 2U) {
-        error_text_ = "Standalone requires at least two input and two output channels";
-        SetErrorStatus("ASIO routing rejected");
-        return false;
-    }
-
-    format_ = {.sample_rate_hz = 192000.0,
-               .max_block_size = static_cast<std::uint32_t>(std::ceil(
-                   static_cast<double>(probe.preferred_buffer_size) * 192000.0 /
-                   probe.device.native_sample_rate_hz)) + 2U,
-               .channel_count = 2U,
-               .sample_representation = SampleRepresentation::Float32};
-    if (!BuildRuntime(preset, format_)) {
-        error_text_ = "selected preset could not be prepared for the ASIO format";
-        SetErrorStatus("Standalone graph rejected");
-        return false;
-    }
-
-    StandaloneAudioRouting routing{.processing_format = format_,
+    StandaloneAudioRouting routing{.processing_format = {.sample_rate_hz = 192000.0,
+                                                        .max_block_size = 1U,
+                                                        .channel_count = 2U,
+                                                        .sample_representation = SampleRepresentation::Float32},
                                    .device_buffer_size = probe.preferred_buffer_size,
                                    .inputs = {{.device_id = probe.device.device_id,
                                                .device_channel = 0U,
@@ -62,6 +47,51 @@ bool StandaloneAudioEngine::Open(const AsioDriverInfo& driver, HWND system_windo
                                                {.device_id = probe.device.device_id,
                                                 .device_channel = 1U,
                                                 .processing_channel = 1U}}};
+    return OpenInternal(driver, system_window, std::move(preset), std::move(routing));
+}
+
+bool StandaloneAudioEngine::OpenWithRouting(const AsioDriverInfo& driver,
+                                            HWND system_window,
+                                            RigPreset preset,
+                                            StandaloneAudioRouting routing) {
+    return OpenInternal(driver, system_window, std::move(preset), std::move(routing));
+}
+
+bool StandaloneAudioEngine::OpenInternal(const AsioDriverInfo& driver,
+                                         HWND system_window,
+                                         RigPreset preset,
+                                         StandaloneAudioRouting routing) {
+    Close();
+    const auto probe = AsioHost::ProbeDriver(driver, system_window);
+    if (!probe.succeeded) {
+        error_text_ = probe.driver_error;
+        SetErrorStatus("ASIO probe failed");
+        return false;
+    }
+    if (std::fabs(routing.processing_format.sample_rate_hz - 192000.0) > 0.001 ||
+        routing.processing_format.channel_count == 0U ||
+        routing.device_buffer_size == 0U) {
+        error_text_ = "Standalone routing must use 192 kHz internal processing, a positive channel count and a device block size";
+        SetErrorStatus("ASIO routing rejected");
+        return false;
+    }
+    const auto routing_validation = ValidateStandaloneAudioRouting({probe.device}, routing);
+    if (!routing_validation.errors.empty()) {
+        error_text_ = "requested physical input/output map failed routing validation";
+        SetErrorStatus("ASIO routing rejected");
+        return false;
+    }
+    routing.processing_format.max_block_size = ResampledBlockSize(
+        routing.device_buffer_size,
+        probe.device.native_sample_rate_hz,
+        routing.processing_format.sample_rate_hz) + 2U;
+    format_ = routing.processing_format;
+    if (!BuildRuntime(preset, format_)) {
+        error_text_ = "selected preset could not be prepared for the ASIO format";
+        SetErrorStatus("Standalone graph rejected");
+        return false;
+    }
+
     if (!asio_host_.Open(driver, system_window, routing, &StandaloneAudioEngine::ProcessCallback, this)) {
         error_text_ = asio_host_.LastErrorMessage();
         asio_host_.Close();
@@ -69,13 +99,15 @@ bool StandaloneAudioEngine::Open(const AsioDriverInfo& driver, HWND system_windo
         SetErrorStatus("ASIO open failed");
         return false;
     }
+    routing_ = routing;
     error_text_.clear();
     callback_count_.store(0U, std::memory_order_relaxed);
     last_callback_sample_count_.store(0U, std::memory_order_relaxed);
     const auto native_rate = static_cast<std::uint32_t>(std::lround(probe.device.native_sample_rate_hz));
     SetStatus("ASIO open: " + probe.device.display_name + " | device " +
               std::to_string(native_rate) + " Hz -> internal 192 kHz | " +
-              std::to_string(asio_host_.BufferSize()) + " samples | 2x2 graph");
+              std::to_string(asio_host_.BufferSize()) + " samples | " +
+              std::to_string(format_.channel_count) + "-channel graph");
     return true;
 }
 
@@ -104,6 +136,7 @@ void StandaloneAudioEngine::Close() noexcept {
     asio_host_.Close();
     ReleaseRuntime();
     format_ = {};
+    routing_ = {};
     processing_input_ = {};
     processing_output_ = {};
     try {
@@ -276,6 +309,10 @@ std::uint64_t StandaloneAudioEngine::CallbackCount() const noexcept {
 
 std::uint32_t StandaloneAudioEngine::LastCallbackSampleCount() const noexcept {
     return last_callback_sample_count_.load(std::memory_order_relaxed);
+}
+
+const StandaloneAudioRouting& StandaloneAudioEngine::Routing() const noexcept {
+    return routing_;
 }
 
 } // namespace solo_rig::standalone
