@@ -17,8 +17,9 @@
 ## 当前状态补充：M20-A1
 
 - M19-C 已提交为 `6c0d46e`：15 个代表性类别中 12 类具有可运行 generic 证据，Wah/Phaser、Chorus/Flanger 和真实 optical hardware 三类保持 stable refusal。
-- M20-A1 已提交为 `268f203`：typed behavior 支持 audio/control/detector/emitter 多边界输入、audio/control/resistance 多边界输出，并统一调度七类已授权 generic runtime。
+- M20-A1 已提交为 `b2010d4`：typed behavior 支持 audio/control/detector/emitter 多边界输入、audio/control/resistance 多边界输出，并统一调度七类已授权 generic runtime。
 - M20-A1 最新验证为核心 `524/524`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过；manifest `4b2a0fac94234011af10efda7fb0f30d`。
+- M20-A2a 已提交：新增版本化 `solorig-behavior-graph` JSON 到 typed graph plan 的 lowering，保留底层端口/域/拓扑拒绝；最新验证为核心 `527/527`、CTest `5/5`、VST3 Validator `47/47`、VST3/UI/backend ABI/C# contract 全通过，manifest `3cd2c978bf4748d588496fa386b5b79e`。
 - 通用 fan-out、延迟反馈、JSON 和自动 MNA 绑定仍排除；D3b/M19-A2 单延迟反馈继续由专用路径承担。
 
 ## 状态口径
@@ -146,7 +147,8 @@
 | M19-A2 | 反馈代表性验证 | 已形成未提交本地候选：self-authored generic VCO -> BBD 单延迟反馈 fixture 验证 Compile/Prepare、上一采样/子步反馈、Reset、采样率/oversampling、非有限和稳定拒绝；不宣称完整 Chorus/Flanger、真实 BBD clock feedthrough、商业硬件、SPICE 或 `reference-1to1`。 |
 | M19-B1 阶段 1 | generic 箱头前后级闭环接口审计 | 已完成静态审计：circuit v2 与 MNA 底层可以在同一实例中容纳 triode/pentode/beam tetrode、C10a Sag、C8b transformer/core 和 C10b speaker，但当前只有单 input/单 output 的 netlist 端口和组件 pins，没有前级/功放/电源/变压器/负载的阶段化 typed route contract。阶段 2 先实现显式 Compile-only contract 与 stable refusal；不在 content 层固定拓扑、控制值或隐藏状态。 |
 | M19-B1 阶段 2b/3b | generic 箱头真实 pin/net contract 与 MNA lowering/runtime | 未提交本地候选：2b 使用真实 triode/pentode/beam、C10a、transformer 四端和 speaker 两端；secondary return 保留真实 pin 名但显式接到 `ground`，并将 terminal 合并进 ground net，output 仍复用真实 `secondary_dot`。3b 已证明 caller-owned netlist 可 Compile/Prepare/Solve，48/96/192 kHz、1x/4x、Reset 和有限确定性序列通过；浮动 secondary 回归稳定拒绝。 |
-| M20-A1 | 通用 typed behavior 多边界路由与统一 runtime | 已由 `268f203` 提交：显式支持 audio/control/detector/emitter 输入和 audio/control/resistance 输出，统一调度七类已授权 generic runtime；核心 `524/524`、CTest `5/5`、Validator `47/47`、manifest `4b2a0fac94234011af10efda7fb0f30d`。通用 fan-out、延迟反馈、JSON 和自动 MNA 绑定仍排除。 |
+| M20-A1 | 通用 typed behavior 多边界路由与统一 runtime | 已由 `b2010d4` 提交：显式支持 audio/control/detector/emitter 输入和 audio/control/resistance 输出，统一调度七类已授权 generic runtime；核心 `524/524`、CTest `5/5`、Validator `47/47`、manifest `4b2a0fac94234011af10efda7fb0f30d`。通用 fan-out、延迟反馈、JSON 和自动 MNA 绑定仍排除。 |
+| M20-A2a | 版本化 typed behavior JSON lowering | 已提交：`solorig-behavior-graph` JSON 解析到已验证多域 typed plan；核心 `527/527`、CTest `5/5`、Validator `47/47`、manifest `3cd2c978bf4748d588496fa386b5b79e`。参数自动合成、外部模型加载和 JSON 到 CircuitNetlist/MNA 仍排除。 |
 | M20 | 性能与产品全量回归 | 192 kHz/过采样、CPU、延迟、无分配、稳定性、C ABI、VST3、UI 和 Validator 全量通过。 |
 
 ## 本地候选：M19-C 代表性 generic 单块/箱头覆盖审计
