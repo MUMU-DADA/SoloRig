@@ -865,6 +865,9 @@ bool Win32RigWindow::TriggerOpen() {
     if (editor_ == nullptr) {
         return false;
     }
+    const auto previous_preset = editor_->ExportPreset();
+    const auto previous_source = editor_->SourcePath();
+    const auto previous_dirty = editor_->IsDirty();
     const auto source = file_dialog_provider_ ? file_dialog_provider_(FileDialogAction::Open, editor_->SourcePath())
                                               : ShowNativeFileDialog(FileDialogAction::Open);
     if (!source.has_value()) {
@@ -876,7 +879,18 @@ bool Win32RigWindow::TriggerOpen() {
         RefreshMidiMappingControls();
     }
     if (result.success && audio_engine_ != nullptr && audio_engine_->IsOpen()) {
-        static_cast<void>(audio_engine_->ReloadPreset(editor_->ExportPreset()));
+        if (!audio_engine_->ReloadPreset(editor_->ExportPreset())) {
+            editor_->RestoreDocument(previous_preset, previous_source, previous_dirty,
+                                     "Open failed: audio graph could not be prepared; previous preset restored.");
+            if (midi_session_ != nullptr) {
+                static_cast<void>(midi_session_->SyncFromEditor());
+                RefreshMidiMappingControls();
+            }
+            UpdateAudioStatus();
+            UpdateWindowTitle();
+            InvalidateRect(window_, nullptr, FALSE);
+            return false;
+        }
         UpdateAudioStatus();
     }
     UpdateWindowTitle();
@@ -888,6 +902,9 @@ bool Win32RigWindow::TriggerImportResource() {
     if (editor_ == nullptr) {
         return false;
     }
+    const auto previous_preset = editor_->ExportPreset();
+    const auto previous_source = editor_->SourcePath();
+    const auto previous_dirty = editor_->IsDirty();
     const auto source = file_dialog_provider_ ? file_dialog_provider_(FileDialogAction::ImportResource,
                                                                        editor_->SourcePath())
                                               : ShowNativeFileDialog(FileDialogAction::ImportResource);
@@ -896,7 +913,14 @@ bool Win32RigWindow::TriggerImportResource() {
     }
     const auto result = editor_->ImportResource(*source);
     if (result.success && audio_engine_ != nullptr && audio_engine_->IsOpen()) {
-        static_cast<void>(audio_engine_->ReloadPreset(editor_->ExportPreset()));
+        if (!audio_engine_->ReloadPreset(editor_->ExportPreset())) {
+            editor_->RestoreDocument(previous_preset, previous_source, previous_dirty,
+                                     "Import failed: audio graph could not be prepared; previous preset restored.");
+            UpdateAudioStatus();
+            UpdateWindowTitle();
+            InvalidateRect(window_, nullptr, FALSE);
+            return false;
+        }
         UpdateAudioStatus();
     }
     UpdateWindowTitle();

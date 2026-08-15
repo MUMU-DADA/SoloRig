@@ -237,6 +237,23 @@ void RigEditorViewModel::SetPreset(RigPreset preset) {
     }
 }
 
+void RigEditorViewModel::RestoreDocument(RigPreset preset,
+                                         std::optional<std::filesystem::path> source,
+                                         bool dirty,
+                                         std::string status) {
+    if (preset.name.empty()) {
+        preset = DefaultEditorPreset();
+    }
+    std::string diagnostic;
+    const auto base_directory = source.has_value() ? source->parent_path() : std::filesystem::current_path();
+    auto packages = LoadExternalPackages(preset, base_directory, diagnostic);
+    ApplyPreset(std::move(preset), std::move(source), dirty, packages.value_or({}));
+    if (!diagnostic.empty()) {
+        status += " External package placeholders: " + diagnostic;
+    }
+    SetFileStatus(std::move(status));
+}
+
 void RigEditorViewModel::NewPreset() {
     ApplyPreset(DefaultEditorPreset(), std::nullopt, false);
     SetFileStatus("New preset created");

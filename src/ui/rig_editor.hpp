@@ -127,6 +127,13 @@ public:
 
     [[nodiscard]] static RigPreset DefaultEditorPreset();
     void SetPreset(RigPreset preset);
+    // Control-thread transaction rollback used when a newly loaded document
+    // cannot be prepared by the audio backend. Restores the document metadata
+    // as well as the preset so the editor and runtime describe the same graph.
+    void RestoreDocument(RigPreset preset,
+                         std::optional<std::filesystem::path> source,
+                         bool dirty,
+                         std::string status);
     void NewPreset();
     [[nodiscard]] RigPreset ExportPreset() const;
     [[nodiscard]] EditorFileResult SaveTo(const std::filesystem::path& destination);

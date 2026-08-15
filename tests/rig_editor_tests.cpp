@@ -332,6 +332,29 @@ TEST_CASE("RigEditor rejects failed loads without changing the current canvas") 
     }
 }
 
+TEST_CASE("RigEditor restores a document snapshot after an audio preparation failure") {
+    const auto path = std::filesystem::temp_directory_path() / "solorig-editor-restore-document.srig";
+    std::error_code cleanup_error;
+    std::filesystem::remove(path, cleanup_error);
+    solo_rig::RigEditorViewModel editor;
+    REQUIRE(editor.SaveTo(path).success);
+    REQUIRE(editor.SetNodeParameter("drive-1", "drive", 6.0F));
+    const auto previous_preset = editor.ExportPreset();
+    const auto previous_source = editor.SourcePath();
+    const auto previous_dirty = editor.IsDirty();
+
+    REQUIRE(editor.SetNodeParameter("drive-1", "drive", 2.0F));
+    editor.RestoreDocument(previous_preset, previous_source, previous_dirty,
+                           "Audio graph reload failed; previous document restored.");
+
+    REQUIRE(editor.ExportPreset().nodes.front().parameter_values.at("drive") == 6.0F);
+    REQUIRE(editor.SourcePath() == previous_source);
+    REQUIRE(editor.IsDirty() == previous_dirty);
+    REQUIRE(editor.Scene().source_path == previous_source->string());
+    REQUIRE(editor.FileStatus() == "Audio graph reload failed; previous document restored.");
+    std::filesystem::remove(path, cleanup_error);
+}
+
 TEST_CASE("RigEditor restores the built-in dark theme for legacy presets without theme metadata") {
     const auto directory = std::filesystem::temp_directory_path();
     const auto legacy_path = directory / "solorig-editor-legacy-v2.srig";
