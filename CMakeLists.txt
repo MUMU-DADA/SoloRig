@@ -281,7 +281,10 @@ if(SOLO_RIG_BUILD_VST3)
         add_executable(solo_rig_vst3_tests
             tests/test_main.cpp
             tests/vst3_processor_tests.cpp
+            tests/vst3_host_lifecycle_tests.cpp
             src/vst3/solo_rig_processor.cpp
+            src/vst3/solo_rig_controller.cpp
+            src/vst3/factory.cpp
             "${SDK_ROOT}/public.sdk/source/common/memorystream.cpp"
         )
         target_include_directories(solo_rig_vst3_tests PRIVATE

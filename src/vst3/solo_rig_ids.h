@@ -1,5 +1,6 @@
 #pragma once
 
+#include "pluginterfaces/base/funknown.h"
 #include "pluginterfaces/vst/vsttypes.h"
 
 namespace solo_rig::vst3 {
