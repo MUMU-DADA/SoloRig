@@ -519,6 +519,10 @@ void Win32RigWindow::Destroy() noexcept {
         DestroyWindow(open_button_);
         open_button_ = nullptr;
     }
+    if (import_button_ != nullptr) {
+        DestroyWindow(import_button_);
+        import_button_ = nullptr;
+    }
     if (save_as_button_ != nullptr) {
         DestroyWindow(save_as_button_);
         save_as_button_ = nullptr;
@@ -880,6 +884,26 @@ bool Win32RigWindow::TriggerOpen() {
     return result.success;
 }
 
+bool Win32RigWindow::TriggerImportResource() {
+    if (editor_ == nullptr) {
+        return false;
+    }
+    const auto source = file_dialog_provider_ ? file_dialog_provider_(FileDialogAction::ImportResource,
+                                                                       editor_->SourcePath())
+                                              : ShowNativeFileDialog(FileDialogAction::ImportResource);
+    if (!source.has_value()) {
+        return false;
+    }
+    const auto result = editor_->ImportResource(*source);
+    if (result.success && audio_engine_ != nullptr && audio_engine_->IsOpen()) {
+        static_cast<void>(audio_engine_->ReloadPreset(editor_->ExportPreset()));
+        UpdateAudioStatus();
+    }
+    UpdateWindowTitle();
+    InvalidateRect(window_, nullptr, FALSE);
+    return result.success;
+}
+
 bool Win32RigWindow::HandleShortcut(std::uint32_t key, bool control, bool shift) {
     if (!control) {
         if (key == 'T' && editor_ != nullptr) {
@@ -1006,6 +1030,8 @@ LRESULT Win32RigWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
                 static_cast<void>(TriggerSaveAs());
             } else if (LOWORD(w_param) == 1003) {
                 static_cast<void>(TriggerOpen());
+            } else if (LOWORD(w_param) == 1025) {
+                static_cast<void>(TriggerImportResource());
             } else if (LOWORD(w_param) == 1004) {
                 static_cast<void>(TriggerMidiRefresh());
             } else if (LOWORD(w_param) == 1005) {
@@ -1051,6 +1077,8 @@ void Win32RigWindow::CreateToolbarButtons() {
                                       92, 16, 80, 30, window_, reinterpret_cast<HMENU>(1002), instance_, nullptr);
     open_button_ = CreateWindowExW(0, L"BUTTON", L"Open", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                    178, 16, 70, 30, window_, reinterpret_cast<HMENU>(1003), instance_, nullptr);
+    import_button_ = CreateWindowExW(0, L"BUTTON", L"Import", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                     254, 16, 90, 30, window_, reinterpret_cast<HMENU>(1025), instance_, nullptr);
     asio_refresh_button_ = CreateWindowExW(0, L"BUTTON", L"ASIO Refresh", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                            16, 50, 96, 30, window_, reinterpret_cast<HMENU>(1014), instance_, nullptr);
     asio_driver_combo_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", nullptr,
@@ -1072,11 +1100,11 @@ void Win32RigWindow::CreateToolbarButtons() {
     tuner_button_ = CreateWindowExW(0, L"BUTTON", L"Tuner", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                     988, 50, 70, 30, window_, reinterpret_cast<HMENU>(1024), instance_, nullptr);
     midi_refresh_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Refresh", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                           256, 16, 98, 30, window_, reinterpret_cast<HMENU>(1004), instance_, nullptr);
+                                           350, 16, 98, 30, window_, reinterpret_cast<HMENU>(1004), instance_, nullptr);
     midi_open_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Open", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                        360, 16, 88, 30, window_, reinterpret_cast<HMENU>(1005), instance_, nullptr);
+                                        454, 16, 88, 30, window_, reinterpret_cast<HMENU>(1005), instance_, nullptr);
     midi_close_button_ = CreateWindowExW(0, L"BUTTON", L"MIDI Close", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                         454, 16, 92, 30, window_, reinterpret_cast<HMENU>(1006), instance_, nullptr);
+                                         548, 16, 92, 30, window_, reinterpret_cast<HMENU>(1006), instance_, nullptr);
     midi_target_combo_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", nullptr,
                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
                                          560, 16, 220, 220, window_, reinterpret_cast<HMENU>(1007), instance_, nullptr);
@@ -1111,6 +1139,7 @@ void Win32RigWindow::LayoutToolbarButtons() {
     move(save_button_, 16, 16, 70, 30);
     move(save_as_button_, 92, 16, 80, 30);
     move(open_button_, 178, 16, 70, 30);
+    move(import_button_, 254, 16, 90, 30);
     move(asio_refresh_button_, 16, 50, 96, 30);
     move(asio_route_label_, 118, 56, 46, 20);
     move(asio_route_edit_, 164, 50, 190, 30);
@@ -1120,9 +1149,9 @@ void Win32RigWindow::LayoutToolbarButtons() {
     move(asio_close_button_, 666, 50, 84, 30);
     move(asio_recover_button_, 756, 50, 98, 30);
     move(tuner_button_, 860, 50, 70, 30);
-    move(midi_refresh_button_, 256, 16, 98, 30);
-    move(midi_open_button_, 360, 16, 88, 30);
-    move(midi_close_button_, 454, 16, 92, 30);
+    move(midi_refresh_button_, 350, 16, 98, 30);
+    move(midi_open_button_, 454, 16, 88, 30);
+    move(midi_close_button_, 548, 16, 92, 30);
     RECT client{};
     GetClientRect(window_, &client);
     const auto width = std::max<LONG>(1, client.right - client.left);
@@ -1230,7 +1259,9 @@ std::optional<std::string> Win32RigWindow::SelectedMidiTarget() const {
 }
 
 bool Win32RigWindow::HandleFileAction(FileDialogAction action) {
-    return action == FileDialogAction::Open ? TriggerOpen() : TriggerSave();
+    if (action == FileDialogAction::Open) return TriggerOpen();
+    if (action == FileDialogAction::Save) return TriggerSave();
+    return TriggerImportResource();
 }
 
 std::optional<std::filesystem::path> Win32RigWindow::ShowNativeFileDialog(FileDialogAction action) const {
@@ -1244,10 +1275,15 @@ std::optional<std::filesystem::path> Win32RigWindow::ShowNativeFileDialog(FileDi
     dialog.hwndOwner = window_;
     dialog.lpstrFile = filename;
     dialog.nMaxFile = static_cast<DWORD>(std::size(filename));
-    dialog.lpstrFilter = L"SoloRig Preset (*.srig)\0*.srig\0\0";
+    if (action == FileDialogAction::ImportResource) {
+        dialog.lpstrFilter = L"External Effect Resources (*.json;*.nam;*.nam-a2;*.ir;*.wav)\0*.json;*.nam;*.nam-a2;*.ir;*.wav\0All Files (*.*)\0*.*\0\0";
+    } else {
+        dialog.lpstrFilter = L"SoloRig Preset (*.srig)\0*.srig\0\0";
+    }
     dialog.nFilterIndex = 1;
-    dialog.lpstrDefExt = L"srig";
-    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+    dialog.lpstrDefExt = action == FileDialogAction::Save ? L"srig" : nullptr;
+    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY |
+                   (action == FileDialogAction::Save ? 0U : OFN_FILEMUSTEXIST);
     const auto accepted = action == FileDialogAction::Open ? GetOpenFileNameW(&dialog) :
                                                              GetSaveFileNameW(&dialog);
     return accepted != FALSE ? std::optional<std::filesystem::path>(std::filesystem::path(filename)) : std::nullopt;

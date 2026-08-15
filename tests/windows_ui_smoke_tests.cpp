@@ -175,8 +175,9 @@ TEST_CASE("Win32 standalone editor routes toolbar and shortcut persistence comma
     const auto save_as_path = directory / "solorig-ui-shortcut.srig";
     const auto open_path = directory / "solorig-ui-open.srig";
     const auto corrupt_path = directory / "solorig-ui-corrupt.srig";
+    const auto import_path = directory / "solorig-ui-import.json";
     std::error_code cleanup;
-    for (const auto& path : {save_path, save_as_path, open_path, corrupt_path}) {
+    for (const auto& path : {save_path, save_as_path, open_path, corrupt_path, import_path}) {
         std::filesystem::remove(path, cleanup);
     }
     solo_rig::RigEditorViewModel source;
@@ -184,6 +185,30 @@ TEST_CASE("Win32 standalone editor routes toolbar and shortcut persistence comma
     {
         std::ofstream output(corrupt_path, std::ios::binary | std::ios::trunc);
         output << "{not-json";
+    }
+    {
+        std::ofstream output(import_path, std::ios::binary | std::ios::trunc);
+        output << R"({
+            "version": 2,
+            "schema": "circuit",
+            "referenceGround": "0",
+            "nodes": ["in", "out", "0"],
+            "ports": [
+                {"id":"input","direction":"input","node":"in"},
+                {"id":"output","direction":"output","node":"out"}
+            ],
+            "supplies": [],
+            "components": [
+                {"id":"series","type":"resistor","pins":["in","out"],"value":1000},
+                {"id":"load","type":"resistor","pins":["out","0"],"value":1000}
+            ],
+            "solver": {
+                "method":"modified-nodal-analysis",
+                "integration":"backward-euler",
+                "oversampling":1,
+                "convergence":{"maxIterations":16,"absoluteTolerance":1e-9,"relativeTolerance":1e-6}
+            }
+        })";
     }
 
     const auto instance = GetModuleHandleW(nullptr);
@@ -196,20 +221,30 @@ TEST_CASE("Win32 standalone editor routes toolbar and shortcut persistence comma
     std::vector<solo_rig::standalone::FileDialogAction> actions;
     bool cancel_dialog = false;
     bool error_dialog = false;
+    std::size_t save_calls = 0U;
     window.SetFileDialogProvider([&](solo_rig::standalone::FileDialogAction action,
                                      const std::optional<std::filesystem::path>&) {
         actions.push_back(action);
         if (cancel_dialog) {
             return std::optional<std::filesystem::path>{};
         }
-        if (error_dialog && action == solo_rig::standalone::FileDialogAction::Open) {
+        if (error_dialog && (action == solo_rig::standalone::FileDialogAction::Open ||
+                             action == solo_rig::standalone::FileDialogAction::ImportResource)) {
             return std::optional<std::filesystem::path>(corrupt_path);
+        }
+        if (action == solo_rig::standalone::FileDialogAction::ImportResource) {
+            return std::optional<std::filesystem::path>(import_path);
         }
         if (action == solo_rig::standalone::FileDialogAction::Open) {
             return std::optional<std::filesystem::path>(open_path);
         }
-        return std::optional<std::filesystem::path>(actions.size() == 1U ? save_path : save_as_path);
+        ++save_calls;
+        return std::optional<std::filesystem::path>(save_calls == 1U ? save_path : save_as_path);
     });
+
+    REQUIRE(SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1025, BN_CLICKED), 0) == 0);
+    REQUIRE(editor.ExportPreset().external_module_packages.size() == 1U);
+    REQUIRE(editor.Scene().resource_status.find("external circuit") != std::string::npos);
 
     // WM_COMMAND exercises all three real toolbar buttons. Save on a new
     // document invokes Save As semantics and writes an actual .srig file.
@@ -251,12 +286,17 @@ TEST_CASE("Win32 standalone editor routes toolbar and shortcut persistence comma
             before_failed_load.nodes.front().parameter_values.at("drive"));
     REQUIRE(editor.SourcePath() == before_source);
     REQUIRE(editor.IsDirty() == before_dirty);
+    const auto before_failed_import = editor.ExportPreset();
+    REQUIRE(!SendMessageW(window.Handle(), WM_COMMAND, MAKEWPARAM(1025, BN_CLICKED), 0));
+    REQUIRE(editor.ExportPreset().external_module_packages.size() ==
+            before_failed_import.external_module_packages.size());
     REQUIRE(std::ranges::find(actions, solo_rig::standalone::FileDialogAction::Save) != actions.end());
     REQUIRE(std::ranges::find(actions, solo_rig::standalone::FileDialogAction::Open) != actions.end());
+    REQUIRE(std::ranges::find(actions, solo_rig::standalone::FileDialogAction::ImportResource) != actions.end());
 
     window.Destroy();
     REQUIRE(window.Handle() == nullptr);
-    for (const auto& path : {save_path, save_as_path, open_path, corrupt_path}) {
+    for (const auto& path : {save_path, save_as_path, open_path, corrupt_path, import_path}) {
         std::filesystem::remove(path, cleanup);
     }
 }

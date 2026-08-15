@@ -19,6 +19,7 @@ namespace solo_rig::standalone {
 enum class FileDialogAction {
     Open,
     Save,
+    ImportResource,
 };
 
 using FileDialogProvider = std::function<std::optional<std::filesystem::path>(
@@ -47,6 +48,7 @@ public:
     [[nodiscard]] bool TriggerSave();
     [[nodiscard]] bool TriggerSaveAs();
     [[nodiscard]] bool TriggerOpen();
+    [[nodiscard]] bool TriggerImportResource();
     // Centralized command dispatch keeps keyboard shortcuts testable without
     // depending on the host keyboard state. WM_KEYDOWN forwards to this path.
     [[nodiscard]] bool HandleShortcut(std::uint32_t key, bool control, bool shift);
@@ -111,6 +113,7 @@ private:
     HWND save_button_{};
     HWND save_as_button_{};
     HWND open_button_{};
+    HWND import_button_{};
     HWND asio_refresh_button_{};
     HWND asio_open_button_{};
     HWND asio_start_button_{};
