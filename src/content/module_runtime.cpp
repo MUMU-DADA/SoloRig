@@ -602,6 +602,76 @@ private:
     std::unique_ptr<ImpulseResponseConvolver> convolver_;
 };
 
+class NamedMnaPortProcessor final : public NamedAudioPortProcessor {
+public:
+    NamedMnaPortProcessor(MnaPreparedCircuit circuit, const CircuitNetlist& netlist)
+        : circuit_(std::move(circuit)) {
+        for (const auto& port : netlist.ports) {
+            auto& list = port.direction == CircuitPortDirection::Input ? inputs_ : outputs_;
+            if (list.count >= list.ports.size()) {
+                valid_ = false;
+                continue;
+            }
+            list.ports[list.count++] = {port.id, port.direction == CircuitPortDirection::Input
+                    ? NamedAudioPortDirection::Input : NamedAudioPortDirection::Output,
+                NamedAudioPortDomain::AudioSignal, 1U};
+        }
+        valid_ = valid_ && inputs_.count > 0U && outputs_.count > 0U;
+    }
+
+    [[nodiscard]] NamedAudioPortContractList InputPorts() const noexcept override { return inputs_; }
+    [[nodiscard]] NamedAudioPortContractList OutputPorts() const noexcept override { return outputs_; }
+
+    bool Prepare(const AudioFormat& format, std::uint32_t oversampling) override {
+        prepared_ = false;
+        if (!valid_ || !format.Validate().empty() || oversampling == 0U || oversampling > 16U ||
+            circuit_.InputCount() != inputs_.count || circuit_.OutputCount() != outputs_.count) {
+            return false;
+        }
+        prepared_ = circuit_.Prepare(format.sample_rate_hz);
+        return prepared_;
+    }
+
+    bool Process(std::span<const NamedAudioPortInput> inputs,
+                 std::span<NamedAudioPortOutput> outputs,
+                 std::uint32_t sample_count) noexcept override {
+        if (!prepared_ || inputs.size() != inputs_.count || outputs.size() != outputs_.count) return false;
+        for (std::size_t index = 0U; index < inputs.size(); ++index) {
+            if (inputs[index].buffer == nullptr || inputs[index].buffer->ChannelCount() != 1U ||
+                inputs[index].buffer->Capacity() < sample_count) return false;
+        }
+        for (std::size_t index = 0U; index < outputs.size(); ++index) {
+            if (outputs[index].buffer == nullptr || outputs[index].buffer->ChannelCount() != 1U ||
+                outputs[index].buffer->Capacity() < sample_count) return false;
+        }
+
+        std::array<double, kMaximumNamedAudioPorts> input_values{};
+        for (std::uint32_t sample = 0U; sample < sample_count; ++sample) {
+            for (std::size_t index = 0U; index < inputs.size(); ++index) {
+                input_values[index] = inputs[index].buffer->ChannelData(0U)[sample];
+            }
+            const auto solved = circuit_.Solve(std::span<const double>(input_values.data(), inputs.size()));
+            if (!solved.Succeeded()) return false;
+            for (std::size_t index = 0U; index < outputs.size(); ++index) {
+                const auto value = circuit_.OutputValue(index);
+                if (!value.has_value() || !std::isfinite(*value)) return false;
+                outputs[index].buffer->ChannelData(0U)[sample] = static_cast<float>(*value);
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] std::uint32_t DeclaredLatencySamples() const noexcept override { return 0U; }
+    void Reset() noexcept override { circuit_.Reset(); }
+
+private:
+    MnaPreparedCircuit circuit_;
+    NamedAudioPortContractList inputs_;
+    NamedAudioPortContractList outputs_;
+    bool valid_{true};
+    bool prepared_{};
+};
+
 bool HasSinglePortPair(const EffectDescriptor& descriptor) {
     std::size_t inputs{};
     std::size_t outputs{};
@@ -649,6 +719,46 @@ std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> Create
     }
     return std::unique_ptr<ModuleRuntimeProcessor>(std::make_unique<ImpulseResponseRuntime>(
         package.descriptor.declared_latency_samples, std::move(convolver)));
+}
+
+std::variant<std::unique_ptr<NamedAudioPortProcessor>, ModuleRuntimeError> CreateNamedMnaRuntime(
+    const ModulePackage& package, const CircuitNetlist& circuit, const ModelDatabase* model_database) {
+    if (package.descriptor.category != EffectCategory::AnalogCircuit) {
+        return ModuleRuntimeError::LogicCategoryMismatch;
+    }
+    const auto compiled = model_database == nullptr
+        ? CompileMnaCircuit(circuit) : CompileMnaCircuit(circuit, *model_database);
+    if (!compiled.circuit.has_value()) {
+        return compiled.error == MnaCompileError::UnsupportedComponent
+            ? ModuleRuntimeError::UnsupportedCircuit : ModuleRuntimeError::UnsupportedAnalogTopology;
+    }
+    const auto input_count = static_cast<std::size_t>(std::count_if(
+        circuit.ports.begin(), circuit.ports.end(),
+        [](const CircuitPort& port) { return port.direction == CircuitPortDirection::Input; }));
+    const auto output_count = static_cast<std::size_t>(std::count_if(
+        circuit.ports.begin(), circuit.ports.end(),
+        [](const CircuitPort& port) { return port.direction == CircuitPortDirection::Output; }));
+    if (input_count == 0U || output_count == 0U || input_count > kMaximumNamedAudioPorts ||
+        output_count > kMaximumNamedAudioPorts || compiled.circuit->InputCount() != input_count ||
+        compiled.circuit->OutputCount() != output_count) {
+        return ModuleRuntimeError::UnsupportedPortLayout;
+    }
+    for (const auto& circuit_port : circuit.ports) {
+        const auto descriptor_port = std::find_if(package.descriptor.ports.begin(), package.descriptor.ports.end(),
+            [&circuit_port](const EffectPort& port) {
+                const auto direction = circuit_port.direction == CircuitPortDirection::Input
+                    ? PortDirection::Input : PortDirection::Output;
+                return port.id == circuit_port.id && port.direction == direction;
+            });
+        if (descriptor_port == package.descriptor.ports.end() || descriptor_port->max_channels != 1U) {
+            return ModuleRuntimeError::UnsupportedPortLayout;
+        }
+    }
+    if (package.descriptor.ports.size() != circuit.ports.size()) {
+        return ModuleRuntimeError::UnsupportedPortLayout;
+    }
+    return std::unique_ptr<NamedAudioPortProcessor>(
+        std::make_unique<NamedMnaPortProcessor>(std::move(*compiled.circuit), circuit));
 }
 
 std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateAnalogRuntime(const ModulePackage& package,
@@ -890,6 +1000,15 @@ std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> Create
             : ModuleRuntimeError::LogicCategoryMismatch;
     }
     return CreateModuleRuntime(package);
+}
+
+std::variant<std::unique_ptr<NamedAudioPortProcessor>, ModuleRuntimeError>
+CreateNamedMnaPortProcessor(const ModulePackage& package, const ModelDatabase* model_database) {
+    if (const auto* circuit = std::get_if<CircuitNetlist>(&package.logic)) {
+        return CreateNamedMnaRuntime(package, *circuit, model_database);
+    }
+    return package.logic.index() == 0U ? ModuleRuntimeError::MissingLogic
+                                      : ModuleRuntimeError::UnsupportedCategory;
 }
 
 } // namespace solo_rig

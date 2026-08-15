@@ -3,6 +3,7 @@
 #include "content/module_package.hpp"
 #include "content/model_database.hpp"
 #include "core/audio_graph.hpp"
+#include "core/named_audio_graph.hpp"
 
 #include <memory>
 #include <optional>
@@ -39,5 +40,12 @@ public:
     const ModulePackage& package);
 [[nodiscard]] std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateModuleRuntime(
     const ModulePackage& package, const ModelDatabase& model_database);
+
+// Named-port boundary for Circuit v2 packages whose input and output counts
+// differ. The returned processor is intended for NamedPortAudioGraph; the
+// legacy ModuleRuntimeProcessor path intentionally keeps its AudioBuffer
+// channel-count contract unchanged.
+[[nodiscard]] std::variant<std::unique_ptr<NamedAudioPortProcessor>, ModuleRuntimeError>
+CreateNamedMnaPortProcessor(const ModulePackage& package, const ModelDatabase* model_database = nullptr);
 
 } // namespace solo_rig

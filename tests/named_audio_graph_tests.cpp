@@ -1,5 +1,7 @@
 #include "content/behavior_audio_processor.hpp"
 #include "content/behavior_ports.hpp"
+#include "content/module_package.hpp"
+#include "content/module_runtime.hpp"
 #include "core/named_audio_graph.hpp"
 #include "test_framework.hpp"
 
@@ -7,6 +9,8 @@
 
 #include <array>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <utility>
@@ -111,6 +115,22 @@ void AddAudioBoundary(solo_rig::NamedPortAudioGraph& graph) {
     REQUIRE(graph.AddOutputPort("audio", solo_rig::NamedAudioPortDomain::AudioSignal, 1U));
 }
 
+std::filesystem::path CreateDifferentIoMnaPackage() {
+    const auto directory = std::filesystem::temp_directory_path() / "SoloRigNamedMnaPackageTest";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    std::filesystem::create_directories(directory / "logic", error);
+    {
+        std::ofstream manifest(directory / "manifest.json", std::ios::binary | std::ios::trunc);
+        manifest << R"({"schemaVersion":1,"moduleId":"org.mumu-dada.solorig.named-mna-mixer","displayName":"Named MNA Mixer","category":"analog-circuit","logicFile":"logic/main.json","ports":[{"id":"in-a","direction":"input","maxChannels":1},{"id":"in-b","direction":"input","maxChannels":1},{"id":"out","direction":"output","maxChannels":1}]})";
+    }
+    {
+        std::ofstream logic(directory / "logic" / "main.json", std::ios::binary | std::ios::trunc);
+        logic << R"({"version":2,"schema":"circuit","referenceGround":"0","nodes":["in-a","in-b","out","0"],"ports":[{"id":"in-a","direction":"input","node":"in-a"},{"id":"in-b","direction":"input","node":"in-b"},{"id":"out","direction":"output","node":"out"}],"components":[{"id":"ra","type":"resistor","pins":["in-a","out"],"value":1000},{"id":"rb","type":"resistor","pins":["in-b","out"],"value":1000},{"id":"load","type":"resistor","pins":["out","0"],"value":1000}],"solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":4,"convergence":{"maxIterations":64,"absoluteTolerance":1e-9,"relativeTolerance":1e-6}}})";
+    }
+    return directory;
+}
+
 } // namespace
 
 TEST_CASE("M22-B2 named port graph executes typed detector sidechain at 192 kHz") {
@@ -213,4 +233,54 @@ TEST_CASE("M22-B2 named port graph rejects scalar typed behavior on multichannel
                                        .channel_count = 2U}, 1U);
     REQUIRE(!errors.empty());
     REQUIRE(errors.front() == solo_rig::NamedAudioGraphPreparationError::ProcessorRejectedFormat);
+}
+
+TEST_CASE("M22-B3 external MNA package maps different named I/O counts into the graph") {
+    const auto directory = CreateDifferentIoMnaPackage();
+    const auto package = solo_rig::LoadModulePackage(directory);
+    REQUIRE(package.package.has_value());
+    auto processor = solo_rig::CreateNamedMnaPortProcessor(*package.package);
+    REQUIRE(std::holds_alternative<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor));
+
+    solo_rig::NamedPortAudioGraph graph;
+    REQUIRE(graph.AddInputPort("a", solo_rig::NamedAudioPortDomain::AudioSignal, 1U));
+    REQUIRE(graph.AddInputPort("b", solo_rig::NamedAudioPortDomain::AudioSignal, 1U));
+    REQUIRE(graph.AddOutputPort("mix", solo_rig::NamedAudioPortDomain::AudioSignal, 1U));
+    REQUIRE(graph.AddNode("mna", std::move(std::get<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(processor))));
+    REQUIRE(graph.Connect({"input", "a", "mna", "in-a"}));
+    REQUIRE(graph.Connect({"input", "b", "mna", "in-b"}));
+    REQUIRE(graph.Connect({"mna", "out", "output", "mix"}));
+    REQUIRE(graph.Prepare(Format(), 4U).empty());
+
+    std::array<solo_rig::AudioBuffer, 2U> inputs{
+        solo_rig::AudioBuffer(1U, 8U), solo_rig::AudioBuffer(1U, 8U)};
+    std::array<solo_rig::AudioBuffer, 1U> outputs{solo_rig::AudioBuffer(1U, 8U)};
+    inputs[0].ChannelData(0U)[0] = 1.0F;
+    inputs[1].ChannelData(0U)[0] = 0.0F;
+    REQUIRE(graph.Process(std::span<const solo_rig::AudioBuffer>(inputs),
+                          std::span<solo_rig::AudioBuffer>(outputs), 1U));
+    REQUIRE(std::fabs(outputs[0].ChannelData(0U)[0] - (1.0F / 3.0F)) < 0.001F);
+    graph.Reset();
+    REQUIRE(graph.Process(std::span<const solo_rig::AudioBuffer>(inputs),
+                          std::span<solo_rig::AudioBuffer>(outputs), 1U));
+    REQUIRE(std::fabs(outputs[0].ChannelData(0U)[0] - (1.0F / 3.0F)) < 0.001F);
+
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+}
+
+TEST_CASE("M22-B3 external MNA factory rejects non-scalar descriptor ports") {
+    const auto directory = CreateDifferentIoMnaPackage();
+    {
+        std::ofstream manifest(directory / "manifest.json", std::ios::binary | std::ios::trunc);
+        manifest << R"({"schemaVersion":1,"moduleId":"org.mumu-dada.solorig.named-mna-mixer","displayName":"Named MNA Mixer","category":"analog-circuit","logicFile":"logic/main.json","ports":[{"id":"in-a","direction":"input","maxChannels":2},{"id":"in-b","direction":"input","maxChannels":1},{"id":"out","direction":"output","maxChannels":1}]})";
+    }
+    const auto package = solo_rig::LoadModulePackage(directory);
+    REQUIRE(package.package.has_value());
+    const auto processor = solo_rig::CreateNamedMnaPortProcessor(*package.package);
+    REQUIRE(std::holds_alternative<solo_rig::ModuleRuntimeError>(processor));
+    REQUIRE(std::get<solo_rig::ModuleRuntimeError>(processor) ==
+            solo_rig::ModuleRuntimeError::UnsupportedPortLayout);
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
 }
