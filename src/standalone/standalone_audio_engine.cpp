@@ -142,6 +142,7 @@ void StandaloneAudioEngine::Close() noexcept {
     asio_coordinator_.Close();
     ReleaseRuntime();
     module_registry_.ClearExternalPackages();
+    active_preset_.reset();
     format_ = {};
     routing_ = {};
     processing_input_ = {};
@@ -162,16 +163,36 @@ bool StandaloneAudioEngine::ReloadPreset(RigPreset preset) {
         return false;
     }
     const auto was_running = asio_coordinator_.IsRunning();
+    const auto previous_preset = active_preset_;
+    const auto restore_previous = [&]() {
+        ReleaseRuntime();
+        if (!previous_preset.has_value() || !BuildRuntime(*previous_preset, format_)) {
+            return false;
+        }
+        if (was_running && !asio_coordinator_.Start()) {
+            ReleaseRuntime();
+            return false;
+        }
+        return true;
+    };
     asio_coordinator_.Stop();
     ReleaseRuntime();
     if (!BuildRuntime(preset, format_)) {
         error_text_ = "selected preset could not be prepared for the ASIO format";
-        SetErrorStatus("Standalone graph reload failed");
+        if (restore_previous()) {
+            SetErrorStatus("Standalone graph reload failed; previous graph restored");
+            return false;
+        }
+        SetErrorStatus("Standalone graph reload failed; previous graph could not be restored");
         return false;
     }
     if (was_running && !asio_coordinator_.Start()) {
         error_text_ = asio_coordinator_.LastErrorMessage();
-        SetErrorStatus("ASIO restart failed after graph reload");
+        if (restore_previous()) {
+            SetErrorStatus("ASIO restart failed after graph reload; previous graph restored");
+            return false;
+        }
+        SetErrorStatus("ASIO restart failed after graph reload; previous graph could not be restored");
         return false;
     }
     error_text_.clear();
@@ -309,6 +330,18 @@ bool StandaloneAudioEngine::RunExternalModulePackageRuntimeSelfTest() {
         float* outputs[] = {output.data()};
         engine.ProcessBlock(inputs, outputs, 1U, 1U);
         const auto valid = std::fabs(output[0] - 0.25F) < 0.0001F;
+        if (!engine.active_preset_.has_value() || engine.active_preset_->preset_id != preset.preset_id) {
+            std::filesystem::remove_all(directory, cleanup);
+            return false;
+        }
+        engine.ReleaseRuntime();
+        auto invalid_preset = preset;
+        invalid_preset.external_module_packages.front().root_directory = directory / "missing-module";
+        if (engine.BuildRuntime(invalid_preset, format) || !engine.active_preset_.has_value() ||
+            engine.active_preset_->preset_id != preset.preset_id || !engine.BuildRuntime(*engine.active_preset_, format)) {
+            std::filesystem::remove_all(directory, cleanup);
+            return false;
+        }
         engine.ReleaseRuntime();
         const std::array<std::uint8_t, 48> wave{
             'R', 'I', 'F', 'F', 40U, 0U, 0U, 0U, 'W', 'A', 'V', 'E',
@@ -414,6 +447,7 @@ bool StandaloneAudioEngine::BuildRuntime(const RigPreset& preset, const AudioFor
             return false;
         }
         mailbox_.Submit(*prepared_runtime_);
+        active_preset_ = prepared_runtime_->preset;
         format_ = format;
         return true;
     } catch (...) {

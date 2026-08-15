@@ -96,6 +96,9 @@ private:
     RealtimePresetMailbox mailbox_;
     std::optional<PreparedPreset> prepared_runtime_;
     std::optional<RigRuntime> rig_runtime_;
+    // Control-thread snapshot used to restore the previous graph when a
+    // stopped-boundary preset reload fails validation or preparation.
+    std::optional<RigPreset> active_preset_;
     AudioFormat format_{};
     StandaloneAudioRouting routing_{};
     AudioBuffer processing_input_;
