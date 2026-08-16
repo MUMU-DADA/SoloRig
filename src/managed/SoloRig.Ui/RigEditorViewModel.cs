@@ -114,15 +114,17 @@ public sealed record ParameterEditorSnapshot(string Target, string Id, float Val
 
 public sealed class AsioRouteSelection : INotifyPropertyChanged
 {
+    private Func<bool> canEdit;
     private IReadOnlyList<AsioDriverSnapshot> driverOptions = [];
     private IReadOnlyList<uint> deviceChannels = [];
     private int selectedDriverIndex = -1;
     private uint selectedDeviceChannel;
 
-    public AsioRouteSelection(string directionLabel, uint processingChannel)
+    public AsioRouteSelection(string directionLabel, uint processingChannel, Func<bool>? canEdit = null)
     {
         DirectionLabel = directionLabel;
         ProcessingChannel = processingChannel;
+        this.canEdit = canEdit ?? (() => true);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -130,19 +132,21 @@ public sealed class AsioRouteSelection : INotifyPropertyChanged
     public uint ProcessingChannel { get; }
     public IReadOnlyList<AsioDriverSnapshot> DriverOptions => driverOptions;
     public IReadOnlyList<uint> DeviceChannels => deviceChannels;
+    public bool IsEditable => canEdit();
+    public bool CanEditDeviceChannel => IsEditable && HasSelectedDriver;
     public int SelectedDriverIndex
     {
         get => selectedDriverIndex;
         set
         {
-            if (selectedDriverIndex == value)
+            if (!IsEditable || selectedDriverIndex == value)
             {
                 return;
             }
             selectedDriverIndex = value;
             UpdateDeviceChannels();
             OnPropertiesChanged(nameof(SelectedDriver), nameof(HasSelectedDriver), nameof(DeviceChannels), nameof(SelectedDeviceChannel),
-                nameof(IsConfigured), nameof(RouteText));
+                nameof(CanEditDeviceChannel), nameof(IsConfigured), nameof(RouteText));
         }
     }
     public uint SelectedDeviceChannel
@@ -150,7 +154,7 @@ public sealed class AsioRouteSelection : INotifyPropertyChanged
         get => selectedDeviceChannel;
         set
         {
-            if (selectedDeviceChannel == value)
+            if (!IsEditable || selectedDeviceChannel == value)
             {
                 return;
             }
@@ -183,11 +187,15 @@ public sealed class AsioRouteSelection : INotifyPropertyChanged
         }
         UpdateDeviceChannels();
         OnPropertiesChanged(nameof(DriverOptions), nameof(SelectedDriverIndex), nameof(SelectedDriver), nameof(HasSelectedDriver),
-            nameof(DeviceChannels), nameof(SelectedDeviceChannel), nameof(IsConfigured), nameof(RouteText));
+            nameof(DeviceChannels), nameof(SelectedDeviceChannel), nameof(CanEditDeviceChannel), nameof(IsConfigured), nameof(RouteText));
     }
 
     public AsioChannelRouteSnapshot ToSnapshot() => new(
         (uint)selectedDriverIndex, selectedDeviceChannel, ProcessingChannel);
+
+    public void NotifyEditingStateChanged() => OnPropertiesChanged(nameof(IsEditable), nameof(CanEditDeviceChannel));
+
+    public void SetEditPredicate(Func<bool> predicate) => canEdit = predicate ?? (() => true);
 
     private void UpdateDeviceChannels()
     {
@@ -270,6 +278,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     {
         foreach (var route in asioInputRoutes.Concat(asioOutputRoutes))
         {
+            route.SetEditPredicate(() => !AudioOpen);
             route.PropertyChanged += AsioRouteChanged;
         }
         try
@@ -417,11 +426,14 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 outputs.GroupBy(route => (route.DriverIndex, route.DeviceChannel)).All(group => group.Count() == 1);
         }
     }
-    public string AsioRouteValidationText => !asioInputRoutes.All(route => route.IsConfigured) ||
-        !asioOutputRoutes.All(route => route.IsConfigured)
-        ? "路由待配置"
-        : AsioRouteMapValid ? "路由有效 · 可使用多个 ASIO 设备" : "路由无效 · 输入处理通道或物理端口重复";
+    public string AsioRouteValidationText => AudioOpen
+        ? "ASIO 已打开 · 路由已锁定，关闭后可修改"
+        : !asioInputRoutes.All(route => route.IsConfigured) || !asioOutputRoutes.All(route => route.IsConfigured)
+            ? "路由待配置"
+            : AsioRouteMapValid ? "路由有效 · 可使用多个 ASIO 设备" : "路由无效 · 输入处理通道或物理端口重复";
     public bool CanOpenAsio => HasAsioDrivers && !AudioOpen && AsioRouteMapValid;
+    public bool CanEditAsioRoutes => !AudioOpen;
+    public bool CanRefreshAsio => !AudioOpen;
     public bool CanStartAsio => AudioOpen && !AudioRunning;
     public bool CanStopAsio => AudioRunning;
     public bool CanCloseAsio => AudioOpen;
@@ -433,6 +445,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public IReadOnlyList<MidiLearnTargetSnapshot> MidiLearnTargets => midiLearnTargets;
     public IReadOnlyList<BindingSnapshot> MidiBindings => snapshot.Bindings;
     public bool CanOpenMidi => SelectedMidiDevice is not null && !MidiOpen;
+    public bool CanEditMidiDeviceSelection => !MidiOpen;
+    public bool CanSelectMidiDevice => CanEditMidiDeviceSelection && HasMidiDevices;
+    public bool CanRefreshMidi => !MidiOpen;
     public bool CanCloseMidi => MidiOpen;
     public bool CanDrainMidi => MidiOpen;
     public bool CanArmMidiLearn => MidiOpen && SelectedMidiLearnTarget is not null && !MidiLearnArmed;
@@ -458,6 +473,10 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         get => selectedMidiDeviceIndex;
         set
         {
+            if (!CanEditMidiDeviceSelection)
+            {
+                return;
+            }
             if (Set(ref selectedMidiDeviceIndex, value))
             {
                 OnPropertiesChanged(nameof(SelectedMidiDevice), nameof(CanOpenMidi));
@@ -578,7 +597,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         4 => "learned",
         5 => "error",
         _ => "unknown"
-    }} · 丢弃 {snapshot.MidiDroppedMessageCount} 条";
+    }} · 丢弃 {snapshot.MidiDroppedMessageCount} 条{(MidiOpen ? " · 设备选择已锁定" : string.Empty)}";
     public string MidiLearnStatus => MidiLearnArmed
         ? "学习中：等待 CC"
         : "未进入学习";
@@ -636,6 +655,10 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 ? null
                 : moduleCatalog.FirstOrDefault(module => module.ModuleId == selectedCatalogModuleId);
             snapshot = nextSnapshot;
+            foreach (var route in asioInputRoutes.Concat(asioOutputRoutes))
+            {
+                route.NotifyEditingStateChanged();
+            }
             theme = nextTheme;
             selectedPresetName = string.IsNullOrWhiteSpace(snapshot.SourcePath) ||
                                  string.IsNullOrWhiteSpace(snapshot.PresetName)
@@ -666,15 +689,15 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 nameof(AudioResetRequested), nameof(AudioDropoutReported), nameof(AudioSampleRateChangedTo),
                 nameof(TunerEnabled), nameof(TunerSignalPresent), nameof(TunerMidiNote), nameof(TunerFrequencyHz),
                 nameof(TunerCentsFromNearestNote), nameof(TunerConfidence), nameof(TunerReadout), nameof(CanToggleTuner),
-                nameof(CanOpenAsio), nameof(CanStartAsio), nameof(CanStopAsio), nameof(CanCloseAsio),
+                nameof(CanOpenAsio), nameof(CanEditAsioRoutes), nameof(CanRefreshAsio), nameof(CanStartAsio), nameof(CanStopAsio), nameof(CanCloseAsio),
                 nameof(CanRecoverAsio), nameof(MidiStatus), nameof(MidiOpen), nameof(MidiLearnArmed),
                 nameof(MidiState), nameof(MidiSelectedDeviceIndex), nameof(MidiDroppedMessageCount),
-                nameof(MidiLifecycleText), nameof(CanOpenMidi), nameof(CanCloseMidi), nameof(CanDrainMidi),
+                nameof(MidiLifecycleText), nameof(CanOpenMidi), nameof(CanEditMidiDeviceSelection), nameof(CanRefreshMidi), nameof(CanCloseMidi), nameof(CanDrainMidi),
                 nameof(CanArmMidiLearn), nameof(CanCancelMidiLearn), nameof(FileStatus),
                 nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames), nameof(SelectedPresetName),
                 nameof(ModuleCatalog), nameof(ModuleCatalogSummaryText), nameof(FilteredModuleCatalog),
                 nameof(SelectedCatalogModule),
-                nameof(MidiDevices), nameof(HasMidiDevices), nameof(MidiLearnTargets), nameof(MidiBindings), nameof(SelectedMidiDevice), nameof(SelectedMidiLearnTarget),
+                nameof(MidiDevices), nameof(HasMidiDevices), nameof(CanSelectMidiDevice), nameof(MidiLearnTargets), nameof(MidiBindings), nameof(SelectedMidiDevice), nameof(SelectedMidiLearnTarget),
                 nameof(SelectedMidiTargetIndex), nameof(SelectedMidiBindingIndex), nameof(MidiLearnStatus),
                 nameof(RealtimeContract),
                 nameof(RealtimeStatus), nameof(WhiteboxStatus), nameof(WhiteboxStatusText),
@@ -696,13 +719,17 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             snapshot = backend.ReadSnapshot();
+            foreach (var route in asioInputRoutes.Concat(asioOutputRoutes))
+            {
+                route.NotifyEditingStateChanged();
+            }
             OnPropertiesChanged(nameof(Snapshot), nameof(AudioStatus), nameof(AudioOpen), nameof(AudioRunning),
                 nameof(AudioResetRequested), nameof(AudioDropoutReported), nameof(AudioSampleRateChangedTo),
                 nameof(TunerEnabled), nameof(TunerSignalPresent), nameof(TunerMidiNote), nameof(TunerFrequencyHz),
                 nameof(TunerCentsFromNearestNote), nameof(TunerConfidence), nameof(TunerReadout), nameof(TunerStatus),
-                nameof(CanToggleTuner), nameof(MidiStatus), nameof(MidiOpen), nameof(MidiLearnArmed), nameof(MidiState),
+                nameof(CanToggleTuner), nameof(CanEditAsioRoutes), nameof(CanRefreshAsio), nameof(MidiStatus), nameof(MidiOpen), nameof(MidiLearnArmed), nameof(MidiState),
                 nameof(MidiSelectedDeviceIndex), nameof(MidiDroppedMessageCount), nameof(MidiLifecycleText),
-                nameof(CanOpenMidi), nameof(CanCloseMidi), nameof(CanDrainMidi), nameof(CanArmMidiLearn),
+                nameof(CanOpenMidi), nameof(CanEditMidiDeviceSelection), nameof(CanSelectMidiDevice), nameof(CanRefreshMidi), nameof(CanCloseMidi), nameof(CanDrainMidi), nameof(CanArmMidiLearn),
                 nameof(CanCancelMidiLearn));
         }
         catch (Exception exception)
@@ -1001,6 +1028,11 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         {
             return false;
         }
+        if (!CanRefreshAsio)
+        {
+            Status = "请先关闭 ASIO，再刷新设备或修改路由";
+            return false;
+        }
         try
         {
             backend.RefreshAsioDrivers();
@@ -1097,6 +1129,11 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     {
         if (backend is null)
         {
+            return false;
+        }
+        if (!CanRefreshMidi)
+        {
+            Status = "请先关闭 MIDI 输入，再刷新设备或切换设备";
             return false;
         }
         try

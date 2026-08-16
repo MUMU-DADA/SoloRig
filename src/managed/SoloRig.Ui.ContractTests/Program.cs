@@ -25,11 +25,15 @@ Require(!viewModel.AudioOpen && !viewModel.AudioRunning && !viewModel.HasAsioDri
 Require(!viewModel.CanOpenAsio && !viewModel.CanStartAsio && !viewModel.CanStopAsio &&
         !viewModel.CanCloseAsio && !viewModel.CanRecoverAsio,
     "startup disables ASIO actions that have no valid device or lifecycle state");
+Require(viewModel.CanEditAsioRoutes && viewModel.CanRefreshAsio,
+    "closed ASIO lifecycle keeps route editing and device refresh available");
 Require(!viewModel.MidiOpen && !viewModel.MidiLearnArmed && viewModel.MidiState == 0U,
     "startup exposes a closed MIDI lifecycle state");
 Require(!viewModel.CanOpenMidi && !viewModel.CanCloseMidi && !viewModel.CanDrainMidi &&
         !viewModel.CanArmMidiLearn && !viewModel.CanCancelMidiLearn,
     "startup disables MIDI actions without an enumerated or open input");
+Require(!viewModel.CanSelectMidiDevice && viewModel.CanRefreshMidi,
+    "closed MIDI lifecycle keeps refresh available without enabling an empty selector");
 var routedDriverFixtures = new[]
 {
     new AsioDriverSnapshot("fixture-input", "Fixture Input", 4U, 2U, 44100.0),
@@ -55,6 +59,15 @@ Require(viewModel.AsioInputRoutes[0].ToSnapshot() == new AsioChannelRouteSnapsho
         viewModel.AsioOutputRoutes[0].ToSnapshot() == new AsioChannelRouteSnapshot(1U, 4U, 0U) &&
         viewModel.AsioOutputRoutes[1].ToSnapshot() == new AsioChannelRouteSnapshot(0U, 1U, 1U),
     "ASIO route editor preserves cross-device driver indexes and processing-channel mappings");
+var lockedRoute = new AsioRouteSelection("输入测试", 0U, static () => false);
+lockedRoute.SetDrivers(routedDriverFixtures);
+var lockedDriver = lockedRoute.SelectedDriverIndex;
+var lockedChannel = lockedRoute.SelectedDeviceChannel;
+lockedRoute.SelectedDriverIndex = lockedDriver == 0 ? 1 : 0;
+lockedRoute.SelectedDeviceChannel = lockedChannel + 1U;
+Require(!lockedRoute.IsEditable && !lockedRoute.CanEditDeviceChannel &&
+        lockedRoute.SelectedDriverIndex == lockedDriver && lockedRoute.SelectedDeviceChannel == lockedChannel,
+    "ASIO route selection rejects edits while its lifecycle is locked");
 Require(viewModel.AsioRouteText.Contains("Fixture Input", StringComparison.Ordinal) &&
         viewModel.AsioRouteText.Contains("Fixture Output", StringComparison.Ordinal),
     "ASIO route summary exposes both independently selected devices");

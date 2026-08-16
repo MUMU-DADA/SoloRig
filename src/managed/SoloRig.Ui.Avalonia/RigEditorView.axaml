@@ -464,7 +464,7 @@
                 <StackPanel Spacing="7" Margin="0,8,0,0">
                   <TextBlock Text="{Binding AsioRouteText}" Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
                   <TextBlock Text="{Binding AsioRouteValidationText}" Classes="srg-muted" FontSize="9" TextWrapping="Wrap" />
-                  <Button Classes="srg-button" Content="刷新 ASIO 设备" Click="RefreshAsioClick" />
+                  <Button Classes="srg-button" Content="刷新 ASIO 设备" IsEnabled="{Binding CanRefreshAsio}" Click="RefreshAsioClick" />
                   <TextBlock Text="输入路由（每行可选择不同设备）" Classes="srg-muted" FontSize="9" />
                   <ItemsControl ItemsSource="{Binding AsioInputRoutes}">
                     <ItemsControl.ItemTemplate>
@@ -472,7 +472,7 @@
                         <Grid ColumnDefinitions="48,*,72">
                           <TextBlock Text="{Binding DirectionLabel}" Classes="srg-muted" FontSize="9" VerticalAlignment="Center" />
                           <ComboBox Grid.Column="1" Margin="4,0,0,0" Classes="srg-input" ItemsSource="{Binding DriverOptions}"
-                                    SelectedIndex="{Binding SelectedDriverIndex, Mode=TwoWay}" FontSize="10" PlaceholderText="选择设备">
+                                    SelectedIndex="{Binding SelectedDriverIndex, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" FontSize="10" PlaceholderText="选择设备">
                             <ComboBox.ItemTemplate>
                               <DataTemplate>
                                 <StackPanel Spacing="1">
@@ -483,7 +483,7 @@
                             </ComboBox.ItemTemplate>
                           </ComboBox>
                           <ComboBox Grid.Column="2" Margin="4,0,0,0" Classes="srg-input" ItemsSource="{Binding DeviceChannels}"
-                                    SelectedItem="{Binding SelectedDeviceChannel, Mode=TwoWay}" IsEnabled="{Binding HasSelectedDriver}" FontSize="10" />
+                                    SelectedItem="{Binding SelectedDeviceChannel, Mode=TwoWay}" IsEnabled="{Binding CanEditDeviceChannel}" FontSize="10" />
                         </Grid>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
@@ -495,7 +495,7 @@
                         <Grid ColumnDefinitions="48,*,72">
                           <TextBlock Text="{Binding DirectionLabel}" Classes="srg-muted" FontSize="9" VerticalAlignment="Center" />
                           <ComboBox Grid.Column="1" Margin="4,0,0,0" Classes="srg-input" ItemsSource="{Binding DriverOptions}"
-                                    SelectedIndex="{Binding SelectedDriverIndex, Mode=TwoWay}" FontSize="10" PlaceholderText="选择设备">
+                                    SelectedIndex="{Binding SelectedDriverIndex, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" FontSize="10" PlaceholderText="选择设备">
                             <ComboBox.ItemTemplate>
                               <DataTemplate>
                                 <StackPanel Spacing="1">
@@ -506,7 +506,7 @@
                             </ComboBox.ItemTemplate>
                           </ComboBox>
                           <ComboBox Grid.Column="2" Margin="4,0,0,0" Classes="srg-input" ItemsSource="{Binding DeviceChannels}"
-                                    SelectedItem="{Binding SelectedDeviceChannel, Mode=TwoWay}" IsEnabled="{Binding HasSelectedDriver}" FontSize="10" />
+                                    SelectedItem="{Binding SelectedDeviceChannel, Mode=TwoWay}" IsEnabled="{Binding CanEditDeviceChannel}" FontSize="10" />
                         </Grid>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
@@ -527,9 +527,9 @@
 
               <Expander Classes="srg-expander" Header="MIDI 控制" IsExpanded="False">
                 <StackPanel Spacing="7" Margin="0,8,0,0">
-                  <Button Classes="srg-button" Content="刷新 MIDI 设备" Click="RefreshMidiClick" />
+                  <Button Classes="srg-button" Content="刷新 MIDI 设备" IsEnabled="{Binding CanRefreshMidi}" Click="RefreshMidiClick" />
                   <ComboBox x:Name="MidiDeviceSelector" Classes="srg-input" ItemsSource="{Binding MidiDevices}"
-                            SelectedIndex="{Binding SelectedMidiDeviceIndex, Mode=TwoWay}" IsEnabled="{Binding HasMidiDevices}"
+                            SelectedIndex="{Binding SelectedMidiDeviceIndex, Mode=TwoWay}" IsEnabled="{Binding CanSelectMidiDevice}"
                             PlaceholderText="选择 MIDI 输入">
                     <ComboBox.ItemTemplate>
                       <DataTemplate><TextBlock Text="{Binding DisplayText}" Classes="srg-text" FontSize="10" /></DataTemplate>

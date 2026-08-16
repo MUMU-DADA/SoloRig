@@ -1,6 +1,6 @@
 # C# + Avalonia Standalone 产品编辑工作流
 
-当前共享视图提供固定 ASIO INPUT/OUTPUT 物理端口、效果器输出端点到输入端点的点击连接、ASIO 设备/物理通道选择、启动/停止/恢复、调音器开关，以及 MIDI 设备刷新/打开/关闭、目标选择、CC Learn/取消、绑定删除/清空和 MIDI Bank 导入。C# Standalone 已是 self-contained 独立程序生产入口；真实硬件成功打开、双设备恢复、真实 MIDI 设备压力和真实 DAW 回灌仍是后续宿主门禁。
+当前共享视图提供固定 ASIO INPUT/OUTPUT 物理端口、效果器输出端点到输入端点的点击连接、ASIO 设备/物理通道选择、启动/停止/恢复、调音器开关，以及 MIDI 设备刷新/打开/关闭、目标选择、CC Learn/取消、绑定删除/清空和 MIDI Bank 导入。ASIO 打开期间路由与设备刷新入口锁定，MIDI 打开期间设备选择与刷新入口锁定，关闭后恢复编辑。C# Standalone 已是 self-contained 独立程序生产入口；真实硬件成功打开、双设备恢复、真实 MIDI 设备压力和真实 DAW 回灌仍是后续宿主门禁。
 
 VST3 Controller 通过 bundle 内标准布局的 hostfxr/runtime 加载同一 SoloRig.Ui.Avalonia 程序集，在独立 STA/UI 线程中调用同一个 RigEditorView 和 RigEditorViewModel，创建 Avalonia 子 HWND 后挂载到 VST3 IPlugView 的 Windows 父窗口；VST3 bundle 同时携带同一 SoloRigBackend.dll，backend 或本地 runtime 不可加载时桥接直接拒绝挂载，避免出现无功能的空界面；Standalone 与 VST3 不再维护两套 C# 界面。
 
