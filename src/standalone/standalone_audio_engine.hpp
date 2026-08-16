@@ -52,6 +52,9 @@ public:
     // callback; it reads the lock-free input window captured by ProcessBlock.
     [[nodiscard]] std::optional<TuningResult> AnalyzeTuner() const;
     [[nodiscard]] static bool RunTunerCaptureSelfTest();
+    // Offline control-path contract: a recovery request without a pending
+    // ASIO fault must explain why it was rejected.
+    [[nodiscard]] static bool RunRecoveryDiagnosticSelfTest();
     // Control-thread contract test for the production package registration
     // path. It exercises package reload, registry registration and one graph
     // block without opening hardware.
@@ -70,6 +73,7 @@ public:
     [[nodiscard]] std::uint32_t OutputLatencySamples() const noexcept;
     [[nodiscard]] bool ResetRequested() const noexcept;
     [[nodiscard]] bool DropoutReported() const noexcept;
+    [[nodiscard]] double SampleRateChangedTo() const noexcept;
     [[nodiscard]] std::uint64_t CallbackCount() const noexcept;
     [[nodiscard]] std::uint32_t LastCallbackSampleCount() const noexcept;
     [[nodiscard]] const StandaloneAudioRouting& Routing() const noexcept;

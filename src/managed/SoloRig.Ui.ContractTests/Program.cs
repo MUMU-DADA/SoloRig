@@ -24,6 +24,8 @@ Require(!viewModel.TunerEnabled, "startup keeps the tuner disabled");
 Require(viewModel.MidiLearnTargets.Count >= 2, "MIDI learn exposes current parameter targets without opening hardware");
 Require(!viewModel.ArmSelectedMidiLearn(), "MIDI learn rejects an unopened MIDI input");
 Require(!viewModel.StartAsio(), "ASIO start is rejected before an explicit device open");
+Require(!viewModel.RecoverAsio() && viewModel.Status.Contains("no ASIO", StringComparison.OrdinalIgnoreCase),
+    "ASIO recovery without a pending fault reports an actionable diagnostic");
 Require(viewModel.ModuleCatalog.Count >= 2, "module catalog exposes built-in modules");
 Require(viewModel.ModuleCatalog.Any(module => module.ModuleId == "org.mumu-dada.solorig.drive"), "catalog exposes Drive metadata");
 var builtInCatalogCount = viewModel.ModuleCatalog.Count;

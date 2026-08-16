@@ -565,6 +565,16 @@ bool AsioDeviceCoordinator::DropoutReported() const noexcept {
     return false;
 }
 
+double AsioDeviceCoordinator::SampleRateChangedTo() const noexcept {
+    for (std::size_t index = 0U; index < active_device_count_; ++index) {
+        const auto sample_rate = endpoints_[index].host.SampleRateChangedTo();
+        if (std::isfinite(sample_rate) && sample_rate > 0.0) {
+            return sample_rate;
+        }
+    }
+    return 0.0;
+}
+
 AsioHostError AsioDeviceCoordinator::LastError() const noexcept {
     return last_error_;
 }

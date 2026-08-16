@@ -60,6 +60,7 @@ public:
     [[nodiscard]] std::uint32_t MasterOutputLatencySamples() const noexcept;
     [[nodiscard]] bool ResetRequested() const noexcept;
     [[nodiscard]] bool DropoutReported() const noexcept;
+    [[nodiscard]] double SampleRateChangedTo() const noexcept;
     [[nodiscard]] AsioHostError LastError() const noexcept;
     [[nodiscard]] const std::string& LastErrorMessage() const noexcept;
     [[nodiscard]] std::uint32_t RequiredInternalBlockSize() const noexcept;

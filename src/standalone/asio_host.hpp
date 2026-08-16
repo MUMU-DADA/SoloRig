@@ -70,6 +70,9 @@ public:
 
     [[nodiscard]] static std::vector<AsioDriverInfo> EnumerateDrivers();
     [[nodiscard]] static AsioProbeResult ProbeDriver(const AsioDriverInfo& driver, HWND system_window);
+    // Offline callback contract only: verifies that reset and sample-rate
+    // notifications are promoted to control-thread recovery state.
+    [[nodiscard]] static bool RunRuntimeFaultSelfTest();
 
     [[nodiscard]] bool Open(const AsioDriverInfo& driver,
                              HWND system_window,

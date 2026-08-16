@@ -814,8 +814,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         catch (Exception exception)
         {
-            Status = exception.Message;
+            var error = exception.Message;
             Refresh();
+            Status = error;
             return false;
         }
     }
@@ -902,8 +903,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         catch (Exception exception)
         {
-            Status = exception.Message;
             Refresh();
+            Status = exception.Message;
             return false;
         }
     }
@@ -1238,8 +1239,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         catch (Exception exception)
         {
-            Status = exception.Message;
+            var error = exception.Message;
             Refresh();
+            Status = error;
             return false;
         }
     }

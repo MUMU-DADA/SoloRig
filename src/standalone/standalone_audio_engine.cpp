@@ -279,7 +279,11 @@ void StandaloneAudioEngine::ReclaimCompletedTransition() noexcept {
 }
 
 bool StandaloneAudioEngine::RecoverAudio() {
-    if (!asio_coordinator_.ResetRequested() && !asio_coordinator_.DropoutReported()) {
+    const auto sample_rate_changed_to = asio_coordinator_.SampleRateChangedTo();
+    if (!asio_coordinator_.ResetRequested() && !asio_coordinator_.DropoutReported() &&
+        !(std::isfinite(sample_rate_changed_to) && sample_rate_changed_to > 0.0)) {
+        error_text_ = "no ASIO reset, dropout, or sample-rate-change fault is pending";
+        SetErrorStatus("ASIO recovery rejected");
         return false;
     }
     if (!asio_coordinator_.Recover()) {
@@ -291,6 +295,15 @@ bool StandaloneAudioEngine::RecoverAudio() {
     SetStatus("ASIO recovered: " + Device().display_name + " | " +
               std::to_string(asio_coordinator_.ActiveDeviceCount()) + " device(s)");
     return true;
+}
+
+bool StandaloneAudioEngine::RunRecoveryDiagnosticSelfTest() {
+    StandaloneAudioEngine engine;
+    if (engine.RecoverAudio()) {
+        return false;
+    }
+    return engine.ErrorText() == "no ASIO reset, dropout, or sample-rate-change fault is pending" &&
+        engine.StatusText() == "ASIO recovery rejected: no ASIO reset, dropout, or sample-rate-change fault is pending";
 }
 
 void StandaloneAudioEngine::SetTunerEnabled(bool enabled) noexcept {
@@ -666,6 +679,11 @@ std::string StandaloneAudioEngine::RuntimeStatusText() const {
     if (DropoutReported()) {
         status += " | dropout detected; recover required";
     }
+    const auto sample_rate_changed_to = SampleRateChangedTo();
+    if (std::isfinite(sample_rate_changed_to) && sample_rate_changed_to > 0.0) {
+        status += " | ASIO sample-rate callback: " + std::to_string(sample_rate_changed_to) +
+            " Hz; recover required";
+    }
     if (TunerEnabled()) {
         const auto tuning = AnalyzeTuner();
         if (!tuning.has_value()) {
@@ -696,6 +714,10 @@ std::uint32_t StandaloneAudioEngine::OutputLatencySamples() const noexcept {
 bool StandaloneAudioEngine::ResetRequested() const noexcept { return asio_coordinator_.ResetRequested(); }
 
 bool StandaloneAudioEngine::DropoutReported() const noexcept { return asio_coordinator_.DropoutReported(); }
+
+double StandaloneAudioEngine::SampleRateChangedTo() const noexcept {
+    return asio_coordinator_.SampleRateChangedTo();
+}
 
 std::uint64_t StandaloneAudioEngine::CallbackCount() const noexcept {
     return callback_count_.load(std::memory_order_relaxed);

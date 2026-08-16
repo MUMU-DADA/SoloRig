@@ -209,6 +209,23 @@ std::vector<AsioDriverInfo> AsioHost::EnumerateDrivers() {
     return result;
 }
 
+bool AsioHost::RunRuntimeFaultSelfTest() {
+    AsioHost host;
+    if (!host.AcquireActiveSlot()) {
+        return false;
+    }
+    const auto slot = host.active_slot_;
+    AsioMessageSlot(slot, asio_abi::kResetRequest, 0L, nullptr, nullptr);
+    const auto reset_reported = host.ResetRequested();
+    host.reset_requested_.store(false, std::memory_order_release);
+    SampleRateDidChangeSlot(slot, 44100.0);
+    const auto sample_rate = host.SampleRateChangedTo();
+    const auto sample_rate_reported = host.ResetRequested() &&
+        std::isfinite(sample_rate) && std::fabs(sample_rate - 44100.0) < 0.001;
+    host.ReleaseActiveSlot();
+    return reset_reported && sample_rate_reported;
+}
+
 AsioProbeResult AsioHost::ProbeDriver(const AsioDriverInfo& driver, HWND system_window) {
     AsioProbeResult result;
     AsioHost host;
@@ -788,6 +805,7 @@ void AsioHost::SampleRateDidChange3(double sample_rate) noexcept {
 void AsioHost::SampleRateDidChangeSlot(std::size_t slot, double sample_rate) noexcept {
     if (auto* host = ActiveHost(slot); host != nullptr) {
         host->sample_rate_changed_to_.store(sample_rate, std::memory_order_release);
+        host->reset_requested_.store(true, std::memory_order_release);
     }
 }
 

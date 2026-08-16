@@ -74,6 +74,7 @@ void WriteTestBitmap(const std::filesystem::path& path) {
 
 TEST_CASE("Win32 standalone editor registers creates renders resizes and destroys a hidden window") {
     REQUIRE(solo_rig::standalone::StandaloneAudioEngine::RunTunerCaptureSelfTest());
+    REQUIRE(solo_rig::standalone::StandaloneAudioEngine::RunRecoveryDiagnosticSelfTest());
     REQUIRE(solo_rig::standalone::StandaloneAudioEngine::RunExternalModulePackageRuntimeSelfTest());
     const auto instance = GetModuleHandleW(nullptr);
     REQUIRE(instance != nullptr);
