@@ -28,6 +28,7 @@ typedef enum SoloRigStatus {
     SOLO_RIG_STATUS_INVALID_PRESET = 5,
     SOLO_RIG_STATUS_INTERNAL_ERROR = 6,
     SOLO_RIG_STATUS_UNSUPPORTED = 7,
+    SOLO_RIG_STATUS_INVALID_THEME = 8,
 } SoloRigStatus;
 
 typedef struct SoloRigSnapshotInfo {
@@ -130,6 +131,11 @@ typedef struct SoloRigWhiteboxStatusView {
     const char* diagnostic_utf8;
 } SoloRigWhiteboxStatusView;
 
+typedef struct SoloRigThemeInfoView {
+    const char* id_utf8;
+    const char* display_name_utf8;
+} SoloRigThemeInfoView;
+
 typedef struct SoloRigAsioDriverView {
     const char* driver_id_utf8;
     const char* display_name_utf8;
@@ -217,6 +223,18 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_clear_node_performance(
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark(
     SoloRigBackend* backend,
     uint8_t dark);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_load_theme_utf8(
+    SoloRigBackend* backend,
+    const char* path_utf8);
+// Theme metadata and color pointers are control-thread views. Returned
+// pointers remain valid until the next operation that mutates the editor;
+// callers must copy them before making another backend call.
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_theme_info(
+    SoloRigBackend* backend,
+    SoloRigThemeInfoView* out_theme);
+SOLO_RIG_BACKEND_API const char* solorig_backend_theme_color_utf8(
+    SoloRigBackend* backend,
+    const char* color_key_utf8);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_viewport(
     SoloRigBackend* backend,
     double width,

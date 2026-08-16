@@ -423,6 +423,44 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark(
     return SOLO_RIG_STATUS_OK;
 }
 
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_load_theme_utf8(
+    SoloRigBackend* backend,
+    const char* path_utf8) {
+    if (!ValidBackend(backend) || !ValidText(path_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "a theme path is required");
+    }
+    if (!backend->editor.LoadThemeFile(PathFromUtf8(path_utf8))) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_THEME, "theme file could not be loaded");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_theme_info(
+    SoloRigBackend* backend,
+    SoloRigThemeInfoView* out_theme) {
+    if (!ValidBackend(backend) || out_theme == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "backend and theme output are required");
+    }
+    const auto& theme = backend->editor.Scene().theme;
+    out_theme->id_utf8 = theme.id.c_str();
+    out_theme->display_name_utf8 = theme.display_name.c_str();
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API const char* solorig_backend_theme_color_utf8(
+    SoloRigBackend* backend,
+    const char* color_key_utf8) {
+    if (!ValidBackend(backend) || !ValidText(color_key_utf8)) {
+        return nullptr;
+    }
+    const auto& colors = backend->editor.Scene().theme.colors;
+    const auto iterator = colors.find(color_key_utf8);
+    return iterator == colors.end() ? nullptr : iterator->second.c_str();
+}
+
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_viewport(
     SoloRigBackend* backend,
     double width,

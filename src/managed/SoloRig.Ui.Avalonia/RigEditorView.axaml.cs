@@ -6,6 +6,7 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using SoloRig.Ui;
+using System.Text.Json;
 
 namespace SoloRig.Ui.Avalonia;
 
@@ -63,6 +64,11 @@ public sealed partial class RigEditorView : UserControl
     {
         Patterns = ["*.nam", "*.nam-a2", "*.ir", "*.wav", "*.json"]
     };
+    private static readonly FilePickerFileType ThemeFileType = new("SoloRig theme")
+    {
+        Patterns = ["*.json"],
+        MimeTypes = ["application/json"]
+    };
 
     private RigEditorViewModel? viewModel;
     private bool dragging;
@@ -71,7 +77,7 @@ public sealed partial class RigEditorView : UserControl
     public RigEditorView()
     {
         InitializeComponent();
-        ApplyTheme(true);
+        ApplyTheme(ThemeSnapshot.Empty, true);
     }
 
     public RigEditorView(RigEditorViewModel editor)
@@ -121,6 +127,66 @@ public sealed partial class RigEditorView : UserControl
         return changed && restored;
     }
 
+    public bool ProbeExternalTheme()
+    {
+        if (viewModel is null || !HasThemePalette || string.IsNullOrWhiteSpace(viewModel.Theme.Id))
+        {
+            return false;
+        }
+
+        var originalTheme = viewModel.Theme;
+        var originalWindow = (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color;
+        var customPath = Path.Combine(Path.GetTempPath(), $"solorig-theme-probe-{Guid.NewGuid():N}.json");
+        var restorePath = Path.Combine(Path.GetTempPath(), $"solorig-theme-restore-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(customPath, """
+{
+  "schemaVersion": 1,
+  "id": "probe.external",
+  "displayName": "Probe External",
+  "colors": {
+    "background": "#0F172A",
+    "surface": "#1E293B",
+    "text": "#F8FAFC",
+    "accent": "#F97316",
+    "window": "#0B1120",
+    "canvas": "#111827"
+  },
+  "metrics": {
+    "gridSize": 16,
+    "cornerRadius": 8
+  }
+}
+""");
+            File.WriteAllText(restorePath, JsonSerializer.Serialize(new
+            {
+                schemaVersion = 1,
+                id = originalTheme.Id,
+                displayName = originalTheme.DisplayName,
+                colors = originalTheme.Colors,
+                metrics = new { gridSize = 16, cornerRadius = 8 }
+            }));
+
+            var loaded = viewModel.LoadTheme(customPath);
+            var applied = loaded && viewModel.Theme.Id == "probe.external" &&
+                          (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == Color.Parse("#0B1120") &&
+                          (Resources["SrgAccentBrush"] as SolidColorBrush)?.Color == Color.Parse("#F97316");
+            var restored = viewModel.LoadTheme(restorePath) && viewModel.Theme.Id == originalTheme.Id &&
+                           (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == originalWindow;
+            return applied && restored;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try { File.Delete(customPath); } catch { }
+            try { File.Delete(restorePath); } catch { }
+        }
+    }
+
     public void AttachEditor(RigEditorViewModel editor)
     {
         ArgumentNullException.ThrowIfNull(editor);
@@ -137,7 +203,7 @@ public sealed partial class RigEditorView : UserControl
         viewModel = editor;
         DataContext = editor;
         editor.PropertyChanged += ViewModelPropertyChanged;
-        ApplyTheme(editor.DarkTheme);
+        ApplyTheme(editor.Theme, editor.DarkTheme);
     }
 
     public void HandleWindowKeyDown(KeyEventArgs args)
@@ -173,15 +239,16 @@ public sealed partial class RigEditorView : UserControl
 
     private void ViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
     {
-        if (args.PropertyName == nameof(RigEditorViewModel.DarkTheme) && viewModel is not null)
+        if ((args.PropertyName == nameof(RigEditorViewModel.DarkTheme) ||
+             args.PropertyName == nameof(RigEditorViewModel.Theme)) && viewModel is not null)
         {
-            ApplyTheme(viewModel.DarkTheme);
+            ApplyTheme(viewModel.Theme, viewModel.DarkTheme);
         }
     }
 
-    private void ApplyTheme(bool dark)
+    private void ApplyTheme(ThemeSnapshot theme, bool dark)
     {
-        var palette = dark ? DarkPalette : LightPalette;
+        var palette = ResolvePalette(theme, dark);
         SetBrush("SrgWindowBrush", palette.Window);
         SetBrush("SrgTopbarBrush", palette.Topbar);
         SetBrush("SrgPanelBrush", palette.Panel);
@@ -225,6 +292,50 @@ public sealed partial class RigEditorView : UserControl
             topLevel.RequestedThemeVariant = dark ? ThemeVariant.Dark : ThemeVariant.Light;
         }
     }
+
+    private static ThemePalette ResolvePalette(ThemeSnapshot theme, bool dark)
+    {
+        var fallback = dark ? DarkPalette : LightPalette;
+        var background = ThemeColor(theme, "background", fallback.Window);
+        var surface = ThemeColor(theme, "surface", fallback.Control);
+        var control = ThemeColor(theme, "control", surface);
+        var accent = ThemeColor(theme, "accent", fallback.Accent);
+        return fallback with
+        {
+            Window = ThemeColor(theme, "window", background),
+            Topbar = ThemeColor(theme, "topbar", surface),
+            Panel = ThemeColor(theme, "panel", surface),
+            Canvas = ThemeColor(theme, "canvas", background),
+            Overlay = ThemeColor(theme, "overlay", surface),
+            Control = control,
+            ControlHover = ThemeColor(theme, "controlHover", fallback.ControlHover),
+            Card = ThemeColor(theme, "card", surface),
+            InputPanel = ThemeColor(theme, "inputPanel", control),
+            OutputPanel = ThemeColor(theme, "outputPanel", control),
+            Border = ThemeColor(theme, "border", fallback.Border),
+            StrongBorder = ThemeColor(theme, "strongBorder", fallback.StrongBorder),
+            CardBorder = ThemeColor(theme, "cardBorder", fallback.CardBorder),
+            Text = ThemeColor(theme, "text", fallback.Text),
+            Muted = ThemeColor(theme, "muted", fallback.Muted),
+            Accent = accent,
+            AccentHover = ThemeColor(theme, "accentHover", accent),
+            AccentText = ThemeColor(theme, "accentText", fallback.AccentText),
+            Input = ThemeColor(theme, "input", fallback.Input),
+            InputOutline = ThemeColor(theme, "inputOutline", fallback.InputOutline),
+            Output = ThemeColor(theme, "output", fallback.Output),
+            OutputOutline = ThemeColor(theme, "outputOutline", fallback.OutputOutline),
+            Track = ThemeColor(theme, "track", fallback.Track),
+            Knob = ThemeColor(theme, "knob", fallback.Knob),
+            Grid = ThemeColor(theme, "grid", fallback.Grid),
+            CanvasStart = ThemeColor(theme, "canvasStart", background),
+            CanvasEnd = ThemeColor(theme, "canvasEnd", fallback.CanvasEnd),
+            AccentOutline = ThemeColor(theme, "accentOutline", fallback.AccentOutline),
+            ToolBorder = ThemeColor(theme, "toolBorder", fallback.ToolBorder)
+        };
+    }
+
+    private static string ThemeColor(ThemeSnapshot theme, string key, string fallback) =>
+        theme.GetColor(key) ?? fallback;
 
     private void SetBrush(string key, string color) => Resources[key] = new SolidColorBrush(Color.Parse(color));
 
@@ -292,6 +403,7 @@ public sealed partial class RigEditorView : UserControl
     private void OpenClick(object? sender, RoutedEventArgs args) => _ = OpenAsync();
     private void SaveClick(object? sender, RoutedEventArgs args) => _ = SaveAsync();
     private void SaveAsClick(object? sender, RoutedEventArgs args) => _ = SaveAsAsync();
+    private void LoadThemeClick(object? sender, RoutedEventArgs args) => _ = LoadThemeAsync();
     private void ImportResourceClick(object? sender, RoutedEventArgs args) => _ = ImportResourceAsync();
 
     private void ModuleCatalogFilterClick(object? sender, RoutedEventArgs args)
@@ -406,6 +518,33 @@ public sealed partial class RigEditorView : UserControl
         viewModel.ImportResource(path);
     }
 
+    private async Task LoadThemeAsync()
+    {
+        if (viewModel is null)
+        {
+            return;
+        }
+        var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
+        if (storage is null)
+        {
+            viewModel.ReportFileDialogCancelled("Theme load");
+            return;
+        }
+        var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "加载 SoloRig 主题 JSON",
+            AllowMultiple = false,
+            FileTypeFilter = [ThemeFileType]
+        });
+        var path = files.FirstOrDefault()?.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            viewModel.ReportFileDialogCancelled("Theme load");
+            return;
+        }
+        viewModel.LoadTheme(path);
+    }
+
     private async Task ImportMidiBankAsync()
     {
         if (viewModel is null)
@@ -515,7 +654,7 @@ public sealed partial class RigEditorView : UserControl
         base.OnAttachedToVisualTree(e);
         if (viewModel is not null)
         {
-            ApplyTheme(viewModel.DarkTheme);
+            ApplyTheme(viewModel.Theme, viewModel.DarkTheme);
         }
     }
 }

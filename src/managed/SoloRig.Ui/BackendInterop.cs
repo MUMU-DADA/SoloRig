@@ -14,6 +14,7 @@ public enum NativeStatus : uint
     InvalidPreset = 5,
     InternalError = 6,
     Unsupported = 7,
+    InvalidTheme = 8,
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -133,6 +134,13 @@ internal struct NativeWhiteboxStatusView
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct NativeThemeInfoView
+{
+    public IntPtr Id;
+    public IntPtr DisplayName;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal struct NativeAsioDriverView
 {
     public IntPtr DriverId;
@@ -218,6 +226,18 @@ internal static class NativeMethods
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_set_theme_dark(IntPtr backend, byte dark);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_load_theme_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_theme_info(
+        IntPtr backend, out NativeThemeInfoView theme);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern IntPtr solorig_backend_theme_color_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string colorKey);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_set_viewport(
@@ -371,6 +391,13 @@ public sealed record ParameterSnapshot(string Id, float Value)
 {
     public string DisplayText => $"{Id}: {Value:0.###}";
 }
+
+public sealed record ThemeSnapshot(string Id, string DisplayName, IReadOnlyDictionary<string, string> Colors)
+{
+    public static ThemeSnapshot Empty { get; } = new("", "", new Dictionary<string, string>());
+
+    public string? GetColor(string key) => Colors.TryGetValue(key, out var color) ? color : null;
+}
 public sealed record NodeSnapshot(
     string InstanceId,
     string ModuleId,
@@ -499,6 +526,15 @@ public sealed record BackendSnapshot(
 
 public sealed class BackendSession : IDisposable
 {
+    private static readonly string[] ThemeColorKeys =
+    [
+        "background", "surface", "text", "accent", "warning",
+        "window", "topbar", "panel", "canvas", "overlay", "control", "controlHover",
+        "card", "inputPanel", "outputPanel", "border", "strongBorder", "cardBorder",
+        "muted", "accentHover", "accentText", "input", "inputOutline", "output",
+        "outputOutline", "track", "knob", "grid", "canvasStart", "canvasEnd",
+        "accentOutline", "toolBorder"
+    ];
     private IntPtr handle;
 
     public bool IsAvailable => handle != IntPtr.Zero;
@@ -528,6 +564,22 @@ public sealed class BackendSession : IDisposable
         return new WhiteboxStatusSnapshot(
             value.SchemaVersion, NativeMethods.Utf8(value.GraphStatus), NativeMethods.Utf8(value.RuntimeStatus),
             NativeMethods.Utf8(value.EvidenceStatus), NativeMethods.Utf8(value.Diagnostic));
+    }
+
+    public ThemeSnapshot ReadTheme()
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_theme_info(handle, out var info), "theme info");
+        var colors = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var key in ThemeColorKeys)
+        {
+            var color = NativeMethods.Utf8(NativeMethods.solorig_backend_theme_color_utf8(handle, key));
+            if (!string.IsNullOrWhiteSpace(color))
+            {
+                colors[key] = color;
+            }
+        }
+        return new ThemeSnapshot(NativeMethods.Utf8(info.Id), NativeMethods.Utf8(info.DisplayName), colors);
     }
 
     public BackendSnapshot ReadSnapshot()
@@ -601,6 +653,9 @@ public sealed class BackendSession : IDisposable
         Ensure(NativeMethods.solorig_backend_clear_node_performance(handle), "clear node performance");
 
     public void SetTheme(bool dark) => Ensure(NativeMethods.solorig_backend_set_theme_dark(handle, dark ? (byte)1 : (byte)0), "set theme");
+
+    public void LoadTheme(string path) =>
+        Ensure(NativeMethods.solorig_backend_load_theme_utf8(handle, path), "load theme");
 
     public void SetViewport(double width, double height, double dpiScale) =>
         Ensure(NativeMethods.solorig_backend_set_viewport(handle, width, height, dpiScale), "set viewport");

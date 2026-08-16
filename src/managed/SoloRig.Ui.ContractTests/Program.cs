@@ -108,17 +108,44 @@ Require(!viewModel.Snapshot.DarkTheme, "theme change is visible in the snapshot"
 
 var path = Path.Combine(Path.GetTempPath(), "solorig-m2-contract.srig");
 var corruptPath = Path.Combine(Path.GetTempPath(), "solorig-m2-corrupt.srig");
+var themePath = Path.Combine(Path.GetTempPath(), "solorig-m25-contract-theme.json");
 var resourcePath = Path.Combine(Path.GetTempPath(), "solorig-m5-resource.nam");
 var midiBankDirectory = Path.Combine(Path.GetTempPath(), "solorig-m2-midi-bank");
 try
 {
     File.Delete(path);
+    File.Delete(themePath);
     File.Delete(resourcePath);
     if (Directory.Exists(midiBankDirectory))
     {
         Directory.Delete(midiBankDirectory, true);
     }
     File.WriteAllText(corruptPath, "{not-json");
+    File.WriteAllText(themePath, """
+{
+  "schemaVersion": 1,
+  "id": "contract.external",
+  "displayName": "Contract External",
+  "colors": {
+    "background": "#202A38",
+    "surface": "#2D3A4A",
+    "text": "#F8FAFC",
+    "accent": "#F59E0B",
+    "window": "#18212D",
+    "canvas": "#1D2938"
+  },
+  "metrics": {
+    "gridSize": 16,
+    "cornerRadius": 8
+  }
+}
+""");
+    Require(viewModel.LoadTheme(themePath), "external theme loads through the shared C# ViewModel");
+    Require(viewModel.Theme.Id == "contract.external" && viewModel.ThemeDisplayName == "Contract External",
+        "external theme metadata reaches the shared UI");
+    Require(viewModel.Theme.GetColor("accent") == "#F59E0B" && viewModel.Theme.GetColor("canvas") == "#1D2938",
+        "external theme colors reach the shared UI palette");
+    Require(viewModel.Snapshot.Dirty, "loading an external theme marks the preset dirty");
     var modelCandidates = new[]
     {
         Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "third_party", "NeuralAmpModelerCore", "example_models", "wavenet.nam")),
@@ -168,6 +195,7 @@ finally
 {
     File.Delete(path);
     File.Delete(corruptPath);
+    File.Delete(themePath);
     File.Delete(resourcePath);
     if (Directory.Exists(midiBankDirectory))
     {

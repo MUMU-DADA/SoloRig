@@ -23,5 +23,7 @@ public sealed partial class MainWindow : Window
 
     public bool ProbeThemeSwitch() => EditorView.ProbeThemeSwitch();
 
+    public bool ProbeExternalTheme() => EditorView.ProbeExternalTheme();
+
     private void WindowKeyDown(object? sender, KeyEventArgs args) => EditorView.HandleWindowKeyDown(args);
 }

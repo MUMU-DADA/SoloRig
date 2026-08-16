@@ -60,6 +60,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly BackendSession? backend;
     private BackendSnapshot snapshot = EmptySnapshot;
+    private ThemeSnapshot theme = ThemeSnapshot.Empty;
     private IReadOnlyList<CanvasNodeSnapshot> canvasNodes = [];
     private IReadOnlyList<CanvasConnectionSnapshot> canvasConnections = [];
     private IReadOnlyList<ModuleCatalogSnapshot> moduleCatalog = [];
@@ -121,6 +122,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public event PropertyChangedEventHandler? PropertyChanged;
     public bool IsBackendAvailable => backend is not null && backend.IsAvailable;
     public BackendSnapshot Snapshot => snapshot;
+    public ThemeSnapshot Theme => theme;
+    public string ThemeDisplayName => string.IsNullOrWhiteSpace(theme.DisplayName) ? "主题不可用" : theme.DisplayName;
     public IReadOnlyList<NodeSnapshot> Nodes => snapshot.Nodes;
     public IReadOnlyList<CanvasNodeSnapshot> CanvasNodes => canvasNodes;
     public IReadOnlyList<CanvasConnectionSnapshot> CanvasConnections => canvasConnections;
@@ -374,6 +377,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         {
             var nextModuleCatalog = backend.ReadCatalog();
             var nextSnapshot = backend.ReadSnapshot();
+            var nextTheme = backend.ReadTheme();
             var nextRealtimeContract = backend.ReadRealtimeContract();
             var nextWhiteboxStatus = backend.ReadWhiteboxStatus();
             var nextMidiLearnTargets = backend.ReadMidiLearnTargets();
@@ -383,6 +387,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 ? null
                 : moduleCatalog.FirstOrDefault(module => module.ModuleId == selectedCatalogModuleId);
             snapshot = nextSnapshot;
+            theme = nextTheme;
             selectedPresetName = string.IsNullOrWhiteSpace(snapshot.SourcePath) ||
                                  string.IsNullOrWhiteSpace(snapshot.PresetName)
                 ? "SoloRig Default"
@@ -404,6 +409,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             Status = $"Backend probe OK | schema {snapshot.SchemaVersion} | theme {(snapshot.DarkTheme ? "dark" : "light")}";
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
                 nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
+                nameof(Theme), nameof(ThemeDisplayName),
                 nameof(WindowTitle), nameof(AudioStatus), nameof(MidiStatus), nameof(FileStatus),
                 nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames), nameof(SelectedPresetName),
                 nameof(ModuleCatalog), nameof(ModuleCatalogSummaryText), nameof(FilteredModuleCatalog),
@@ -476,6 +482,26 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         {
             backend.SetTheme(!snapshot.DarkTheme);
             Refresh();
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            return false;
+        }
+    }
+
+    public bool LoadTheme(string path)
+    {
+        if (backend is null || string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+        try
+        {
+            backend.LoadTheme(path);
+            Refresh();
+            Status = $"主题已加载: {ThemeDisplayName}";
             return true;
         }
         catch (Exception exception)

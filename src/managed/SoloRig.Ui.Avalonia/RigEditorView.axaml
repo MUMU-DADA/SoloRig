@@ -111,6 +111,7 @@
             <Button Classes="srg-button ghost" Content="打开" Click="OpenClick" />
             <Button Classes="srg-button ghost" Content="另存为" Click="SaveAsClick" />
             <Button Classes="srg-button primary" Content="保存" Click="SaveClick" />
+            <Button Classes="srg-button ghost" Content="主题" ToolTip.Tip="加载主题 JSON" Click="LoadThemeClick" />
             <Button Classes="srg-button" Content="◐" ToolTip.Tip="切换主题" Command="{Binding ToggleThemeCommand}" />
           </StackPanel>
         </Grid>
