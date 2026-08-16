@@ -51,6 +51,17 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private string status = "Starting backend probe...";
     private RealtimeContractSnapshot realtimeContract = EmptyRealtimeContract;
     private WhiteboxStatusSnapshot whiteboxStatus = EmptyWhiteboxStatus;
+    private IReadOnlyList<AsioDriverSnapshot> asioDrivers = [];
+    private IReadOnlyList<MidiDeviceSnapshot> midiDevices = [];
+    private IReadOnlyList<uint> asioInputPorts = [];
+    private IReadOnlyList<uint> asioOutputPorts = [];
+    private int selectedAsioDriverIndex = -1;
+    private int selectedMidiDeviceIndex = -1;
+    private uint selectedInputChannel0;
+    private uint selectedInputChannel1 = 1;
+    private uint selectedOutputChannel0;
+    private uint selectedOutputChannel1 = 1;
+    private bool tunerEnabled;
 
     private static RealtimeContractSnapshot EmptyRealtimeContract => new(
         0, false, true, true, true, true, false, 0, 0, 0, 0, 0, 0.0, "backend unavailable");
@@ -140,6 +151,95 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public string WhiteboxStatusText => whiteboxStatus.SchemaVersion == 0
         ? "白盒状态: unavailable"
         : $"白盒: {whiteboxStatus.RuntimeStatus} · 证据: {whiteboxStatus.EvidenceStatus}";
+    public IReadOnlyList<AsioDriverSnapshot> AsioDrivers => asioDrivers;
+    public IReadOnlyList<MidiDeviceSnapshot> MidiDevices => midiDevices;
+    public IReadOnlyList<uint> AsioInputPorts => asioInputPorts;
+    public IReadOnlyList<uint> AsioOutputPorts => asioOutputPorts;
+    public int SelectedAsioDriverIndex
+    {
+        get => selectedAsioDriverIndex;
+        set
+        {
+            if (Set(ref selectedAsioDriverIndex, value))
+            {
+                UpdateAsioPortLists();
+                OnPropertiesChanged(nameof(SelectedAsioDriver), nameof(AsioRouteText),
+                    nameof(FixedInputPortText), nameof(FixedOutputPortText));
+            }
+        }
+    }
+    public int SelectedMidiDeviceIndex
+    {
+        get => selectedMidiDeviceIndex;
+        set => Set(ref selectedMidiDeviceIndex, value);
+    }
+    public AsioDriverSnapshot? SelectedAsioDriver =>
+        selectedAsioDriverIndex >= 0 && selectedAsioDriverIndex < asioDrivers.Count
+            ? asioDrivers[selectedAsioDriverIndex]
+            : null;
+    public MidiDeviceSnapshot? SelectedMidiDevice =>
+        selectedMidiDeviceIndex >= 0 && selectedMidiDeviceIndex < midiDevices.Count
+            ? midiDevices[selectedMidiDeviceIndex]
+            : null;
+    public uint SelectedInputChannel0
+    {
+        get => selectedInputChannel0;
+        set
+        {
+            if (Set(ref selectedInputChannel0, value))
+            {
+                OnPropertiesChanged(nameof(AsioRouteText), nameof(FixedInputPortText));
+            }
+        }
+    }
+    public uint SelectedInputChannel1
+    {
+        get => selectedInputChannel1;
+        set
+        {
+            if (Set(ref selectedInputChannel1, value))
+            {
+                OnPropertiesChanged(nameof(AsioRouteText), nameof(FixedInputPortText));
+            }
+        }
+    }
+    public uint SelectedOutputChannel0
+    {
+        get => selectedOutputChannel0;
+        set
+        {
+            if (Set(ref selectedOutputChannel0, value))
+            {
+                OnPropertiesChanged(nameof(AsioRouteText), nameof(FixedOutputPortText));
+            }
+        }
+    }
+    public uint SelectedOutputChannel1
+    {
+        get => selectedOutputChannel1;
+        set
+        {
+            if (Set(ref selectedOutputChannel1, value))
+            {
+                OnPropertiesChanged(nameof(AsioRouteText), nameof(FixedOutputPortText));
+            }
+        }
+    }
+    public bool TunerEnabled
+    {
+        get => tunerEnabled;
+        private set => Set(ref tunerEnabled, value);
+    }
+    public string AsioRouteText => SelectedAsioDriver is null
+        ? "ASIO: 未选择设备；输入/输出端口固定为选定设备的物理通道"
+        : $"ASIO: {SelectedAsioDriver.DisplayName} · 输入 {SelectedInputChannel0}/{SelectedInputChannel1} → 输出 {SelectedOutputChannel0}/{SelectedOutputChannel1}";
+    public string FixedInputPortText => SelectedAsioDriver is null
+        ? "固定输入 · 未选 ASIO 设备"
+        : $"固定输入 · {SelectedAsioDriver.DisplayName} · 物理通道 {SelectedInputChannel0}/{SelectedInputChannel1}";
+    public string FixedOutputPortText => SelectedAsioDriver is null
+        ? "固定输出 · 未选 ASIO 设备"
+        : $"固定输出 · {SelectedAsioDriver.DisplayName} · 物理通道 {SelectedOutputChannel0}/{SelectedOutputChannel1}";
+    public string TunerStatus => $"调音器: {(TunerEnabled ? "开启" : "关闭")}";
     public IReadOnlyList<string> PresetNames =>
         string.IsNullOrWhiteSpace(snapshot.PresetName) ||
         string.Equals(snapshot.PresetName, "SoloRig Default", StringComparison.Ordinal)
@@ -199,7 +299,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 nameof(WindowTitle), nameof(AudioStatus), nameof(MidiStatus), nameof(FileStatus),
                 nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames), nameof(SelectedPresetName),
                 nameof(RealtimeContract),
-                nameof(RealtimeStatus), nameof(WhiteboxStatus), nameof(WhiteboxStatusText));
+                nameof(RealtimeStatus), nameof(WhiteboxStatus), nameof(WhiteboxStatusText),
+                nameof(AsioRouteText), nameof(TunerStatus));
         }
         catch (Exception exception)
         {
@@ -380,6 +481,187 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         catch (Exception exception) { Status = exception.Message; return false; }
     }
 
+    public bool RefreshAsioDevices()
+    {
+        if (backend is null)
+        {
+            return false;
+        }
+        try
+        {
+            backend.RefreshAsioDrivers();
+            asioDrivers = backend.ReadAsioDrivers();
+            OnPropertiesChanged(nameof(AsioDrivers));
+            SelectedAsioDriverIndex = asioDrivers.Count == 0 ? -1 : 0;
+            Refresh();
+            Status = asioDrivers.Count == 0
+                ? "未发现 ASIO 驱动；请确认驱动已安装"
+                : $"已发现 {asioDrivers.Count} 个 ASIO 驱动";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            return false;
+        }
+    }
+
+    public bool OpenSelectedAsio(IntPtr nativeWindow)
+    {
+        if (backend is null || SelectedAsioDriver is null)
+        {
+            Status = "请先刷新并选择 ASIO 设备";
+            return false;
+        }
+        if (SelectedAsioDriver.InputChannelCount < 2 || SelectedAsioDriver.OutputChannelCount < 2)
+        {
+            Status = "所选 ASIO 设备至少需要 2 个输入和 2 个输出通道";
+            return false;
+        }
+        try
+        {
+            backend.OpenAsio((uint)selectedAsioDriverIndex, nativeWindow,
+                SelectedInputChannel0, SelectedInputChannel1, SelectedOutputChannel0, SelectedOutputChannel1);
+            Refresh();
+            Status = $"ASIO 已打开；固定输入 {SelectedInputChannel0}/{SelectedInputChannel1}，固定输出 {SelectedOutputChannel0}/{SelectedOutputChannel1}";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            Refresh();
+            return false;
+        }
+    }
+
+    public bool StartAsio()
+    {
+        return RunAudioAction(() => backend?.StartAsio(), "ASIO 已启动");
+    }
+
+    public bool StopAsio()
+    {
+        return RunAudioAction(() => backend?.StopAsio(), "ASIO 已停止");
+    }
+
+    public bool CloseAsio()
+    {
+        return RunAudioAction(() => backend?.CloseAsio(), "ASIO 已关闭");
+    }
+
+    public bool RecoverAsio()
+    {
+        return RunAudioAction(() => backend?.RecoverAsio(), "ASIO 已执行恢复");
+    }
+
+    public bool SetTunerEnabled(bool enabled)
+    {
+        if (backend is null)
+        {
+            return false;
+        }
+        try
+        {
+            backend.SetTunerEnabled(enabled);
+            TunerEnabled = enabled;
+            Refresh();
+            Status = TunerStatus;
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            return false;
+        }
+    }
+
+    public bool RefreshMidiDevices()
+    {
+        if (backend is null)
+        {
+            return false;
+        }
+        try
+        {
+            backend.RefreshMidiDevices();
+            midiDevices = backend.ReadMidiDevices();
+            OnPropertiesChanged(nameof(MidiDevices));
+            SelectedMidiDeviceIndex = midiDevices.Count == 0 ? -1 : 0;
+            Refresh();
+            Status = midiDevices.Count == 0
+                ? "未发现 MIDI 输入设备"
+                : $"已发现 {midiDevices.Count} 个 MIDI 输入设备";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            return false;
+        }
+    }
+
+    public bool OpenSelectedMidi()
+    {
+        if (backend is null || SelectedMidiDevice is null)
+        {
+            Status = "请先刷新并选择 MIDI 输入设备";
+            return false;
+        }
+        try
+        {
+            backend.OpenMidi(SelectedMidiDevice.DeviceIndex);
+            Refresh();
+            Status = $"MIDI 已打开: {SelectedMidiDevice.DisplayName}";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            Refresh();
+            return false;
+        }
+    }
+
+    public bool CloseMidi()
+    {
+        if (backend is null)
+        {
+            return false;
+        }
+        try
+        {
+            backend.CloseMidi();
+            Refresh();
+            Status = "MIDI 已关闭";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            return false;
+        }
+    }
+
+    public bool DrainMidi()
+    {
+        if (backend is null)
+        {
+            return false;
+        }
+        try
+        {
+            var processed = backend.DrainMidi();
+            Refresh();
+            Status = $"MIDI 已处理 {processed} 条消息";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            return false;
+        }
+    }
+
     public bool SaveToPath(string path)
     {
         if (backend is null)
@@ -423,6 +705,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public void ReportFileDialogCancelled(string operation) => Status = $"{operation} cancelled; current preset unchanged.";
+
+    public void ReportInteractionStatus(string message) => Status = message;
 
     public bool SelectPreset(string? name)
     {
@@ -512,6 +796,58 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     {
         var connection = snapshot.Connections.FirstOrDefault();
         if (connection is not null) DisconnectNodes(connection.SourceInstanceId, connection.DestinationInstanceId);
+    }
+
+    private bool RunAudioAction(Action? action, string successStatus)
+    {
+        if (action is null)
+        {
+            Status = "音频后端不可用";
+            return false;
+        }
+        try
+        {
+            action();
+            Refresh();
+            Status = successStatus;
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            Refresh();
+            return false;
+        }
+    }
+
+    private void UpdateAsioPortLists()
+    {
+        var driver = SelectedAsioDriver;
+        asioInputPorts = driver is null ? [] : Enumerable.Range(0, checked((int)driver.InputChannelCount)).Select(static value => (uint)value).ToArray();
+        asioOutputPorts = driver is null ? [] : Enumerable.Range(0, checked((int)driver.OutputChannelCount)).Select(static value => (uint)value).ToArray();
+        if (asioInputPorts.Count > 0)
+        {
+            SelectedInputChannel0 = asioInputPorts.Contains(SelectedInputChannel0) ? SelectedInputChannel0 : asioInputPorts[0];
+            SelectedInputChannel1 = asioInputPorts.Contains(SelectedInputChannel1) ? SelectedInputChannel1 :
+                asioInputPorts[Math.Min(1, asioInputPorts.Count - 1)];
+        }
+        else
+        {
+            SelectedInputChannel0 = 0;
+            SelectedInputChannel1 = 1;
+        }
+        if (asioOutputPorts.Count > 0)
+        {
+            SelectedOutputChannel0 = asioOutputPorts.Contains(SelectedOutputChannel0) ? SelectedOutputChannel0 : asioOutputPorts[0];
+            SelectedOutputChannel1 = asioOutputPorts.Contains(SelectedOutputChannel1) ? SelectedOutputChannel1 :
+                asioOutputPorts[Math.Min(1, asioOutputPorts.Count - 1)];
+        }
+        else
+        {
+            SelectedOutputChannel0 = 0;
+            SelectedOutputChannel1 = 1;
+        }
+        OnPropertiesChanged(nameof(AsioInputPorts), nameof(AsioOutputPorts), nameof(AsioRouteText));
     }
 
     private double ToBackendX(double x) => x * Math.Max(snapshot.DpiScale, 1.0);

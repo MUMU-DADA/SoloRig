@@ -22,6 +22,7 @@ public sealed partial class RigEditorView : UserControl
 
     private RigEditorViewModel? viewModel;
     private bool dragging;
+    private string? pendingOutputNode;
 
     public RigEditorView()
     {
@@ -182,6 +183,70 @@ public sealed partial class RigEditorView : UserControl
     private void SaveClick(object? sender, RoutedEventArgs args) => _ = SaveAsync();
     private void SaveAsClick(object? sender, RoutedEventArgs args) => _ = SaveAsAsync();
     private void ImportResourceClick(object? sender, RoutedEventArgs args) => _ = ImportResourceAsync();
+
+    private void RefreshAsioClick(object? sender, RoutedEventArgs args) => viewModel?.RefreshAsioDevices();
+
+    private void OpenAsioClick(object? sender, RoutedEventArgs args)
+    {
+        var nativeWindow = TopLevel.GetTopLevel(this)?.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        viewModel?.OpenSelectedAsio(nativeWindow);
+    }
+
+    private void StartAsioClick(object? sender, RoutedEventArgs args) => viewModel?.StartAsio();
+    private void StopAsioClick(object? sender, RoutedEventArgs args) => viewModel?.StopAsio();
+    private void CloseAsioClick(object? sender, RoutedEventArgs args) => viewModel?.CloseAsio();
+    private void RecoverAsioClick(object? sender, RoutedEventArgs args) => viewModel?.RecoverAsio();
+
+    private void ToggleTunerClick(object? sender, RoutedEventArgs args) =>
+        viewModel?.SetTunerEnabled(!viewModel.TunerEnabled);
+
+    private void RefreshMidiClick(object? sender, RoutedEventArgs args) => viewModel?.RefreshMidiDevices();
+    private void OpenMidiClick(object? sender, RoutedEventArgs args) => viewModel?.OpenSelectedMidi();
+    private void CloseMidiClick(object? sender, RoutedEventArgs args) => viewModel?.CloseMidi();
+    private void DrainMidiClick(object? sender, RoutedEventArgs args) => viewModel?.DrainMidi();
+
+    private void NodeOutputEndpointPressed(object? sender, PointerPressedEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control || control.Tag is not string nodeId)
+        {
+            return;
+        }
+        pendingOutputNode = nodeId;
+        viewModel.ReportInteractionStatus($"已选择 {nodeId} 的输出端点，请点击目标效果器的输入端点");
+        args.Handled = true;
+    }
+
+    private void NodeInputEndpointPressed(object? sender, PointerPressedEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control || control.Tag is not string nodeId)
+        {
+            return;
+        }
+        if (pendingOutputNode is null)
+        {
+            viewModel.ReportInteractionStatus($"已点击 {nodeId} 的输入端点；请先点击来源效果器的输出端点");
+        }
+        else
+        {
+            var sourceNode = pendingOutputNode;
+            pendingOutputNode = null;
+            if (sourceNode == nodeId)
+            {
+                viewModel.ReportInteractionStatus("不能连接效果器自身；请选择另一个输入端点");
+            }
+            else
+            {
+                viewModel.ConnectNodes(sourceNode, nodeId);
+            }
+        }
+        args.Handled = true;
+    }
+
+    private void FixedEndpointPressed(object? sender, PointerPressedEventArgs args)
+    {
+        viewModel?.ReportInteractionStatus("INPUT / OUTPUT 是当前 ASIO 设备的固定物理端口，不能作为效果器节点移动");
+        args.Handled = true;
+    }
 
     private async Task ImportResourceAsync()
     {

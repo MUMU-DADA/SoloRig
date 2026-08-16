@@ -167,6 +167,8 @@ enable_solo_rig_warnings(solo_rig_core)
 if(WIN32)
     add_library(solo_rig_backend SHARED
         src/interop/solorig_backend.cpp
+        src/standalone/midi_control_session.cpp
+        src/standalone/standalone_audio_engine.cpp
     )
     target_include_directories(solo_rig_backend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(solo_rig_backend PRIVATE SOLO_RIG_BACKEND_BUILD UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)

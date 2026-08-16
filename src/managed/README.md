@@ -1,5 +1,7 @@
 # C# + Avalonia Standalone 产品编辑工作流
 
+当前共享视图提供固定 ASIO INPUT/OUTPUT 物理端口、效果器输出端点到输入端点的点击连接、ASIO 设备/物理通道选择、启动/停止/恢复、调音器开关，以及 MIDI 设备刷新/打开/关闭/控制线程排空。真实硬件成功打开、双设备恢复、MIDI Learn/Bank 完整产品控件和 VST3 UI 嵌入仍是后续宿主门禁。
+
 项目分为两个层次：
 
 - `SoloRig.Ui`：不依赖 Avalonia 的共享 ViewModel 和 `BackendSession`。它只通过稳定 C ABI 获取不可变快照，并完成 DPI 坐标投影、节点选择/拖拽吸附、参数/主题编辑和显式 Save/Open 的事务状态。

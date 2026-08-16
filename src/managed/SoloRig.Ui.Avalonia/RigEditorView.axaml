@@ -58,6 +58,69 @@
           </StackPanel>
           <TextBlock Text="{Binding ResourceStatus}" Foreground="#AAB5C5" TextWrapping="Wrap" />
           <Button Content="导入 NAM / A2 / IR / circuit" Click="ImportResourceClick" />
+          <Border Padding="8" Background="#303740" CornerRadius="5">
+            <StackPanel Spacing="7">
+              <TextBlock FontSize="16" FontWeight="Bold" Text="音频设备 / 固定 I/O" />
+              <TextBlock Text="{Binding AsioRouteText}" Foreground="#C4CBD5" TextWrapping="Wrap" />
+              <Button Content="刷新 ASIO 设备" Click="RefreshAsioClick" />
+              <ComboBox ItemsSource="{Binding AsioDrivers}" SelectedIndex="{Binding SelectedAsioDriverIndex, Mode=TwoWay}"
+                        PlaceholderText="选择 ASIO 设备">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="{Binding DisplayText}" />
+                      <TextBlock Text="{Binding SampleRateText}" FontSize="11" Foreground="#AAB5C5" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="输入端口 1" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="输入端口 2" />
+                <ComboBox Grid.Row="1" Grid.Column="0" Margin="0,3,3,0" ItemsSource="{Binding AsioInputPorts}"
+                          SelectedItem="{Binding SelectedInputChannel0, Mode=TwoWay}" />
+                <ComboBox Grid.Row="1" Grid.Column="1" Margin="3,3,0,0" ItemsSource="{Binding AsioInputPorts}"
+                          SelectedItem="{Binding SelectedInputChannel1, Mode=TwoWay}" />
+              </Grid>
+              <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="输出端口 1" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="输出端口 2" />
+                <ComboBox Grid.Row="1" Grid.Column="0" Margin="0,3,3,0" ItemsSource="{Binding AsioOutputPorts}"
+                          SelectedItem="{Binding SelectedOutputChannel0, Mode=TwoWay}" />
+                <ComboBox Grid.Row="1" Grid.Column="1" Margin="3,3,0,0" ItemsSource="{Binding AsioOutputPorts}"
+                          SelectedItem="{Binding SelectedOutputChannel1, Mode=TwoWay}" />
+              </Grid>
+              <StackPanel Orientation="Horizontal" Spacing="5">
+                <Button Content="打开" Click="OpenAsioClick" />
+                <Button Content="启动" Click="StartAsioClick" />
+                <Button Content="停止" Click="StopAsioClick" />
+                <Button Content="关闭" Click="CloseAsioClick" />
+              </StackPanel>
+              <StackPanel Orientation="Horizontal" Spacing="5">
+                <Button Content="恢复音频" Click="RecoverAsioClick" />
+                <Button Content="{Binding TunerStatus}" Click="ToggleTunerClick" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <Border Padding="8" Background="#303740" CornerRadius="5">
+            <StackPanel Spacing="7">
+              <TextBlock FontSize="16" FontWeight="Bold" Text="MIDI 控制" />
+              <Button Content="刷新 MIDI 设备" Click="RefreshMidiClick" />
+              <ComboBox ItemsSource="{Binding MidiDevices}" SelectedIndex="{Binding SelectedMidiDeviceIndex, Mode=TwoWay}"
+                        PlaceholderText="选择 MIDI 输入">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding DisplayText}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <StackPanel Orientation="Horizontal" Spacing="5">
+                <Button Content="打开 MIDI" Click="OpenMidiClick" />
+                <Button Content="关闭 MIDI" Click="CloseMidiClick" />
+                <Button Content="排空消息" Click="DrainMidiClick" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
           <TextBlock FontSize="18" FontWeight="Bold" Text="参数编辑" />
           <TextBlock Text="{Binding SelectedNode.InstanceId, FallbackValue=未选择节点}" />
           <TextBlock Text="点击节点选中；拖动时按网格吸附。" Foreground="#AAB5C5" TextWrapping="Wrap" />
@@ -85,6 +148,32 @@
       <Canvas x:Name="EditorCanvas" ClipToBounds="True" Background="#1B2027"
               PointerPressed="CanvasPointerPressed" PointerMoved="CanvasPointerMoved"
               PointerReleased="CanvasPointerReleased" SizeChanged="CanvasSizeChanged">
+        <Border Canvas.Left="12" Canvas.Top="22" Width="178" Height="82" Padding="10"
+                Background="#243A45" BorderBrush="#51D0C4" BorderThickness="2" CornerRadius="8">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Grid.Column="0" Spacing="3">
+              <TextBlock Text="INPUT" FontWeight="Bold" Foreground="#75F2E6" />
+              <TextBlock Text="{Binding FixedInputPortText}" FontSize="11"
+                         Foreground="#D7F9F5" TextWrapping="Wrap" />
+            </StackPanel>
+            <Ellipse Grid.Column="1" Width="18" Height="18" Margin="8,0,0,0"
+                     Fill="#51D0C4" Stroke="#E8FFFC" StrokeThickness="2"
+                     Tag="fixed-input" PointerPressed="FixedEndpointPressed" />
+          </Grid>
+        </Border>
+        <Border Canvas.Right="12" Canvas.Top="22" Width="178" Height="82" Padding="10"
+                Background="#3D3048" BorderBrush="#CE8BFF" BorderThickness="2" CornerRadius="8">
+          <Grid ColumnDefinitions="Auto,*">
+            <Ellipse Grid.Column="0" Width="18" Height="18" Margin="0,0,8,0"
+                     Fill="#CE8BFF" Stroke="#FFF4FF" StrokeThickness="2"
+                     Tag="fixed-output" PointerPressed="FixedEndpointPressed" />
+            <StackPanel Grid.Column="1" Spacing="3">
+              <TextBlock Text="OUTPUT" FontWeight="Bold" Foreground="#E8BDFF" />
+              <TextBlock Text="{Binding FixedOutputPortText}" FontSize="11"
+                         Foreground="#F5E8FF" TextWrapping="Wrap" />
+            </StackPanel>
+          </Grid>
+        </Border>
         <ItemsControl ItemsSource="{Binding CanvasConnections}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
@@ -108,17 +197,24 @@
           </ItemsControl.ItemContainerTheme>
           <ItemsControl.ItemTemplate>
             <DataTemplate>
-              <Border Width="{Binding Width}" Height="{Binding Height}" Padding="10"
-                      Background="{Binding CardBackground}" BorderBrush="{Binding CardBorder}"
-                      BorderThickness="2" CornerRadius="8">
-                <StackPanel Spacing="4">
-                  <TextBlock FontSize="17" FontWeight="Bold" Text="{Binding InstanceId}" />
-                  <TextBlock Text="{Binding ModuleId}" TextWrapping="Wrap" Foreground="#D7DDE6" />
-                  <TextBlock Text="{Binding LayoutText}" Foreground="#B8C1CD" />
-                  <TextBlock Text="{Binding PerformanceText}" Foreground="#AAB5C5" TextWrapping="Wrap" />
-                  <TextBlock Text="缺失模块资源" IsVisible="{Binding Unresolved}" Foreground="#FFB454" />
-                </StackPanel>
-              </Border>
+              <Grid Width="{Binding Width}" Height="{Binding Height}">
+                <Border Padding="10" Background="{Binding CardBackground}" BorderBrush="{Binding CardBorder}"
+                        BorderThickness="2" CornerRadius="8">
+                  <StackPanel Spacing="4">
+                    <TextBlock FontSize="17" FontWeight="Bold" Text="{Binding InstanceId}" />
+                    <TextBlock Text="{Binding ModuleId}" TextWrapping="Wrap" Foreground="#D7DDE6" />
+                    <TextBlock Text="{Binding LayoutText}" Foreground="#B8C1CD" />
+                    <TextBlock Text="{Binding PerformanceText}" Foreground="#AAB5C5" TextWrapping="Wrap" />
+                    <TextBlock Text="缺失模块资源" IsVisible="{Binding Unresolved}" Foreground="#FFB454" />
+                  </StackPanel>
+                </Border>
+                <Ellipse Width="16" Height="16" HorizontalAlignment="Left" VerticalAlignment="Center"
+                         Margin="-8,0,0,0" Fill="#51D0C4" Stroke="#E8FFFC" StrokeThickness="2"
+                         Tag="{Binding InstanceId}" PointerPressed="NodeInputEndpointPressed" />
+                <Ellipse Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center"
+                         Margin="0,0,-8,0" Fill="#CE8BFF" Stroke="#FFF4FF" StrokeThickness="2"
+                         Tag="{Binding InstanceId}" PointerPressed="NodeOutputEndpointPressed" />
+              </Grid>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>

@@ -130,6 +130,19 @@ typedef struct SoloRigWhiteboxStatusView {
     const char* diagnostic_utf8;
 } SoloRigWhiteboxStatusView;
 
+typedef struct SoloRigAsioDriverView {
+    const char* driver_id_utf8;
+    const char* display_name_utf8;
+    uint32_t input_channel_count;
+    uint32_t output_channel_count;
+    double native_sample_rate_hz;
+} SoloRigAsioDriverView;
+
+typedef struct SoloRigMidiDeviceView {
+    uint32_t device_index;
+    const char* display_name_utf8;
+} SoloRigMidiDeviceView;
+
 // ABI contract:
 // - All strings are UTF-8 and NUL-terminated. Pointers returned through a
 //   snapshot remain valid until solorig_snapshot_destroy(snapshot).
@@ -254,6 +267,41 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_disconnect_utf8(
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_import_resource_utf8(
     SoloRigBackend* backend,
     const char* path_utf8);
+
+// Control-thread-only Standalone host bridge. `native_window` is the host
+// HWND used by ASIO driver dialogs/callback registration; it is never touched
+// by the audio callback. Device enumeration is explicit and startup remains
+// side-effect free.
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_refresh(SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_driver_count(
+    SoloRigBackend* backend, uint32_t* out_count);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_driver_entry(
+    SoloRigBackend* backend, uint32_t index, SoloRigAsioDriverView* out_driver);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_open(
+    SoloRigBackend* backend,
+    uint32_t driver_index,
+    void* native_window,
+    uint32_t input_channel_0,
+    uint32_t input_channel_1,
+    uint32_t output_channel_0,
+    uint32_t output_channel_1);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_start(SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_stop(SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_close(SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_recover(SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_tuner_set_enabled(
+    SoloRigBackend* backend, uint8_t enabled);
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_refresh(SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_device_count(
+    SoloRigBackend* backend, uint32_t* out_count);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_device_entry(
+    SoloRigBackend* backend, uint32_t index, SoloRigMidiDeviceView* out_device);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_open(
+    SoloRigBackend* backend, uint32_t device_index);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_close(SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_drain(
+    SoloRigBackend* backend, uint32_t* out_processed_messages);
 
 #ifdef __cplusplus
 }

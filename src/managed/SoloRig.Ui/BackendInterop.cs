@@ -130,6 +130,23 @@ internal struct NativeWhiteboxStatusView
     public IntPtr Diagnostic;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeAsioDriverView
+{
+    public IntPtr DriverId;
+    public IntPtr DisplayName;
+    public uint InputChannelCount;
+    public uint OutputChannelCount;
+    public double NativeSampleRateHz;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeMidiDeviceView
+{
+    public uint DeviceIndex;
+    public IntPtr DisplayName;
+}
+
 internal static class NativeMethods
 {
     private const string Library = "SoloRigBackend";
@@ -252,6 +269,55 @@ internal static class NativeMethods
     internal static extern NativeStatus solorig_backend_import_resource_utf8(
         IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_asio_refresh(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_asio_driver_count(IntPtr backend, out uint count);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_asio_driver_entry(
+        IntPtr backend, uint index, out NativeAsioDriverView entry);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_asio_open(
+        IntPtr backend, uint driverIndex, IntPtr nativeWindow,
+        uint inputChannel0, uint inputChannel1, uint outputChannel0, uint outputChannel1);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_asio_start(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_asio_stop(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_asio_close(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_asio_recover(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_tuner_set_enabled(IntPtr backend, byte enabled);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_refresh(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_device_count(IntPtr backend, out uint count);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_device_entry(
+        IntPtr backend, uint index, out NativeMidiDeviceView entry);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_open(IntPtr backend, uint deviceIndex);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_close(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_drain(IntPtr backend, out uint processedMessages);
+
     internal static string Utf8(IntPtr pointer) => pointer == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(pointer) ?? string.Empty;
 }
 
@@ -315,6 +381,22 @@ public sealed record ModuleCatalogSnapshot(
     double EstimatedCpuPercent)
 {
     public string DisplayText => $"{DisplayName} · {Category}";
+}
+
+public sealed record AsioDriverSnapshot(
+    string DriverId,
+    string DisplayName,
+    uint InputChannelCount,
+    uint OutputChannelCount,
+    double NativeSampleRateHz)
+{
+    public string DisplayText => $"{DisplayName} · {InputChannelCount} in / {OutputChannelCount} out";
+    public string SampleRateText => NativeSampleRateHz > 0.0 ? $"{NativeSampleRateHz:0} Hz" : "probe unavailable";
+}
+
+public sealed record MidiDeviceSnapshot(uint DeviceIndex, string DisplayName)
+{
+    public string DisplayText => $"{DisplayName} · device {DeviceIndex}";
 }
 
 public sealed record RealtimeContractSnapshot(
@@ -521,6 +603,68 @@ public sealed class BackendSession : IDisposable
 
     public void ImportResource(string path) =>
         Ensure(NativeMethods.solorig_backend_import_resource_utf8(handle, path), "import resource");
+
+    public void RefreshAsioDrivers()
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_asio_refresh(handle), "refresh ASIO drivers");
+    }
+
+    public IReadOnlyList<AsioDriverSnapshot> ReadAsioDrivers()
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_asio_driver_count(handle, out var count), "ASIO driver count");
+        var entries = new List<AsioDriverSnapshot>((int)count);
+        for (uint index = 0; index < count; index++)
+        {
+            Ensure(NativeMethods.solorig_backend_asio_driver_entry(handle, index, out var entry), "ASIO driver entry");
+            entries.Add(new AsioDriverSnapshot(NativeMethods.Utf8(entry.DriverId), NativeMethods.Utf8(entry.DisplayName),
+                entry.InputChannelCount, entry.OutputChannelCount, entry.NativeSampleRateHz));
+        }
+        return entries;
+    }
+
+    public void OpenAsio(uint driverIndex, IntPtr nativeWindow,
+        uint inputChannel0, uint inputChannel1, uint outputChannel0, uint outputChannel1) =>
+        Ensure(NativeMethods.solorig_backend_asio_open(handle, driverIndex, nativeWindow,
+            inputChannel0, inputChannel1, outputChannel0, outputChannel1), "open ASIO");
+
+    public void StartAsio() => Ensure(NativeMethods.solorig_backend_asio_start(handle), "start ASIO");
+    public void StopAsio() => Ensure(NativeMethods.solorig_backend_asio_stop(handle), "stop ASIO");
+    public void CloseAsio() => Ensure(NativeMethods.solorig_backend_asio_close(handle), "close ASIO");
+    public void RecoverAsio() => Ensure(NativeMethods.solorig_backend_asio_recover(handle), "recover ASIO");
+    public void SetTunerEnabled(bool enabled) =>
+        Ensure(NativeMethods.solorig_backend_tuner_set_enabled(handle, enabled ? (byte)1 : (byte)0), "set tuner");
+
+    public void RefreshMidiDevices()
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_midi_refresh(handle), "refresh MIDI devices");
+    }
+
+    public IReadOnlyList<MidiDeviceSnapshot> ReadMidiDevices()
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_midi_device_count(handle, out var count), "MIDI device count");
+        var entries = new List<MidiDeviceSnapshot>((int)count);
+        for (uint index = 0; index < count; index++)
+        {
+            Ensure(NativeMethods.solorig_backend_midi_device_entry(handle, index, out var entry), "MIDI device entry");
+            entries.Add(new MidiDeviceSnapshot(entry.DeviceIndex, NativeMethods.Utf8(entry.DisplayName)));
+        }
+        return entries;
+    }
+
+    public void OpenMidi(uint deviceIndex) =>
+        Ensure(NativeMethods.solorig_backend_midi_open(handle, deviceIndex), "open MIDI");
+
+    public void CloseMidi() => Ensure(NativeMethods.solorig_backend_midi_close(handle), "close MIDI");
+
+    public uint DrainMidi()
+    {
+        Ensure(NativeMethods.solorig_backend_midi_drain(handle, out var processedMessages), "drain MIDI");
+        return processedMessages;
+    }
 
     public void Dispose()
     {

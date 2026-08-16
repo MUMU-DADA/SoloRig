@@ -2,8 +2,14 @@
 
 #include "content/preset.hpp"
 #include "core/realtime_contract.hpp"
+#include "standalone/asio_host.hpp"
+#include "standalone/midi_control_session.hpp"
+#include "standalone/standalone_audio_engine.hpp"
 #include "ui/rig_editor.hpp"
 
+#include <windows.h>
+
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <iterator>
@@ -15,12 +21,16 @@
 
 struct SoloRigBackend {
     solo_rig::RigEditorViewModel editor{solo_rig::RigEditorViewModel::DefaultEditorPreset()};
+    std::unique_ptr<solo_rig::standalone::StandaloneAudioEngine> audio_engine;
+    std::unique_ptr<solo_rig::standalone::StandaloneMidiControlSession> midi_session;
+    std::vector<std::string> midi_device_names_utf8;
     std::string last_error;
 };
 
 struct SoloRigSnapshot {
     solo_rig::RigPreset preset;
     solo_rig::RigEditorScene scene;
+    std::string midi_status;
 };
 
 namespace {
@@ -40,6 +50,39 @@ bool ValidBackend(SoloRigBackend* backend) noexcept {
 
 bool ValidText(const char* text) noexcept {
     return text != nullptr && *text != '\0';
+}
+
+std::string WideToUtf8(std::wstring_view text) {
+    if (text.empty()) {
+        return {};
+    }
+    const auto length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(),
+                                            static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    if (length <= 0) {
+        return {};
+    }
+    std::string result(static_cast<std::size_t>(length), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(),
+                            static_cast<int>(text.size()), result.data(), length, nullptr, nullptr) <= 0) {
+        return {};
+    }
+    return result;
+}
+
+void SyncAudioStatus(SoloRigBackend& backend) {
+    if (backend.audio_engine != nullptr) {
+        backend.editor.SetAudioStatus(backend.audio_engine->RuntimeStatusText());
+    }
+}
+
+void SyncMidiStatus(SoloRigBackend& backend) {
+    if (backend.midi_session != nullptr) {
+        backend.midi_device_names_utf8.clear();
+        backend.midi_device_names_utf8.reserve(backend.midi_session->Devices().size());
+        for (const auto& device : backend.midi_session->Devices()) {
+            backend.midi_device_names_utf8.push_back(WideToUtf8(device.display_name));
+        }
+    }
 }
 
 bool ValidViewport(double width, double height, double dpi_scale) noexcept {
@@ -102,6 +145,9 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_create(SoloRigBackend** out_b
     *out_backend = nullptr;
     try {
         *out_backend = new SoloRigBackend{};
+        (*out_backend)->audio_engine = std::make_unique<solo_rig::standalone::StandaloneAudioEngine>();
+        (*out_backend)->midi_session = std::make_unique<solo_rig::standalone::StandaloneMidiControlSession>(
+            (*out_backend)->editor);
         return SOLO_RIG_STATUS_OK;
     } catch (const std::bad_alloc&) {
         return SOLO_RIG_STATUS_OUT_OF_MEMORY;
@@ -179,9 +225,14 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_snapshot_create(
     }
     *out_snapshot = nullptr;
     try {
+        SyncAudioStatus(*backend);
+        SyncMidiStatus(*backend);
         auto snapshot = std::make_unique<SoloRigSnapshot>();
         snapshot->preset = backend->editor.ExportPreset();
         snapshot->scene = backend->editor.Scene();
+        snapshot->midi_status = backend->midi_session != nullptr
+            ? backend->midi_session->StatusText()
+            : "MIDI control unavailable";
         *out_snapshot = snapshot.release();
         backend->last_error.clear();
         return SOLO_RIG_STATUS_OK;
@@ -209,8 +260,7 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_info(
     out_info->source_path_utf8 = snapshot->scene.source_path.c_str();
     out_info->audio_status_utf8 = snapshot->scene.audio_status.c_str();
     out_info->file_status_utf8 = snapshot->scene.file_status.c_str();
-    static constexpr char kMidiClosed[] = "MIDI closed; no device access on startup";
-    out_info->midi_status_utf8 = kMidiClosed;
+    out_info->midi_status_utf8 = snapshot->midi_status.c_str();
     out_info->viewport_width = snapshot->scene.viewport_width;
     out_info->viewport_height = snapshot->scene.viewport_height;
     out_info->dpi_scale = snapshot->scene.dpi_scale;
@@ -560,6 +610,232 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_import_resource_utf8(
         }
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, result.message);
     }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_refresh(SoloRigBackend* backend) {
+    if (!ValidBackend(backend) || backend->audio_engine == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "audio backend is unavailable");
+    }
+    static_cast<void>(backend->audio_engine->RefreshDrivers());
+    SyncAudioStatus(*backend);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_driver_count(
+    SoloRigBackend* backend, uint32_t* out_count) {
+    if (!ValidBackend(backend) || backend->audio_engine == nullptr || out_count == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "audio backend and driver count are required");
+    }
+    *out_count = static_cast<uint32_t>(backend->audio_engine->Drivers().size());
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_driver_entry(
+    SoloRigBackend* backend, uint32_t index, SoloRigAsioDriverView* out_driver) {
+    if (!ValidBackend(backend) || backend->audio_engine == nullptr || out_driver == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "audio backend and driver entry are required");
+    }
+    const auto& drivers = backend->audio_engine->Drivers();
+    if (index >= drivers.size()) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "ASIO driver entry was not found");
+    }
+    const auto& driver = drivers[index];
+    const auto probe = solo_rig::standalone::AsioHost::ProbeDriver(driver, nullptr);
+    out_driver->driver_id_utf8 = driver.driver_id.c_str();
+    out_driver->display_name_utf8 = driver.display_name.c_str();
+    out_driver->input_channel_count = probe.succeeded ? probe.device.input_channel_count : 0U;
+    out_driver->output_channel_count = probe.succeeded ? probe.device.output_channel_count : 0U;
+    out_driver->native_sample_rate_hz = probe.succeeded ? probe.device.native_sample_rate_hz : 0.0;
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_open(
+    SoloRigBackend* backend,
+    uint32_t driver_index,
+    void* native_window,
+    uint32_t input_channel_0,
+    uint32_t input_channel_1,
+    uint32_t output_channel_0,
+    uint32_t output_channel_1) {
+    if (!ValidBackend(backend) || backend->audio_engine == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "audio backend is unavailable");
+    }
+    const auto& drivers = backend->audio_engine->Drivers();
+    if (driver_index >= drivers.size()) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "ASIO driver entry was not found");
+    }
+    const auto probe = solo_rig::standalone::AsioHost::ProbeDriver(
+        drivers[driver_index], static_cast<HWND>(native_window));
+    if (!probe.succeeded) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND,
+                        "ASIO probe failed: " + probe.driver_error);
+    }
+    if (input_channel_0 >= probe.device.input_channel_count ||
+        input_channel_1 >= probe.device.input_channel_count ||
+        output_channel_0 >= probe.device.output_channel_count ||
+        output_channel_1 >= probe.device.output_channel_count ||
+        input_channel_0 == input_channel_1 || output_channel_0 == output_channel_1) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "selected ASIO input/output ports are invalid or duplicated");
+    }
+
+    solo_rig::StandaloneAudioRouting routing{
+        .processing_format = {.sample_rate_hz = 192000.0,
+                              .max_block_size = 1U,
+                              .channel_count = 2U,
+                              .sample_representation = solo_rig::SampleRepresentation::Float32},
+        .device_buffer_size = probe.preferred_buffer_size,
+        .inputs = {{.device_id = probe.device.device_id,
+                    .device_channel = input_channel_0,
+                    .processing_channel = 0U},
+                   {.device_id = probe.device.device_id,
+                    .device_channel = input_channel_1,
+                    .processing_channel = 1U}},
+        .outputs = {{.device_id = probe.device.device_id,
+                     .device_channel = output_channel_0,
+                     .processing_channel = 0U},
+                    {.device_id = probe.device.device_id,
+                     .device_channel = output_channel_1,
+                     .processing_channel = 1U}}};
+    if (!backend->audio_engine->OpenWithRouting(
+            drivers[driver_index], static_cast<HWND>(native_window), backend->editor.ExportPreset(),
+            std::move(routing))) {
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR,
+                        backend->audio_engine->ErrorText());
+    }
+    SyncAudioStatus(*backend);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_start(SoloRigBackend* backend) {
+    if (!ValidBackend(backend) || backend->audio_engine == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "audio backend is unavailable");
+    }
+    if (!backend->audio_engine->Start()) {
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, backend->audio_engine->ErrorText());
+    }
+    SyncAudioStatus(*backend);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_stop(SoloRigBackend* backend) {
+    if (!ValidBackend(backend) || backend->audio_engine == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "audio backend is unavailable");
+    }
+    backend->audio_engine->Stop();
+    SyncAudioStatus(*backend);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_close(SoloRigBackend* backend) {
+    if (!ValidBackend(backend) || backend->audio_engine == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "audio backend is unavailable");
+    }
+    backend->audio_engine->Close();
+    SyncAudioStatus(*backend);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_recover(SoloRigBackend* backend) {
+    if (!ValidBackend(backend) || backend->audio_engine == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "audio backend is unavailable");
+    }
+    if (!backend->audio_engine->RecoverAudio()) {
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, backend->audio_engine->ErrorText());
+    }
+    SyncAudioStatus(*backend);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_tuner_set_enabled(
+    SoloRigBackend* backend, uint8_t enabled) {
+    if (!ValidBackend(backend) || backend->audio_engine == nullptr || enabled > 1U) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "tuner state and audio backend are required");
+    }
+    backend->audio_engine->SetTunerEnabled(enabled != 0U);
+    SyncAudioStatus(*backend);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_refresh(SoloRigBackend* backend) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "MIDI session is unavailable");
+    }
+    static_cast<void>(backend->midi_session->RefreshDevices());
+    SyncMidiStatus(*backend);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_device_count(
+    SoloRigBackend* backend, uint32_t* out_count) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr || out_count == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "MIDI session and device count are required");
+    }
+    *out_count = static_cast<uint32_t>(backend->midi_session->Devices().size());
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_device_entry(
+    SoloRigBackend* backend, uint32_t index, SoloRigMidiDeviceView* out_device) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr || out_device == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "MIDI session and device entry are required");
+    }
+    SyncMidiStatus(*backend);
+    const auto& devices = backend->midi_session->Devices();
+    if (index >= devices.size() || index >= backend->midi_device_names_utf8.size()) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "MIDI device entry was not found");
+    }
+    out_device->device_index = devices[index].index;
+    out_device->display_name_utf8 = backend->midi_device_names_utf8[index].c_str();
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_open(
+    SoloRigBackend* backend, uint32_t device_index) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "MIDI session is unavailable");
+    }
+    if (!backend->midi_session->Open(device_index)) {
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, backend->midi_session->StatusText());
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_close(SoloRigBackend* backend) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "MIDI session is unavailable");
+    }
+    backend->midi_session->Close();
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_drain(
+    SoloRigBackend* backend, uint32_t* out_processed_messages) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr || out_processed_messages == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "MIDI session and processed message count are required");
+    }
+    *out_processed_messages = static_cast<uint32_t>(backend->midi_session->Drain());
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }

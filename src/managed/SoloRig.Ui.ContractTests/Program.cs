@@ -7,6 +7,10 @@ Require(viewModel.Nodes.All(node => !node.MeasurementAvailable), "startup keeps 
 Require(viewModel.PerformanceStatus.Contains("实测未连接", StringComparison.Ordinal), "performance status distinguishes estimate from measurement");
 Require(viewModel.Snapshot.Connections.Count == 1, "default snapshot exposes the Drive-to-Delay connection");
 Require(viewModel.MidiStatus.Contains("closed", StringComparison.OrdinalIgnoreCase), "startup MIDI remains closed");
+Require(viewModel.AsioDrivers.Count == 0 && viewModel.MidiDevices.Count == 0,
+    "startup keeps ASIO and MIDI enumeration explicit and side-effect free");
+Require(!viewModel.TunerEnabled, "startup keeps the tuner disabled");
+Require(!viewModel.StartAsio(), "ASIO start is rejected before an explicit device open");
 Require(viewModel.ModuleCatalog.Count >= 2, "module catalog exposes built-in modules");
 Require(viewModel.ModuleCatalog.Any(module => module.ModuleId == "org.mumu-dada.solorig.drive"), "catalog exposes Drive metadata");
 Require(viewModel.RealtimeContract.IsRealtimeSafe, "C ABI reports a C++-only, preallocated realtime boundary");
@@ -28,6 +32,30 @@ using (var lifecycleProbe = new BackendSession())
         disposedRejected = true;
     }
     Require(disposedRejected, "disposed backend rejects further status reads");
+}
+using (var hostProbe = new BackendSession())
+{
+    var invalidAsioRejected = false;
+    try
+    {
+        hostProbe.OpenAsio(0, IntPtr.Zero, 0, 1, 0, 1);
+    }
+    catch (BackendException exception) when (exception.Status == NativeStatus.NotFound)
+    {
+        invalidAsioRejected = true;
+    }
+    Require(invalidAsioRejected, "ASIO open rejects an invalid driver index");
+
+    var invalidMidiRejected = false;
+    try
+    {
+        hostProbe.OpenMidi(0);
+    }
+    catch (BackendException)
+    {
+        invalidMidiRejected = true;
+    }
+    Require(invalidMidiRejected, "MIDI open rejects a device before enumeration");
 }
 Require(viewModel.AddModule("org.mumu-dada.solorig.drive", "drive-extra", 640, 320), "module add uses the C ABI transaction");
 Require(viewModel.Snapshot.Nodes.Any(node => node.InstanceId == "drive-extra" && node.Parameters.Any(parameter => parameter.Id == "drive" && parameter.Value == 4.0F)),
