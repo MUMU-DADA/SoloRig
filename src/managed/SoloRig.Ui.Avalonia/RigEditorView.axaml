@@ -47,6 +47,17 @@
     <Style Selector="Button.srg-button.ghost">
       <Setter Property="Background" Value="Transparent" />
     </Style>
+    <Style Selector="Button.srg-button.selected">
+      <Setter Property="Background" Value="{DynamicResource SrgInputPanelBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource SrgAccentBrush}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.srg-button.selected:pointerover">
+      <Setter Property="Background" Value="{DynamicResource SrgOverlayBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource SrgAccentHoverBrush}" />
+    </Style>
     <Style Selector="Button.srg-footswitch">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
@@ -149,11 +160,11 @@
               </Grid>
               <TextBox Classes="srg-input" Watermark="搜索模块" Text="{Binding ModuleSearchText}" />
               <Grid ColumnDefinitions="*,*,*">
-                <Button Grid.Column="0" Classes="srg-button ghost" Content="模拟" Tag="模拟"
+                <Button x:Name="AnalogFilterButton" Grid.Column="0" Classes="srg-button ghost" Content="模拟" Tag="模拟"
                         Click="ModuleCatalogFilterClick" HorizontalContentAlignment="Center" />
-                <Button Grid.Column="1" Classes="srg-button ghost" Content="数字" Tag="数字"
+                <Button x:Name="DigitalFilterButton" Grid.Column="1" Classes="srg-button ghost" Content="数字" Tag="数字"
                         Click="ModuleCatalogFilterClick" HorizontalContentAlignment="Center" />
-                <Button Grid.Column="2" Classes="srg-button ghost" Content="外部" Tag="外部"
+                <Button x:Name="ExternalFilterButton" Grid.Column="2" Classes="srg-button ghost" Content="外部" Tag="外部"
                         Click="ModuleCatalogFilterClick" HorizontalContentAlignment="Center" />
               </Grid>
               <ListBox x:Name="ModuleCatalogList" Classes="srg-list" Height="205"
@@ -410,11 +421,11 @@
                 </Border>
               </Grid>
               <Grid ColumnDefinitions="*,*,*">
-                <Button Grid.Column="0" Classes="srg-button ghost" Content="参数" Tag="参数"
+                <Button x:Name="ParameterInspectorButton" Grid.Column="0" Classes="srg-button ghost" Content="参数" Tag="参数"
                         Click="InspectorTabClick" HorizontalContentAlignment="Center" />
-                <Button Grid.Column="1" Classes="srg-button ghost" Content="端口" Tag="端口"
+                <Button x:Name="PortInspectorButton" Grid.Column="1" Classes="srg-button ghost" Content="端口" Tag="端口"
                         Click="InspectorTabClick" HorizontalContentAlignment="Center" />
-                <Button Grid.Column="2" Classes="srg-button ghost" Content="资源" Tag="资源"
+                <Button x:Name="ResourceInspectorButton" Grid.Column="2" Classes="srg-button ghost" Content="资源" Tag="资源"
                         Click="InspectorTabClick" HorizontalContentAlignment="Center" />
               </Grid>
               <Border IsVisible="{Binding IsPortInspectorVisible}" Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1" CornerRadius="7" Padding="9">

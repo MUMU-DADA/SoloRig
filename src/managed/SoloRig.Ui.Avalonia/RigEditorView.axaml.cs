@@ -327,6 +327,46 @@ public sealed partial class RigEditorView : UserControl
         return toggled && modifierIgnored && viewModel.DarkTheme == originalDark;
     }
 
+    public bool ProbeSelectionState()
+    {
+        if (viewModel is null)
+        {
+            return false;
+        }
+
+        var originalFilter = viewModel.ModuleCatalogFilter;
+        var originalTab = viewModel.InspectorTab;
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        var probePassed = false;
+        try
+        {
+            var filterChanged = viewModel.SetModuleCatalogFilter("模拟") &&
+                                viewModel.ModuleCatalogFilter == "模拟" &&
+                                AnalogFilterButton.Classes.Contains("selected") &&
+                                !DigitalFilterButton.Classes.Contains("selected") &&
+                                !ExternalFilterButton.Classes.Contains("selected");
+            var tabChanged = viewModel.SelectInspectorTab("端口") &&
+                             viewModel.InspectorTab == "端口" &&
+                             PortInspectorButton.Classes.Contains("selected") &&
+                             !ParameterInspectorButton.Classes.Contains("selected") &&
+                             !ResourceInspectorButton.Classes.Contains("selected");
+            probePassed = filterChanged && tabChanged;
+        }
+        finally
+        {
+            viewModel.SetModuleCatalogFilter(originalFilter);
+            viewModel.SelectInspectorTab(originalTab);
+            UpdateSelectionStyles();
+        }
+        var filterRestored = AnalogFilterButton.Classes.Contains("selected") == (originalFilter == "模拟") &&
+                             DigitalFilterButton.Classes.Contains("selected") == (originalFilter == "数字") &&
+                             ExternalFilterButton.Classes.Contains("selected") == (originalFilter == "外部");
+        var tabRestored = ParameterInspectorButton.Classes.Contains("selected") == (originalTab == "参数") &&
+                          PortInspectorButton.Classes.Contains("selected") == (originalTab == "端口") &&
+                          ResourceInspectorButton.Classes.Contains("selected") == (originalTab == "资源");
+        return probePassed && BuildVisualRegressionFingerprint() == originalFingerprint && filterRestored && tabRestored;
+    }
+
     private RenderedSurfaceFingerprint? CaptureRenderedSurface()
     {
         var topLevel = TopLevel.GetTopLevel(this);
@@ -377,7 +417,7 @@ public sealed partial class RigEditorView : UserControl
             $"images={node.Skin.HasKnobImage},{node.Skin.HasToggleImage},{node.Skin.HasFootswitchImage}:" +
             string.Join(",", node.Controls.Select(control =>
                 $"{control.Id}:{control.Value:0.######}:{control.KnobAngle:0.###}:{control.IsToggle}"))));
-        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};resources={resources};nodes={nodes};connections={viewModel.CanvasConnections.Count}";
+        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};filter={viewModel.ModuleCatalogFilter};inspector={viewModel.InspectorTab};resources={resources};nodes={nodes};connections={viewModel.CanvasConnections.Count}";
     }
 
     private void NodeFootswitchClick(object? sender, RoutedEventArgs args)
@@ -407,6 +447,7 @@ public sealed partial class RigEditorView : UserControl
         DataContext = editor;
         editor.PropertyChanged += ViewModelPropertyChanged;
         ApplyTheme(editor.Theme, editor.DarkTheme);
+        UpdateSelectionStyles();
         StartRuntimeRefreshTimer();
     }
 
@@ -463,6 +504,26 @@ public sealed partial class RigEditorView : UserControl
         {
             ApplyTheme(viewModel.Theme, viewModel.DarkTheme);
         }
+        if (viewModel is not null &&
+            (args.PropertyName == nameof(RigEditorViewModel.ModuleCatalogFilter) ||
+             args.PropertyName == nameof(RigEditorViewModel.InspectorTab)))
+        {
+            UpdateSelectionStyles();
+        }
+    }
+
+    private void UpdateSelectionStyles()
+    {
+        if (viewModel is null)
+        {
+            return;
+        }
+        AnalogFilterButton.Classes.Set("selected", viewModel.ModuleCatalogFilter == "模拟");
+        DigitalFilterButton.Classes.Set("selected", viewModel.ModuleCatalogFilter == "数字");
+        ExternalFilterButton.Classes.Set("selected", viewModel.ModuleCatalogFilter == "外部");
+        ParameterInspectorButton.Classes.Set("selected", viewModel.InspectorTab == "参数");
+        PortInspectorButton.Classes.Set("selected", viewModel.InspectorTab == "端口");
+        ResourceInspectorButton.Classes.Set("selected", viewModel.InspectorTab == "资源");
     }
 
     private void StartRuntimeRefreshTimer()

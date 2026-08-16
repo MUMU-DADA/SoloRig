@@ -36,6 +36,8 @@ public sealed partial class MainWindow : Window
 
     public bool ProbeKeyboardShortcuts() => EditorView.ProbeKeyboardShortcuts();
 
+    public bool ProbeSelectionState() => EditorView.ProbeSelectionState();
+
     private void WindowKeyDown(object? sender, KeyEventArgs args) => EditorView.HandleWindowKeyDown(args);
 
     private async void WindowClosing(object? sender, WindowClosingEventArgs args)
