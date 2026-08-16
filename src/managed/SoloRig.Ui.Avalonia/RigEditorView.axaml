@@ -56,6 +56,12 @@
       <Setter Property="Foreground" Value="{DynamicResource SrgTextBrush}" />
       <Setter Property="CornerRadius" Value="6" />
     </Style>
+    <Style Selector="Slider.srg-slider">
+      <Setter Property="Background" Value="{DynamicResource SrgTrackBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource SrgAccentBrush}" />
+      <Setter Property="MinWidth" Value="80" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
     <Style Selector="ListBox.srg-list">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
@@ -368,15 +374,25 @@
                   <TextBlock Text="输出 · audio / 2ch" Classes="srg-text" FontSize="11" />
                 </StackPanel>
               </Border>
-              <ItemsControl IsVisible="{Binding IsParameterInspectorVisible}" ItemsSource="{Binding SelectedParameters}">
+              <ItemsControl x:Name="ParameterControlsList" IsVisible="{Binding IsParameterInspectorVisible}"
+                            ItemsSource="{Binding SelectedParameters}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
-                    <Grid ColumnDefinitions="*,90" Margin="0,2">
-                      <TextBlock Grid.Column="0" Text="{Binding Id}" Classes="srg-muted" FontSize="11"
-                                 VerticalAlignment="Center" />
-                      <TextBox Grid.Column="1" Classes="srg-input" Tag="{Binding Target}" Text="{Binding ValueText}"
-                               LostFocus="ParameterLostFocus" HorizontalContentAlignment="Right" FontSize="11" />
-                    </Grid>
+                    <Border Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgBorderBrush}"
+                            BorderThickness="1" CornerRadius="7" Padding="7" Margin="0,3">
+                      <Grid RowDefinitions="Auto,Auto">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBlock Text="{Binding Id}" Classes="srg-text" FontSize="11" />
+                          <TextBlock Grid.Column="1" Text="{Binding RangeText}" Classes="srg-muted" FontSize="9" />
+                        </Grid>
+                        <Grid Grid.Row="1" ColumnDefinitions="*,74" Margin="0,5,0,0">
+                          <Slider Classes="srg-slider" Minimum="{Binding Minimum}" Maximum="{Binding Maximum}"
+                                  Value="{Binding Value}" Tag="{Binding Target}" ValueChanged="ParameterSliderChanged" />
+                          <TextBox Grid.Column="1" Classes="srg-input" Margin="7,0,0,0" Tag="{Binding Target}" Text="{Binding ValueText}"
+                                   LostFocus="ParameterLostFocus" HorizontalContentAlignment="Right" FontSize="11" />
+                        </Grid>
+                      </Grid>
+                    </Border>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>

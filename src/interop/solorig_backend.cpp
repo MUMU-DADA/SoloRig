@@ -32,6 +32,7 @@ struct SoloRigSnapshot {
     solo_rig::RigPreset preset;
     solo_rig::RigEditorScene scene;
     std::string midi_status;
+    std::vector<std::vector<std::pair<float, float>>> parameter_ranges;
 };
 
 namespace {
@@ -239,6 +240,30 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_snapshot_create(
         auto snapshot = std::make_unique<SoloRigSnapshot>();
         snapshot->preset = backend->editor.ExportPreset();
         snapshot->scene = backend->editor.Scene();
+        snapshot->parameter_ranges.reserve(snapshot->preset.nodes.size());
+        const auto& catalog = backend->editor.Catalog();
+        for (const auto& node : snapshot->preset.nodes) {
+            std::vector<std::pair<float, float>> ranges;
+            ranges.reserve(node.parameter_values.size());
+            const auto catalog_entry = std::ranges::find_if(catalog, [&node](const auto& entry) {
+                return entry.module_id == node.module_id;
+            });
+            for (const auto& parameter : node.parameter_values) {
+                const auto& parameter_id = parameter.first;
+                std::pair<float, float> range{0.0F, 1.0F};
+                if (catalog_entry != catalog.end()) {
+                    const auto descriptor = std::ranges::find_if(
+                        catalog_entry->parameter_descriptors, [&parameter_id](const auto& item) {
+                            return item.id == parameter_id;
+                        });
+                    if (descriptor != catalog_entry->parameter_descriptors.end()) {
+                        range = {descriptor->minimum, descriptor->maximum};
+                    }
+                }
+                ranges.push_back(range);
+            }
+            snapshot->parameter_ranges.push_back(std::move(ranges));
+        }
         snapshot->midi_status = backend->midi_session != nullptr
             ? backend->midi_session->StatusText()
             : "MIDI control unavailable";
@@ -326,6 +351,13 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_parameter(
     std::advance(iterator, parameter_index);
     out_parameter->parameter_id_utf8 = iterator->first.c_str();
     out_parameter->value = iterator->second;
+    out_parameter->minimum = 0.0F;
+    out_parameter->maximum = 1.0F;
+    if (node_index < snapshot->parameter_ranges.size() &&
+        parameter_index < snapshot->parameter_ranges[node_index].size()) {
+        out_parameter->minimum = snapshot->parameter_ranges[node_index][parameter_index].first;
+        out_parameter->maximum = snapshot->parameter_ranges[node_index][parameter_index].second;
+    }
     return SOLO_RIG_STATUS_OK;
 }
 

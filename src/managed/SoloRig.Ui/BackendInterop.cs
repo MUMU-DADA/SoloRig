@@ -67,6 +67,8 @@ internal struct NativeParameterView
 {
     public IntPtr ParameterId;
     public float Value;
+    public float Minimum;
+    public float Maximum;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -387,9 +389,11 @@ public sealed class BackendException : Exception
     public NativeStatus Status { get; }
 }
 
-public sealed record ParameterSnapshot(string Id, float Value)
+public sealed record ParameterSnapshot(string Id, float Value, float Minimum = 0.0F, float Maximum = 1.0F)
 {
     public string DisplayText => $"{Id}: {Value:0.###}";
+    public string RangeText => $"{Minimum:0.###} .. {Maximum:0.###}";
+    public bool IsValidRange => float.IsFinite(Minimum) && float.IsFinite(Maximum) && Maximum > Minimum;
 }
 
 public sealed record ThemeSnapshot(string Id, string DisplayName, IReadOnlyDictionary<string, string> Colors)
@@ -597,7 +601,8 @@ public sealed class BackendSession : IDisposable
                 for (uint parameterIndex = 0; parameterIndex < node.ParameterCount; parameterIndex++)
                 {
                     Ensure(NativeMethods.solorig_snapshot_parameter(snapshot, nodeIndex, parameterIndex, out var parameter), "snapshot parameter");
-                    parameters.Add(new ParameterSnapshot(NativeMethods.Utf8(parameter.ParameterId), parameter.Value));
+                    parameters.Add(new ParameterSnapshot(NativeMethods.Utf8(parameter.ParameterId), parameter.Value,
+                        parameter.Minimum, parameter.Maximum));
                 }
                 nodes.Add(new NodeSnapshot(
                     NativeMethods.Utf8(node.InstanceId), NativeMethods.Utf8(node.ModuleId), node.LayoutX, node.LayoutY,

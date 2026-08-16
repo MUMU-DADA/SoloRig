@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -185,6 +186,52 @@ public sealed partial class RigEditorView : UserControl
             try { File.Delete(customPath); } catch { }
             try { File.Delete(restorePath); } catch { }
         }
+    }
+
+    public bool ProbeParameterBinding()
+    {
+        if (viewModel is null)
+        {
+            return false;
+        }
+        var canvasNode = viewModel.CanvasNodes.FirstOrDefault();
+        var sourceParameter = canvasNode?.Parameters.FirstOrDefault();
+        if (canvasNode is null || sourceParameter is null || !sourceParameter.IsValidRange)
+        {
+            return false;
+        }
+        if (!viewModel.SelectAt(canvasNode.CanvasX + 10.0, canvasNode.CanvasY + 10.0))
+        {
+            return false;
+        }
+        if (ParameterControlsList is null || ParameterControlsList.ItemCount == 0 || ParameterControlsList.Bounds.Width <= 0)
+        {
+            return false;
+        }
+        var selectedParameter = viewModel.SelectedParameters.FirstOrDefault(item => item.Id == sourceParameter.Id);
+        if (selectedParameter is null || !selectedParameter.IsValidRange)
+        {
+            return false;
+        }
+        var original = selectedParameter.Value;
+        var midpoint = (selectedParameter.Minimum + selectedParameter.Maximum) * 0.5F;
+        var fraction = original <= midpoint ? 0.75F : 0.25F;
+        var candidate = selectedParameter.Minimum +
+                        (selectedParameter.Maximum - selectedParameter.Minimum) * fraction;
+        if (Math.Abs(candidate - original) < 0.00001F)
+        {
+            candidate = midpoint;
+        }
+        if (Math.Abs(candidate - original) < 0.00001F || !viewModel.SetParameter(selectedParameter.Target, candidate))
+        {
+            return false;
+        }
+        var changed = viewModel.SelectedParameters.FirstOrDefault(item => item.Target == selectedParameter.Target);
+        var changedCorrectly = changed is not null && Math.Abs(changed.Value - candidate) < 0.00001F;
+        var restored = viewModel.SetParameter(selectedParameter.Target, original);
+        var restoredParameter = viewModel.SelectedParameters.FirstOrDefault(item => item.Target == selectedParameter.Target);
+        return changedCorrectly && restored && restoredParameter is not null &&
+               Math.Abs(restoredParameter.Value - original) < 0.00001F;
     }
 
     public void AttachEditor(RigEditorViewModel editor)
@@ -398,6 +445,21 @@ public sealed partial class RigEditorView : UserControl
         {
             textBox.Text = viewModel.SelectedParameters.FirstOrDefault(item => item.Target == target)?.ValueText ?? textBox.Text;
         }
+    }
+
+    private void ParameterSliderChanged(object? sender, RangeBaseValueChangedEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control || control.Tag is not string target ||
+            !double.IsFinite(args.NewValue))
+        {
+            return;
+        }
+        var current = viewModel.SelectedParameters.FirstOrDefault(item => item.Target == target);
+        if (current is null || Math.Abs(current.Value - args.NewValue) < 0.00001)
+        {
+            return;
+        }
+        viewModel.SetParameter(target, (float)args.NewValue);
     }
 
     private void OpenClick(object? sender, RoutedEventArgs args) => _ = OpenAsync();

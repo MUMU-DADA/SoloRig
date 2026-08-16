@@ -25,5 +25,7 @@ public sealed partial class MainWindow : Window
 
     public bool ProbeExternalTheme() => EditorView.ProbeExternalTheme();
 
+    public bool ProbeParameterBinding() => EditorView.ProbeParameterBinding();
+
     private void WindowKeyDown(object? sender, KeyEventArgs args) => EditorView.HandleWindowKeyDown(args);
 }

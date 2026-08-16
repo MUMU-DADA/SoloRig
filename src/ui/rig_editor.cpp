@@ -147,6 +147,9 @@ std::vector<ModuleCatalogEntry> BuiltinCatalog() {
          .category = "Analog",
          .description = "Built-in drive processor",
          .default_parameters = {{"drive", 4.0F}, {"outputGain", 1.0F}, {"diodeThreshold", 0.35F}},
+         .parameter_descriptors = {{.id = "drive", .minimum = 0.0F, .maximum = 16.0F, .default_value = 4.0F},
+                                   {.id = "outputGain", .minimum = 0.0F, .maximum = 2.0F, .default_value = 1.0F},
+                                   {.id = "diodeThreshold", .minimum = 0.01F, .maximum = 1.0F, .default_value = 0.35F}},
          .latency_samples = 0U,
          .estimated_cpu_percent = 1.5},
         {.module_id = "org.mumu-dada.solorig.digital-delay",
@@ -154,6 +157,9 @@ std::vector<ModuleCatalogEntry> BuiltinCatalog() {
          .category = "Digital",
          .description = "Built-in digital delay processor",
          .default_parameters = {{"time", 0.35F}, {"feedback", 0.35F}, {"mix", 0.25F}},
+         .parameter_descriptors = {{.id = "time", .minimum = 0.0F, .maximum = 2.0F, .default_value = 0.35F},
+                                   {.id = "feedback", .minimum = -0.99F, .maximum = 0.99F, .default_value = 0.35F},
+                                   {.id = "mix", .minimum = 0.0F, .maximum = 1.0F, .default_value = 0.25F}},
          .latency_samples = 96U,
          .estimated_cpu_percent = 2.5},
     };
@@ -522,6 +528,7 @@ void RigEditorViewModel::RebuildCatalog() {
             .estimated_cpu_percent = package.descriptor.category == EffectCategory::AnalogCircuit ? 4.0 : 2.0,
         };
         entry.default_parameters.reserve(package.descriptor.parameters.size());
+        entry.parameter_descriptors = package.descriptor.parameters;
         for (const auto& parameter : package.descriptor.parameters) {
             entry.default_parameters.emplace_back(parameter.id, parameter.default_value);
         }

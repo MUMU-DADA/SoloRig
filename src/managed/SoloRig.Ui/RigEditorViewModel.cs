@@ -51,9 +51,11 @@ public sealed record CanvasConnectionSnapshot(
     public string DestinationPoint => $"{DestinationX:0.###},{DestinationY:0.###}";
 }
 
-public sealed record ParameterEditorSnapshot(string Target, string Id, float Value)
+public sealed record ParameterEditorSnapshot(string Target, string Id, float Value, float Minimum, float Maximum)
 {
     public string ValueText => Value.ToString("0.###", CultureInfo.InvariantCulture);
+    public string RangeText => $"{Minimum.ToString("0.###", CultureInfo.InvariantCulture)} .. {Maximum.ToString("0.###", CultureInfo.InvariantCulture)}";
+    public bool IsValidRange => float.IsFinite(Minimum) && float.IsFinite(Maximum) && Maximum > Minimum;
 }
 
 public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
@@ -181,7 +183,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         SelectedNode is null
             ? []
             : SelectedNode.Parameters.Select(parameter =>
-                new ParameterEditorSnapshot($"{SelectedNode.InstanceId}.{parameter.Id}", parameter.Id, parameter.Value)).ToArray();
+                new ParameterEditorSnapshot($"{SelectedNode.InstanceId}.{parameter.Id}", parameter.Id, parameter.Value,
+                    parameter.Minimum, parameter.Maximum)).ToArray();
     public bool IsDirty => snapshot.Dirty;
     public bool DarkTheme => snapshot.DarkTheme;
     public string WindowTitle => string.IsNullOrWhiteSpace(snapshot.PresetName)
@@ -452,6 +455,20 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         if (backend is null)
         {
             return false;
+        }
+        var separator = target.LastIndexOf('.');
+        if (separator > 0 && separator < target.Length - 1 && float.IsFinite(value))
+        {
+            var instanceId = target[..separator];
+            var parameterId = target[(separator + 1)..];
+            var descriptor = snapshot.Nodes.FirstOrDefault(node => node.InstanceId == instanceId)?.Parameters
+                .FirstOrDefault(parameter => parameter.Id == parameterId);
+            if (descriptor is not null && descriptor.IsValidRange &&
+                (value < descriptor.Minimum || value > descriptor.Maximum))
+            {
+                Status = $"参数 {parameterId} 超出范围 {descriptor.RangeText}";
+                return false;
+            }
         }
         try
         {

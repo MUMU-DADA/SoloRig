@@ -85,6 +85,8 @@ typedef struct SoloRigNodeView {
 typedef struct SoloRigParameterView {
     const char* parameter_id_utf8;
     float value;
+    float minimum;
+    float maximum;
 } SoloRigParameterView;
 
 typedef struct SoloRigConnectionView {

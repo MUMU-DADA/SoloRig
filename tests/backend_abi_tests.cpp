@@ -62,6 +62,8 @@ TEST_CASE("C ABI backend performs a real parameter edit and preserves ownership 
         if (std::string(parameter.parameter_id_utf8) == "drive") {
             drive_found = true;
             REQUIRE(parameter.value == 6.0F);
+            REQUIRE(parameter.minimum == 0.0F);
+            REQUIRE(parameter.maximum == 16.0F);
         }
     }
     REQUIRE(drive_found);

@@ -76,6 +76,7 @@ struct ModuleCatalogEntry {
     std::string category;
     std::string description;
     std::vector<std::pair<std::string, float>> default_parameters;
+    std::vector<EffectParameter> parameter_descriptors;
     uint32_t latency_samples{};
     double estimated_cpu_percent{};
 };

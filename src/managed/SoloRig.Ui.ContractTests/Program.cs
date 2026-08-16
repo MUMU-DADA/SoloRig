@@ -2,6 +2,9 @@ using SoloRig.Ui;
 
 using var viewModel = new RigEditorViewModel();
 Require(viewModel.Nodes.Count >= 2, "default snapshot exposes Drive and Delay nodes");
+var driveRange = viewModel.Nodes.Single(node => node.InstanceId == "drive-1").Parameters.Single(parameter => parameter.Id == "drive");
+Require(driveRange.Minimum == 0.0F && driveRange.Maximum == 16.0F,
+    "parameter snapshot exposes the validated Drive control range");
 Require(viewModel.Nodes.All(node => node.EstimatedCpuPercent > 0), "per-node estimated performance is visible");
 Require(viewModel.Nodes.All(node => !node.MeasurementAvailable), "startup keeps measured performance explicitly unavailable");
 Require(viewModel.PerformanceStatus.Contains("实测未连接", StringComparison.Ordinal), "performance status distinguishes estimate from measurement");
@@ -93,6 +96,7 @@ Require(string.IsNullOrEmpty(viewModel.Snapshot.SourcePath) && !viewModel.IsDirt
 Require(viewModel.SetParameter("drive-1.drive", 6.0F), "C ABI parameter edit succeeds");
 Require(viewModel.Nodes.SelectMany(node => node.Parameters).Any(parameter => parameter.Id == "drive" && parameter.Value == 6.0F),
     "edited parameter is visible in the next snapshot");
+Require(!viewModel.SetParameter("drive-1.drive", 20.0F), "shared UI rejects a parameter value outside the descriptor range");
 Require(viewModel.SelectPreset("SoloRig Default"), "preset selector activates the quick default action");
 Require(viewModel.SelectedPresetName == "SoloRig Default" && !viewModel.IsDirty,
     "preset selector restores the clean default state");
