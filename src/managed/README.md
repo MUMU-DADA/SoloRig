@@ -1,6 +1,6 @@
 # C# + Avalonia Standalone 产品编辑工作流
 
-当前共享视图提供固定 ASIO INPUT/OUTPUT 物理端口、效果器输出端点到输入端点的点击连接、ASIO 设备/物理通道选择、启动/停止/恢复、调音器开关，以及 MIDI 设备刷新/打开/关闭、目标选择、CC Learn/取消、绑定删除/清空和 MIDI Bank 导入。C# Standalone 已是独立程序生产入口；真实硬件成功打开、双设备恢复、真实 MIDI 设备压力和真实 DAW 回灌仍是后续宿主门禁。
+当前共享视图提供固定 ASIO INPUT/OUTPUT 物理端口、效果器输出端点到输入端点的点击连接、ASIO 设备/物理通道选择、启动/停止/恢复、调音器开关，以及 MIDI 设备刷新/打开/关闭、目标选择、CC Learn/取消、绑定删除/清空和 MIDI Bank 导入。C# Standalone 已是 self-contained 独立程序生产入口；真实硬件成功打开、双设备恢复、真实 MIDI 设备压力和真实 DAW 回灌仍是后续宿主门禁。
 
 VST3 Controller 通过 hostfxr 加载同一 SoloRig.Ui.Avalonia 程序集，在独立 STA/UI 线程中调用同一个 RigEditorView 和 RigEditorViewModel，创建 Avalonia 子 HWND 后挂载到 VST3 IPlugView 的 Windows 父窗口；VST3 bundle 同时携带同一 SoloRigBackend.dll，backend 不可加载时桥接直接拒绝挂载，避免出现无功能的空界面；Standalone 与 VST3 不再维护两套 C# 界面。
 
@@ -21,4 +21,4 @@ dotnet build src\managed\SoloRig.Standalone\SoloRig.Standalone.csproj --no-resto
 dotnet build src\managed\SoloRig.Ui.ContractTests\SoloRig.Ui.ContractTests.csproj --no-restore -c Release
 ```
 
-构建前需先生成 `build\bin\SoloRigBackend.dll`；项目文件会把它复制到 C# 输出目录。资源入口只在用户显式导入时识别 `.nam`、`.nam-a2`、`.ir`、`.wav` 和外部 `circuit.json`，不会在启动或实时路径读文件；不会把识别冒充模型加载。C# VST3 UI 宿主桥已通过 hostfxr 接入同一共享视图，实时线程继续由 C++ 原生运行时负责；真实 DAW 音频回灌和无 .NET 安装体验仍需单独验收。
+构建前需先生成 `build\bin\SoloRigBackend.dll`；项目文件会把它复制到 C# 输出目录。资源入口只在用户显式导入时识别 `.nam`、`.nam-a2`、`.ir`、`.wav` 和外部 `circuit.json`，不会在启动或实时路径读文件；不会把识别冒充模型加载。C# Standalone 发布目录会封装本机 .NET 8 runtime/hostfxr，并已在禁用全局 runtime 探索下通过 visual probe；C# VST3 UI 宿主桥仍通过 hostfxr 接入同一共享视图，实时线程继续由 C++ 原生运行时负责，VST3 runtime 的最终随包部署策略和真实 DAW 音频回灌仍需单独验收。

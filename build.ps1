@@ -440,6 +440,24 @@ try {
     if ($null -eq $managedStandaloneExe) {
         Fail-Layer -Layer ".NET Avalonia artifacts" -Message "C# Standalone 发布目录缺少 SoloRig.Standalone.exe。"
     }
+    $dotnetSharedRoot = Join-Path $env:ProgramFiles "dotnet\shared\Microsoft.NETCore.App"
+    $dotnetRuntime = Get-ChildItem -LiteralPath $dotnetSharedRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "8.*" } | Sort-Object Name -Descending | Select-Object -First 1
+    $dotnetHostFxrRoot = Join-Path $env:ProgramFiles "dotnet\host\fxr"
+    $dotnetHostFxrDirectory = Get-ChildItem -LiteralPath $dotnetHostFxrRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "8.*" } | Sort-Object Name -Descending | Select-Object -First 1
+    if ($null -eq $dotnetRuntime -or $null -eq $dotnetHostFxrDirectory) {
+        Fail-Layer -Layer ".NET Avalonia artifacts" -Message "找不到本机 .NET 8 runtime/hostfxr，无法生成离线独立程序包。"
+    }
+    $standaloneRuntimeOutput = Join-Path $managedStandaloneOutput ("shared\Microsoft.NETCore.App\{0}" -f $dotnetRuntime.Name)
+    New-Item -ItemType Directory -Path $standaloneRuntimeOutput -Force | Out-Null
+    Copy-Item -Path (Join-Path $dotnetRuntime.FullName "*") -Destination $standaloneRuntimeOutput -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $dotnetHostFxrDirectory.FullName "hostfxr.dll") -Destination (Join-Path $managedStandaloneOutput "hostfxr.dll") -Force
+    $standaloneHostFxr = Join-Path $managedStandaloneOutput "hostfxr.dll"
+    $standaloneRuntimeCore = Join-Path $standaloneRuntimeOutput "System.Private.CoreLib.dll"
+    if (-not (Test-Path -LiteralPath $standaloneHostFxr) -or -not (Test-Path -LiteralPath $standaloneRuntimeCore)) {
+        Fail-Layer -Layer ".NET Avalonia artifacts" -Message "C# Standalone 离线独立包缺少 hostfxr 或 core runtime。"
+    }
     Invoke-Tool -Layer ".NET VST3 C# UI bridge Release build" -Executable $dotnet -Arguments @(
         "publish", $vst3UiProject, "-c", "Release", "--no-restore", "-o", $managedVst3UiOutput
     )
@@ -469,6 +487,22 @@ try {
     }
 
     if (-not $SkipTests) {
+        $previousDotnetLookup = $env:DOTNET_MULTILEVEL_LOOKUP
+        $previousDotnetRoot = $env:DOTNET_ROOT
+        $previousDotnetRootX64 = $env:DOTNET_ROOT_X64
+        try {
+            $env:DOTNET_MULTILEVEL_LOOKUP = "0"
+            $env:DOTNET_ROOT = $managedStandaloneOutput
+            $env:DOTNET_ROOT_X64 = $managedStandaloneOutput
+            Invoke-Tool -Layer "C# Standalone offline visual probe" -Executable $managedStandaloneExe.FullName -Arguments @(
+                "--standalone-visual-probe"
+            )
+        }
+        finally {
+            $env:DOTNET_MULTILEVEL_LOOKUP = $previousDotnetLookup
+            $env:DOTNET_ROOT = $previousDotnetRoot
+            $env:DOTNET_ROOT_X64 = $previousDotnetRootX64
+        }
         Invoke-Tool -Layer "CTest" -Executable $ctest -Arguments @(
             "--test-dir", $outputBuildRoot, "-C", "Release", "--output-on-failure"
         )
@@ -500,6 +534,8 @@ try {
         artifacts = [ordered]@{
             backend = $backendDll.FullName
             standalone = $managedStandaloneExe.FullName
+            standaloneDeployment = "runtime-complete-offline"
+            standaloneRuntime = $dotnetRuntime.Name
             validator = $validatorExe.FullName
             vst3 = $vst3Bundle.FullName
             managedStandalone = $managedStandaloneOutput
