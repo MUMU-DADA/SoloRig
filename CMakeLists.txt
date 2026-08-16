@@ -232,6 +232,16 @@ if(SOLO_RIG_BUILD_VST3)
     if(NOT EXISTS "${SOLO_RIG_VST3_SDK_ROOT}/public.sdk/source/vst/vstaudioeffect.cpp")
         message(FATAL_ERROR "The vendored VST3 SDK is incomplete. Initialize third_party/vst3sdk first.")
     endif()
+    if(WIN32)
+        file(GLOB SOLO_RIG_DOTNET_HOST_NATIVE_DIRS
+            "C:/Program Files/dotnet/packs/Microsoft.NETCore.App.Host.win-x64/*/runtimes/win-x64/native")
+        list(SORT SOLO_RIG_DOTNET_HOST_NATIVE_DIRS COMPARE NATURAL ORDER DESCENDING)
+        list(LENGTH SOLO_RIG_DOTNET_HOST_NATIVE_DIRS SOLO_RIG_DOTNET_HOST_NATIVE_COUNT)
+        if(SOLO_RIG_DOTNET_HOST_NATIVE_COUNT EQUAL 0)
+            message(FATAL_ERROR "The .NET host development pack is required for the C# VST3 UI bridge.")
+        endif()
+        list(GET SOLO_RIG_DOTNET_HOST_NATIVE_DIRS 0 SOLO_RIG_DOTNET_HOST_NATIVE_DIR)
+    endif()
 
     # Build a self-contained VST3 package inside the build tree. Deployment is an
     # explicit user action; CMake must never alter the system plug-in folders.
@@ -271,9 +281,15 @@ if(SOLO_RIG_BUILD_VST3)
         SOURCES_LIST
             src/vst3/solo_rig_processor.cpp
             src/vst3/solo_rig_controller.cpp
+            src/vst3/solo_rig_plug_view.cpp
             src/vst3/factory.cpp
     )
     target_include_directories(solo_rig_vst3 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    if(WIN32)
+        target_compile_definitions(solo_rig_vst3 PRIVATE
+            SOLO_RIG_DOTNET_HOST_NATIVE_DIR="${SOLO_RIG_DOTNET_HOST_NATIVE_DIR}")
+        target_include_directories(solo_rig_vst3 PRIVATE "${SOLO_RIG_DOTNET_HOST_NATIVE_DIR}")
+    endif()
     target_link_libraries(solo_rig_vst3 PRIVATE sdk solo_rig_core)
     # VST3's public SDK headers are compiled into this boundary target. Keep
     # SoloRig's stricter /W4 /WX policy on its own core and tests; applying it
@@ -286,6 +302,7 @@ if(SOLO_RIG_BUILD_VST3)
             tests/vst3_host_lifecycle_tests.cpp
             src/vst3/solo_rig_processor.cpp
             src/vst3/solo_rig_controller.cpp
+            src/vst3/solo_rig_plug_view.cpp
             src/vst3/factory.cpp
             "${SDK_ROOT}/public.sdk/source/common/memorystream.cpp"
         )
@@ -294,8 +311,15 @@ if(SOLO_RIG_BUILD_VST3)
             "${SDK_ROOT}"
             "${SDK_ROOT}/public.sdk"
         )
-        target_link_libraries(solo_rig_vst3_tests PRIVATE sdk sdk_hosting solo_rig_core)
+        if(WIN32)
+            target_compile_definitions(solo_rig_vst3_tests PRIVATE
+                SOLO_RIG_DOTNET_HOST_NATIVE_DIR="${SOLO_RIG_DOTNET_HOST_NATIVE_DIR}")
+            target_include_directories(solo_rig_vst3_tests PRIVATE "${SOLO_RIG_DOTNET_HOST_NATIVE_DIR}")
+        endif()
+        target_link_libraries(solo_rig_vst3_tests PRIVATE sdk sdk_hosting solo_rig_core user32)
         add_test(NAME solo_rig_vst3_tests COMMAND solo_rig_vst3_tests)
+        set_tests_properties(solo_rig_vst3_tests PROPERTIES
+            ENVIRONMENT "SOLO_RIG_VST3_UI_DIR=${CMAKE_BINARY_DIR}/managed/vst3-ui")
         add_test(
             NAME solo_rig_vst3_validator
             COMMAND $<TARGET_FILE:validator>

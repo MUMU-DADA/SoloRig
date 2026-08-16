@@ -10,5 +10,11 @@
   <ItemGroup>
     <ProjectReference Include="..\SoloRig.Ui\SoloRig.Ui.csproj" />
     <PackageReference Include="Avalonia" Version="11.0.10" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.0.10" />
+    <PackageReference Include="Avalonia.Themes.Simple" Version="11.0.10" />
   </ItemGroup>
+
+  <PropertyGroup>
+    <GenerateRuntimeConfigFile>true</GenerateRuntimeConfigFile>
+  </PropertyGroup>
 </Project>

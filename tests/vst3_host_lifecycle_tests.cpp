@@ -3,12 +3,15 @@
 #include "vst3/solo_rig_ids.h"
 
 #include "base/source/fstreamer.h"
+#include "pluginterfaces/gui/iplugview.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
+#include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "public.sdk/source/common/memorystream.h"
 
 #include <array>
 #include <cmath>
+#include <windows.h>
 
 extern "C" Steinberg::IPluginFactory* PLUGIN_API GetPluginFactory();
 
@@ -129,4 +132,41 @@ TEST_CASE("VST3 exported factory supports host component lifecycle and state res
     for (const auto sample : restored_output) {
         REQUIRE(std::isfinite(sample));
     }
+}
+
+TEST_CASE("VST3 controller exposes the shared C# Avalonia IPlugView") {
+    auto* factory = GetPluginFactory();
+    REQUIRE(factory != nullptr);
+
+    Steinberg::Vst::IEditController* controller{};
+    REQUIRE(factory->createInstance(solo_rig::vst3::kControllerUid,
+                                    Steinberg::Vst::IEditController::iid,
+                                    reinterpret_cast<void**>(&controller)) == Steinberg::kResultOk);
+    REQUIRE(controller != nullptr);
+    REQUIRE(controller->initialize(nullptr) == Steinberg::kResultOk);
+
+    auto* view = controller->createView(Steinberg::Vst::ViewType::kEditor);
+    REQUIRE(view != nullptr);
+    REQUIRE(view->isPlatformTypeSupported(Steinberg::kPlatformTypeHWND) == Steinberg::kResultTrue);
+    REQUIRE(view->isPlatformTypeSupported(Steinberg::kPlatformTypeX11EmbedWindowID) ==
+            Steinberg::kResultFalse);
+
+    const auto parent = CreateWindowExW(0, L"STATIC", L"SoloRig VST3 C# UI host probe",
+                                        WS_OVERLAPPEDWINDOW, 0, 0, 1024, 720,
+                                        nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    REQUIRE(parent != nullptr);
+    REQUIRE(view->attached(parent, Steinberg::kPlatformTypeHWND) == Steinberg::kResultOk);
+
+    Steinberg::ViewRect size{};
+    REQUIRE(view->getSize(&size) == Steinberg::kResultTrue);
+    REQUIRE(size.getWidth() >= 320);
+    REQUIRE(size.getHeight() >= 220);
+
+    Steinberg::ViewRect resized(0, 0, 720, 480);
+    REQUIRE(view->onSize(&resized) == Steinberg::kResultTrue);
+    REQUIRE(view->removed() == Steinberg::kResultOk);
+    view->release();
+    controller->terminate();
+    controller->release();
+    DestroyWindow(parent);
 }

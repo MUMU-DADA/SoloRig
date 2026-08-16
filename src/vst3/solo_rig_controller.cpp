@@ -1,12 +1,22 @@
 #include "vst3/solo_rig_controller.h"
 
 #include "vst3/solo_rig_ids.h"
+#include "vst3/solo_rig_plug_view.h"
 
 #include "base/source/fstreamer.h"
 
 #include <algorithm>
+#include <cstring>
 
 namespace solo_rig::vst3 {
+
+Steinberg::IPlugView* PLUGIN_API SoloRigController::createView(
+    Steinberg::FIDString name) {
+    if (name == nullptr || std::strcmp(name, Steinberg::Vst::ViewType::kEditor) != 0) {
+        return nullptr;
+    }
+    return new SoloRigPlugView();
+}
 
 Steinberg::tresult PLUGIN_API SoloRigController::initialize(Steinberg::FUnknown* context) {
     const auto result = EditController::initialize(context);

@@ -41,7 +41,7 @@
 | 22 | 逻辑、元属性、外观三层模块包 | 部分完成 | `ModulePackage` manifest、logic、descriptor/metadata、外部 Circuit/NAM/IR 入口；编辑器动态目录、manifest 包与直接 Circuit/NAM/IR preset 引用、Standalone 注册/处理自测、VST3 state v3 重建和 C ABI 重开回归已接通；模块级 skin JSON 可声明相对图像资源，非法/缺失时回退默认控件 | 真实 VST3 宿主、多模块皮肤视觉产品绑定、矢量/动画资源生命周期/版本迁移和更复杂模拟逻辑与数字逻辑统一运行契约 |
 | 23 | 多 ASIO 设备与任意 I/O 通道 | 部分完成 | `AsioDeviceCoordinator` 已支持最多四个 ASIO host、固定容量跨设备 ring、任意物理输入/输出路由文本、每设备 buffer 配置、异步时钟离线契约和 Recover 入口；单设备 `Midiplus USB Audio` 真实回调通过 | 至少两个可用 ASIO 设备的真实同步/异步回归、真实断连/重置恢复和更多硬件 |
 
-补充：M24-C 已将 C# 共享视图的 ASIO/MIDI/调音器控制桥接到原生控制线程，并在画布显示固定 INPUT/OUTPUT 与效果器端点点击连接；真实硬件成功打开、MIDI Learn/Bank 完整产品控件和 VST3 IPlugView 仍未完成。
+补充：M24-C 已将 C# 共享视图的 ASIO/MIDI/调音器控制桥接到原生控制线程，并在画布显示固定 INPUT/OUTPUT 与效果器端点点击连接；M24-D 已通过 hostfxr 将同一 C# RigEditorView 挂载到 Windows VST3 IPlugView，并覆盖真实 Win32 父窗口的创建、缩放和移除；真实 DAW 项目回灌、硬件成功打开、MIDI Learn/Bank 完整产品控件和宿主无 .NET 安装体验仍未完成。
 
 ## 白盒专用覆盖
 

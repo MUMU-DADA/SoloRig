@@ -393,8 +393,10 @@ try {
     $managedRoot = Join-Path $outputBuildRoot "managed"
     $managedStandaloneOutput = Join-Path $managedRoot "standalone"
     $managedContractOutput = Join-Path $managedRoot "contract-tests"
+    $managedVst3UiOutput = Join-Path $managedRoot "vst3-ui"
     New-Item -ItemType Directory -Path $managedStandaloneOutput -Force | Out-Null
     New-Item -ItemType Directory -Path $managedContractOutput -Force | Out-Null
+    New-Item -ItemType Directory -Path $managedVst3UiOutput -Force | Out-Null
 
     $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
     $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = "1"
@@ -414,7 +416,8 @@ try {
     }
     $standaloneProject = Join-Path $sourceRoot "src\managed\SoloRig.Standalone\SoloRig.Standalone.csproj"
     $contractProject = Join-Path $sourceRoot "src\managed\SoloRig.Ui.ContractTests\SoloRig.Ui.ContractTests.csproj"
-    foreach ($project in @($standaloneProject, $contractProject)) {
+    $vst3UiProject = Join-Path $sourceRoot "src\managed\SoloRig.Ui.Avalonia\SoloRig.Ui.Avalonia.csproj"
+    foreach ($project in @($standaloneProject, $contractProject, $vst3UiProject)) {
         if (-not (Test-Path -LiteralPath $project)) {
             Fail-Layer -Layer ".NET configuration" -Message ("缺少托管项目: {0}" -f $project)
         }
@@ -425,6 +428,24 @@ try {
     Invoke-Tool -Layer ".NET Avalonia Release build" -Executable $dotnet -Arguments @(
         "publish", $standaloneProject, "-c", "Release", "--no-restore", "-o", $managedStandaloneOutput
     )
+    Invoke-Tool -Layer ".NET VST3 C# UI bridge Release build" -Executable $dotnet -Arguments @(
+        "publish", $vst3UiProject, "-c", "Release", "--no-restore", "-o", $managedVst3UiOutput
+    )
+    $runtimeConfig = Join-Path $managedStandaloneOutput "SoloRig.Standalone.runtimeconfig.json"
+    if (-not (Test-Path -LiteralPath $runtimeConfig)) {
+        Fail-Layer -Layer ".NET VST3 C# UI bridge artifacts" -Message "Standalone runtimeconfig.json 不存在，无法初始化 hostfxr。"
+    }
+    Copy-Item -LiteralPath $runtimeConfig -Destination (Join-Path $managedVst3UiOutput "SoloRig.Ui.Avalonia.runtimeconfig.json") -Force
+    $dotnetHostPackRoot = Join-Path $env:ProgramFiles "dotnet\packs\Microsoft.NETCore.App.Host.win-x64"
+    $nethost = Get-ChildItem -LiteralPath $dotnetHostPackRoot -Recurse -Filter "nethost.dll" -File -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending | Select-Object -First 1
+    if ($null -eq $nethost) {
+        Fail-Layer -Layer ".NET VST3 C# UI bridge artifacts" -Message "找不到 nethost.dll，无法初始化 hostfxr。"
+    }
+    Copy-Item -LiteralPath $nethost.FullName -Destination (Join-Path $managedVst3UiOutput "nethost.dll") -Force
+    $managedVst3BundleOutput = Join-Path $vst3Bundle.FullName "Contents\Resources\managed"
+    New-Item -ItemType Directory -Path $managedVst3BundleOutput -Force | Out-Null
+    Copy-Item -Path (Join-Path $managedVst3UiOutput "*") -Destination $managedVst3BundleOutput -Recurse -Force
     Invoke-Tool -Layer ".NET contract Release build" -Executable $dotnet -Arguments @(
         "publish", $contractProject, "-c", "Release", "--no-restore", "-o", $managedContractOutput
     )
@@ -470,6 +491,7 @@ try {
             vst3 = $vst3Bundle.FullName
             managedStandalone = $managedStandaloneOutput
             managedContractTests = $managedContractOutput
+            managedVst3Ui = $managedVst3UiOutput
         }
     }
     $manifestPath = Join-Path $outputBuildRoot "SoloRigBuildManifest.json"
