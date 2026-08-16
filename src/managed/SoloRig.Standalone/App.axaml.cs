@@ -29,7 +29,8 @@ public sealed class App : Application
                 {
                     attempts++;
                     if (mainWindow.HasStandaloneVisualContent && mainWindow.ProbeExternalTheme() &&
-                        mainWindow.ProbeThemeSwitch() && mainWindow.ProbeParameterBinding())
+                        mainWindow.ProbeThemeSwitch() && mainWindow.ProbeParameterBinding() &&
+                        mainWindow.ProbeDpiScaling())
                     {
                         probe.Stop();
                         desktop.Shutdown(0);

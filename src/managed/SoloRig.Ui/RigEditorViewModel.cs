@@ -504,6 +504,53 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public bool ProbeDpiScaling()
+    {
+        if (backend is null || snapshot.ViewportWidth <= 0 || snapshot.ViewportHeight <= 0 ||
+            CanvasNodes.Count < 2 || CanvasConnections.Count == 0)
+        {
+            return false;
+        }
+        var originalWidth = snapshot.ViewportWidth;
+        var originalHeight = snapshot.ViewportHeight;
+        var originalDpi = snapshot.DpiScale;
+        var originalNode = CanvasNodes[0];
+        var originalConnection = CanvasConnections[0];
+        try
+        {
+            foreach (var dpiScale in new[] { 1.0, 1.25, 2.0 })
+            {
+                SetViewport(originalWidth, originalHeight, dpiScale);
+                if (Math.Abs(snapshot.DpiScale - dpiScale) > 0.00001 ||
+                    CanvasNodes.Count < 2 || CanvasConnections.Count == 0)
+                {
+                    return false;
+                }
+                var node = CanvasNodes.FirstOrDefault(candidate => candidate.InstanceId == originalNode.InstanceId);
+                var connection = CanvasConnections.FirstOrDefault(candidate =>
+                    candidate.SourceInstanceId == originalConnection.SourceInstanceId &&
+                    candidate.DestinationInstanceId == originalConnection.DestinationInstanceId);
+                if (node is null || connection is null ||
+                    Math.Abs(node.CanvasX - originalNode.CanvasX) > 0.00001 ||
+                    Math.Abs(node.CanvasY - originalNode.CanvasY) > 0.00001 ||
+                    Math.Abs(connection.SourceX - originalConnection.SourceX) > 0.00001 ||
+                    Math.Abs(connection.SourceY - originalConnection.SourceY) > 0.00001 ||
+                    Math.Abs(connection.DestinationX - originalConnection.DestinationX) > 0.00001 ||
+                    Math.Abs(connection.DestinationY - originalConnection.DestinationY) > 0.00001 ||
+                    !SelectAt(node.CanvasX + 10.0, node.CanvasY + 10.0) ||
+                    !CanvasNodes.First(candidate => candidate.InstanceId == node.InstanceId).Selected)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        finally
+        {
+            SetViewport(originalWidth, originalHeight, originalDpi);
+        }
+    }
+
     public bool SetParameter(string target, float value)
     {
         if (backend is null)

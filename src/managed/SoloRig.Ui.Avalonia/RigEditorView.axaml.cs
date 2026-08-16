@@ -253,6 +253,8 @@ public sealed partial class RigEditorView : UserControl
                BuildVisualRegressionFingerprint() == originalFingerprint;
     }
 
+    public bool ProbeDpiScaling() => viewModel is not null && viewModel.ProbeDpiScaling();
+
     private string BuildVisualRegressionFingerprint()
     {
         if (viewModel is null)

@@ -27,5 +27,7 @@ public sealed partial class MainWindow : Window
 
     public bool ProbeParameterBinding() => EditorView.ProbeParameterBinding();
 
+    public bool ProbeDpiScaling() => EditorView.ProbeDpiScaling();
+
     private void WindowKeyDown(object? sender, KeyEventArgs args) => EditorView.HandleWindowKeyDown(args);
 }

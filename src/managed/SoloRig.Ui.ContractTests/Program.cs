@@ -16,6 +16,7 @@ Require(viewModel.Nodes.All(node => node.EstimatedCpuPercent > 0), "per-node est
 Require(viewModel.Nodes.All(node => !node.MeasurementAvailable), "startup keeps measured performance explicitly unavailable");
 Require(viewModel.PerformanceStatus.Contains("实测未连接", StringComparison.Ordinal), "performance status distinguishes estimate from measurement");
 Require(viewModel.Snapshot.Connections.Count == 1, "default snapshot exposes the Drive-to-Delay connection");
+Require(viewModel.ProbeDpiScaling(), "shared geometry and hit testing remain aligned at 1x/1.25x/2x DPI");
 Require(viewModel.MidiStatus.Contains("closed", StringComparison.OrdinalIgnoreCase), "startup MIDI remains closed");
 Require(viewModel.AsioDrivers.Count == 0 && viewModel.MidiDevices.Count == 0,
     "startup keeps ASIO and MIDI enumeration explicit and side-effect free");
