@@ -109,6 +109,8 @@ public sealed partial class RigEditorView : UserControl
         Resources["SrgTextBrush"] is SolidColorBrush &&
         Resources["SrgAccentBrush"] is SolidColorBrush;
 
+    public string VisualRegressionFingerprint => BuildVisualRegressionFingerprint();
+
     public bool ProbeThemeSwitch()
     {
         if (viewModel is null || !HasThemePalette)
@@ -117,14 +119,18 @@ public sealed partial class RigEditorView : UserControl
         }
         var originalDark = viewModel.DarkTheme;
         var originalWindow = (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color;
+        var originalFingerprint = BuildVisualRegressionFingerprint();
         if (!viewModel.ToggleTheme())
         {
             return false;
         }
         var switchedWindow = (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color;
-        var changed = viewModel.DarkTheme != originalDark && switchedWindow != originalWindow;
+        var switchedFingerprint = BuildVisualRegressionFingerprint();
+        var changed = viewModel.DarkTheme != originalDark && switchedWindow != originalWindow &&
+                      switchedFingerprint != originalFingerprint;
         var restored = viewModel.ToggleTheme() && viewModel.DarkTheme == originalDark &&
-                       (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == originalWindow;
+                       (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == originalWindow &&
+                       BuildVisualRegressionFingerprint() == originalFingerprint;
         return changed && restored;
     }
 
@@ -137,6 +143,7 @@ public sealed partial class RigEditorView : UserControl
 
         var originalTheme = viewModel.Theme;
         var originalWindow = (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color;
+        var originalFingerprint = BuildVisualRegressionFingerprint();
         var customPath = Path.Combine(Path.GetTempPath(), $"solorig-theme-probe-{Guid.NewGuid():N}.json");
         var restorePath = Path.Combine(Path.GetTempPath(), $"solorig-theme-restore-{Guid.NewGuid():N}.json");
         try
@@ -172,9 +179,11 @@ public sealed partial class RigEditorView : UserControl
             var loaded = viewModel.LoadTheme(customPath);
             var applied = loaded && viewModel.Theme.Id == "probe.external" &&
                           (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == Color.Parse("#0B1120") &&
-                          (Resources["SrgAccentBrush"] as SolidColorBrush)?.Color == Color.Parse("#F97316");
+                          (Resources["SrgAccentBrush"] as SolidColorBrush)?.Color == Color.Parse("#F97316") &&
+                          BuildVisualRegressionFingerprint() != originalFingerprint;
             var restored = viewModel.LoadTheme(restorePath) && viewModel.Theme.Id == originalTheme.Id &&
-                           (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == originalWindow;
+                           (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == originalWindow &&
+                           BuildVisualRegressionFingerprint() == originalFingerprint;
             return applied && restored;
         }
         catch
@@ -196,7 +205,7 @@ public sealed partial class RigEditorView : UserControl
         }
         var canvasNode = viewModel.CanvasNodes.FirstOrDefault();
         var sourceParameter = canvasNode?.Parameters.FirstOrDefault();
-        if (canvasNode is null || sourceParameter is null || !sourceParameter.IsValidRange)
+        if (canvasNode is null || sourceParameter is null || canvasNode.Controls.Count == 0 || !sourceParameter.IsValidRange)
         {
             return false;
         }
@@ -213,6 +222,7 @@ public sealed partial class RigEditorView : UserControl
         {
             return false;
         }
+        var originalFingerprint = BuildVisualRegressionFingerprint();
         var original = selectedParameter.Value;
         var midpoint = (selectedParameter.Minimum + selectedParameter.Maximum) * 0.5F;
         var fraction = original <= midpoint ? 0.75F : 0.25F;
@@ -227,11 +237,36 @@ public sealed partial class RigEditorView : UserControl
             return false;
         }
         var changed = viewModel.SelectedParameters.FirstOrDefault(item => item.Target == selectedParameter.Target);
-        var changedCorrectly = changed is not null && Math.Abs(changed.Value - candidate) < 0.00001F;
+        var changedControl = viewModel.CanvasNodes.SelectMany(item => item.Controls)
+            .FirstOrDefault(item => item.Id == selectedParameter.Id);
+        var changedCorrectly = changed is not null && changedControl is not null &&
+                               Math.Abs(changed.Value - candidate) < 0.00001F &&
+                               Math.Abs(changedControl.Value - candidate) < 0.00001F &&
+                               BuildVisualRegressionFingerprint() != originalFingerprint;
         var restored = viewModel.SetParameter(selectedParameter.Target, original);
         var restoredParameter = viewModel.SelectedParameters.FirstOrDefault(item => item.Target == selectedParameter.Target);
-        return changedCorrectly && restored && restoredParameter is not null &&
-               Math.Abs(restoredParameter.Value - original) < 0.00001F;
+        var restoredControl = viewModel.CanvasNodes.SelectMany(item => item.Controls)
+            .FirstOrDefault(item => item.Id == selectedParameter.Id);
+        return changedCorrectly && restored && restoredParameter is not null && restoredControl is not null &&
+               Math.Abs(restoredControl.Value - original) < 0.00001F &&
+               Math.Abs(restoredParameter.Value - original) < 0.00001F &&
+               BuildVisualRegressionFingerprint() == originalFingerprint;
+    }
+
+    private string BuildVisualRegressionFingerprint()
+    {
+        if (viewModel is null)
+        {
+            return string.Empty;
+        }
+        var resourceKeys = new[] { "SrgWindowBrush", "SrgCanvasBrush", "SrgTextBrush", "SrgAccentBrush", "SrgKnobBrush" };
+        var resources = string.Join(",", resourceKeys.Select(key =>
+            $"{key}={(Resources[key] as SolidColorBrush)?.Color.ToString() ?? "missing"}"));
+        var nodes = string.Join("|", viewModel.CanvasNodes.Select(node =>
+            $"{node.InstanceId}:{node.Selected}:{node.Unresolved}:{node.FootswitchText}:" +
+            string.Join(",", node.Controls.Select(control =>
+                $"{control.Id}:{control.Value:0.######}:{control.KnobAngle:0.###}:{control.IsToggle}"))));
+        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};resources={resources};nodes={nodes};connections={viewModel.CanvasConnections.Count}";
     }
 
     public void AttachEditor(RigEditorViewModel editor)

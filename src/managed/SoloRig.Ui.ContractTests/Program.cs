@@ -2,6 +2,9 @@ using SoloRig.Ui;
 
 using var viewModel = new RigEditorViewModel();
 Require(viewModel.Nodes.Count >= 2, "default snapshot exposes Drive and Delay nodes");
+Require(viewModel.CanvasNodes.All(node => node.Controls.Count > 0 &&
+    node.Controls.All(control => control.IsKnob && control.Maximum > control.Minimum)),
+    "node cards expose parameter-backed knob controls with valid ranges");
 var driveRange = viewModel.Nodes.Single(node => node.InstanceId == "drive-1").Parameters.Single(parameter => parameter.Id == "drive");
 Require(driveRange.Minimum == 0.0F && driveRange.Maximum == 16.0F,
     "parameter snapshot exposes the validated Drive control range");

@@ -5,6 +5,25 @@ using System.Windows.Input;
 
 namespace SoloRig.Ui;
 
+public sealed record NodeControlSnapshot(string Id, string Label, float Value, float Minimum, float Maximum, bool IsToggle)
+{
+    public bool IsKnob => !IsToggle;
+    public string ValueText => Value.ToString("0.##", CultureInfo.InvariantCulture);
+    public string RangeText => $"{Minimum.ToString("0.##", CultureInfo.InvariantCulture)}..{Maximum.ToString("0.##", CultureInfo.InvariantCulture)}";
+    public double KnobAngle
+    {
+        get
+        {
+            if (!float.IsFinite(Minimum) || !float.IsFinite(Maximum) || Maximum <= Minimum)
+            {
+                return 0.0;
+            }
+            var normalized = Math.Clamp((Value - Minimum) / (Maximum - Minimum), 0.0F, 1.0F);
+            return -135.0 + normalized * 270.0;
+        }
+    }
+}
+
 public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, double CanvasY, bool DarkTheme)
 {
     public string InstanceId => Source.InstanceId;
@@ -23,6 +42,13 @@ public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, dou
     public string PerformanceText => Source.PerformanceText;
     public string LatencyText => $"{Source.DeclaredLatencySamples} samples · {Source.EstimatedCpuPercent:0.0}% CPU";
     public string NodeStateText => Unresolved ? "资源缺失" : "已启用";
+    public string FootswitchText => Unresolved ? "缺失" : "启用";
+    public double FootswitchOpacity => Unresolved ? 0.45 : 1.0;
+    public IReadOnlyList<NodeControlSnapshot> Controls => Parameters
+        .Take(3)
+        .Select(parameter => new NodeControlSnapshot(parameter.Id, FormatParameterName(parameter.Id), parameter.Value,
+            parameter.Minimum, parameter.Maximum, IsToggleParameter(parameter.Id)))
+        .ToArray();
     public double Width => 196.0;
     public double Height => 154.0;
     public string CardBackground => Selected
@@ -37,6 +63,23 @@ public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, dou
         var name = moduleId.Split('.', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
         return string.IsNullOrWhiteSpace(name) ? fallback : name.Replace('-', ' ');
     }
+
+    private static string FormatParameterName(string id) => id switch
+    {
+        "drive" => "增益",
+        "outputGain" => "输出",
+        "diodeThreshold" => "阈值",
+        "time" => "时间",
+        "feedback" => "反馈",
+        "mix" => "混合",
+        _ => id
+    };
+
+    private static bool IsToggleParameter(string id) =>
+        id.Contains("bypass", StringComparison.OrdinalIgnoreCase) ||
+        id.Contains("toggle", StringComparison.OrdinalIgnoreCase) ||
+        id.Contains("switch", StringComparison.OrdinalIgnoreCase) ||
+        id.Contains("mode", StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed record CanvasConnectionSnapshot(
