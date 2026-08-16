@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <iterator>
 #include <memory>
@@ -41,6 +42,12 @@ struct SoloRigSnapshot {
     bool audio_reset_requested{};
     bool audio_dropout_reported{};
     double audio_sample_rate_changed_to{};
+    bool tuner_enabled{};
+    bool tuner_signal_present{};
+    std::int32_t tuner_midi_note{-1};
+    double tuner_frequency_hz{};
+    double tuner_cents_from_nearest_note{};
+    double tuner_confidence{};
     bool midi_open{};
     bool midi_learn_armed{};
     std::uint8_t midi_state{};
@@ -429,6 +436,14 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_snapshot_create(
             snapshot->audio_reset_requested = backend->audio_engine->ResetRequested();
             snapshot->audio_dropout_reported = backend->audio_engine->DropoutReported();
             snapshot->audio_sample_rate_changed_to = backend->audio_engine->SampleRateChangedTo();
+            snapshot->tuner_enabled = backend->audio_engine->TunerEnabled();
+            if (const auto tuning = backend->audio_engine->AnalyzeTuner(); tuning.has_value()) {
+                snapshot->tuner_signal_present = true;
+                snapshot->tuner_midi_note = tuning->midi_note;
+                snapshot->tuner_frequency_hz = tuning->frequency_hz;
+                snapshot->tuner_cents_from_nearest_note = tuning->cents_from_nearest_note;
+                snapshot->tuner_confidence = tuning->confidence;
+            }
         }
         *out_snapshot = snapshot.release();
         backend->last_error.clear();
@@ -487,6 +502,23 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_audio_state(
     out_state->reset_requested = snapshot->audio_reset_requested ? 1U : 0U;
     out_state->dropout_reported = snapshot->audio_dropout_reported ? 1U : 0U;
     out_state->sample_rate_changed_to = snapshot->audio_sample_rate_changed_to;
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_tuner_state(
+    const SoloRigSnapshot* snapshot,
+    SoloRigTunerStateView* out_state) {
+    if (snapshot == nullptr || out_state == nullptr) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    out_state->enabled = snapshot->tuner_enabled ? 1U : 0U;
+    out_state->signal_present = snapshot->tuner_signal_present ? 1U : 0U;
+    out_state->reserved0 = 0U;
+    out_state->reserved1 = 0U;
+    out_state->midi_note = snapshot->tuner_midi_note;
+    out_state->frequency_hz = snapshot->tuner_frequency_hz;
+    out_state->cents_from_nearest_note = snapshot->tuner_cents_from_nearest_note;
+    out_state->confidence = snapshot->tuner_confidence;
     return SOLO_RIG_STATUS_OK;
 }
 

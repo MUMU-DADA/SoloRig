@@ -254,7 +254,6 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private uint selectedInputChannel1 = 1;
     private uint selectedOutputChannel0;
     private uint selectedOutputChannel1 = 1;
-    private bool tunerEnabled;
 
     private static RealtimeContractSnapshot EmptyRealtimeContract => new(
         0, false, true, true, true, true, false, 0, 0, 0, 0, 0, 0.0, "backend unavailable");
@@ -264,7 +263,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private static BackendSnapshot EmptySnapshot => new(
         0, true, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty,
         1280, 720, 1, false, [], [], [], 0, 0, "No external resource imported", 0, 0, 0, false,
-        false, false, false, false, 0.0, false, false, 0, 0U, 0UL);
+        false, false, false, false, 0.0, false, false, -1, 0.0, 0.0, 0.0,
+        false, false, 0, 0U, 0UL);
 
     public RigEditorViewModel()
     {
@@ -282,7 +282,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         {
             status = exception.Message;
         }
-        RefreshCommand = new RelayCommand(Refresh);
+        RefreshCommand = new RelayCommand(() => Refresh());
         IncreaseDriveCommand = new RelayCommand(IncreaseDrive);
         ToggleThemeCommand = new RelayCommand(ToggleThemeAction);
         NewPresetCommand = new RelayCommand(NewPreset);
@@ -368,6 +368,12 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public bool AudioResetRequested => snapshot.AudioResetRequested;
     public bool AudioDropoutReported => snapshot.AudioDropoutReported;
     public double AudioSampleRateChangedTo => snapshot.AudioSampleRateChangedTo;
+    public bool TunerEnabled => snapshot.TunerEnabled;
+    public bool TunerSignalPresent => snapshot.TunerSignalPresent;
+    public int TunerMidiNote => snapshot.TunerMidiNote;
+    public double TunerFrequencyHz => snapshot.TunerFrequencyHz;
+    public double TunerCentsFromNearestNote => snapshot.TunerCentsFromNearestNote;
+    public double TunerConfidence => snapshot.TunerConfidence;
     public string MidiStatus => $"MIDI: {snapshot.MidiStatus} | mappings: {snapshot.Bindings.Count}";
     public bool MidiOpen => snapshot.MidiOpen;
     public bool MidiLearnArmed => snapshot.MidiLearnArmed;
@@ -421,6 +427,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public bool CanCloseAsio => AudioOpen;
     public bool CanRecoverAsio => AudioOpen &&
         (AudioResetRequested || AudioDropoutReported || (double.IsFinite(AudioSampleRateChangedTo) && AudioSampleRateChangedTo > 0.0));
+    public bool CanToggleTuner => AudioRunning || TunerEnabled;
     public IReadOnlyList<MidiDeviceSnapshot> MidiDevices => midiDevices;
     public bool HasMidiDevices => midiDevices.Count > 0;
     public IReadOnlyList<MidiLearnTargetSnapshot> MidiLearnTargets => midiLearnTargets;
@@ -529,11 +536,6 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             }
         }
     }
-    public bool TunerEnabled
-    {
-        get => tunerEnabled;
-        private set => Set(ref tunerEnabled, value);
-    }
     public string InspectorTab => inspectorTab;
     public bool IsParameterInspectorVisible => inspectorTab == "参数";
     public bool IsPortInspectorVisible => inspectorTab == "端口";
@@ -558,6 +560,15 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public string FixedInputPortText => "输入路由 · " + string.Join(" | ", asioInputRoutes.Select(route => route.RouteText));
     public string FixedOutputPortText => "输出路由 · " + string.Join(" | ", asioOutputRoutes.Select(route => route.RouteText));
     public string TunerStatus => $"调音器: {(TunerEnabled ? "开启" : "关闭")}";
+    public string TunerReadout => !AudioOpen
+        ? "调音器读数：请先打开 ASIO"
+        : !AudioRunning
+            ? "调音器读数：请先启动音频"
+            : !TunerEnabled
+                ? "调音器读数：已关闭"
+                : !TunerSignalPresent
+                    ? "调音器读数：等待稳定信号"
+                    : $"调音器读数：{TunerNoteName(TunerMidiNote)} · {TunerFrequencyHz:0.0} Hz · {TunerCentsFromNearestNote:+0.0;-0.0;0.0} cents · 置信度 {TunerConfidence:0.00}";
     public string MidiLifecycleText => $"MIDI 生命周期: {snapshot.MidiState switch
     {
         0 => "closed",
@@ -604,7 +615,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public ICommand ConnectSelectedCommand { get; }
     public ICommand DisconnectSelectedCommand { get; }
 
-    public void Refresh()
+    public void Refresh(bool reportStatus = true)
     {
         if (backend is null)
         {
@@ -644,12 +655,17 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                     ? 0
                     : selectedMidiBindingIndex;
             RebuildCanvasProjections();
-            Status = $"Backend probe OK | schema {snapshot.SchemaVersion} | theme {(snapshot.DarkTheme ? "dark" : "light")}";
+            if (reportStatus)
+            {
+                Status = $"Backend probe OK | schema {snapshot.SchemaVersion} | theme {(snapshot.DarkTheme ? "dark" : "light")}";
+            }
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
                 nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
                 nameof(Theme), nameof(ThemeDisplayName),
                 nameof(WindowTitle), nameof(AudioStatus), nameof(AudioOpen), nameof(AudioRunning),
                 nameof(AudioResetRequested), nameof(AudioDropoutReported), nameof(AudioSampleRateChangedTo),
+                nameof(TunerEnabled), nameof(TunerSignalPresent), nameof(TunerMidiNote), nameof(TunerFrequencyHz),
+                nameof(TunerCentsFromNearestNote), nameof(TunerConfidence), nameof(TunerReadout), nameof(CanToggleTuner),
                 nameof(CanOpenAsio), nameof(CanStartAsio), nameof(CanStopAsio), nameof(CanCloseAsio),
                 nameof(CanRecoverAsio), nameof(MidiStatus), nameof(MidiOpen), nameof(MidiLearnArmed),
                 nameof(MidiState), nameof(MidiSelectedDeviceIndex), nameof(MidiDroppedMessageCount),
@@ -664,6 +680,30 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 nameof(RealtimeStatus), nameof(WhiteboxStatus), nameof(WhiteboxStatusText),
                 nameof(AsioInputRoutes), nameof(AsioOutputRoutes), nameof(HasAsioDrivers), nameof(HasSelectedAsio),
                 nameof(AsioRouteMapValid), nameof(AsioRouteValidationText), nameof(AsioRouteText), nameof(TunerStatus));
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+        }
+    }
+
+    public void RefreshRuntimeStatus()
+    {
+        if (backend is null)
+        {
+            return;
+        }
+        try
+        {
+            snapshot = backend.ReadSnapshot();
+            OnPropertiesChanged(nameof(Snapshot), nameof(AudioStatus), nameof(AudioOpen), nameof(AudioRunning),
+                nameof(AudioResetRequested), nameof(AudioDropoutReported), nameof(AudioSampleRateChangedTo),
+                nameof(TunerEnabled), nameof(TunerSignalPresent), nameof(TunerMidiNote), nameof(TunerFrequencyHz),
+                nameof(TunerCentsFromNearestNote), nameof(TunerConfidence), nameof(TunerReadout), nameof(TunerStatus),
+                nameof(CanToggleTuner), nameof(MidiStatus), nameof(MidiOpen), nameof(MidiLearnArmed), nameof(MidiState),
+                nameof(MidiSelectedDeviceIndex), nameof(MidiDroppedMessageCount), nameof(MidiLifecycleText),
+                nameof(CanOpenMidi), nameof(CanCloseMidi), nameof(CanDrainMidi), nameof(CanArmMidiLearn),
+                nameof(CanCancelMidiLearn));
         }
         catch (Exception exception)
         {
@@ -1034,10 +1074,14 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         {
             return false;
         }
+        if (enabled && !AudioRunning)
+        {
+            Status = "请先打开并启动 ASIO，再开启调音器";
+            return false;
+        }
         try
         {
             backend.SetTunerEnabled(enabled);
-            TunerEnabled = enabled;
             Refresh();
             Status = TunerStatus;
             return true;
@@ -1350,6 +1394,16 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     }
 
     private void ToggleThemeAction() => ToggleTheme();
+
+    private static string TunerNoteName(int midiNote)
+    {
+        if (midiNote is < 0 or > 127)
+        {
+            return "--";
+        }
+        string[] noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        return $"{noteNames[midiNote % 12]}{midiNote / 12 - 1}";
+    }
 
     private void NewPreset()
     {

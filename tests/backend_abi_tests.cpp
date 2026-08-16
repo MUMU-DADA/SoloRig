@@ -217,6 +217,16 @@ TEST_CASE("C ABI exposes catalog, transactional editing and performance snapshot
     REQUIRE(audio_state.reset_requested == 0U);
     REQUIRE(audio_state.dropout_reported == 0U);
     REQUIRE(audio_state.sample_rate_changed_to == 0.0);
+    SoloRigTunerStateView tuner_state{};
+    REQUIRE(solorig_snapshot_tuner_state(snapshot, &tuner_state) == SOLO_RIG_STATUS_OK);
+    REQUIRE(tuner_state.enabled == 0U);
+    REQUIRE(tuner_state.signal_present == 0U);
+    REQUIRE(tuner_state.midi_note == -1);
+    REQUIRE(tuner_state.frequency_hz == 0.0);
+    REQUIRE(tuner_state.cents_from_nearest_note == 0.0);
+    REQUIRE(tuner_state.confidence == 0.0);
+    REQUIRE(solorig_snapshot_tuner_state(nullptr, &tuner_state) == SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    REQUIRE(solorig_snapshot_tuner_state(snapshot, nullptr) == SOLO_RIG_STATUS_INVALID_ARGUMENT);
     SoloRigMidiStateView midi_state{};
     REQUIRE(solorig_snapshot_midi_state(snapshot, &midi_state) == SOLO_RIG_STATUS_OK);
     REQUIRE(midi_state.is_open == 0U);

@@ -66,6 +66,19 @@ typedef struct SoloRigAudioStateView {
     double sample_rate_changed_to;
 } SoloRigAudioStateView;
 
+// Additive control-plane view for Standalone tuner state. Kept separate from
+// SoloRigSnapshotInfo so existing C ABI consumers retain their struct size.
+typedef struct SoloRigTunerStateView {
+    uint8_t enabled;
+    uint8_t signal_present;
+    uint8_t reserved0;
+    uint8_t reserved1;
+    int32_t midi_note;
+    double frequency_hz;
+    double cents_from_nearest_note;
+    double confidence;
+} SoloRigTunerStateView;
+
 // Additive control-plane view for MIDI lifecycle state. Kept separate from
 // SoloRigSnapshotInfo so existing C ABI consumers retain their struct size.
 typedef struct SoloRigMidiStateView {
@@ -232,6 +245,9 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_info(
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_audio_state(
     const SoloRigSnapshot* snapshot,
     SoloRigAudioStateView* out_state);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_tuner_state(
+    const SoloRigSnapshot* snapshot,
+    SoloRigTunerStateView* out_state);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_midi_state(
     const SoloRigSnapshot* snapshot,
     SoloRigMidiStateView* out_state);

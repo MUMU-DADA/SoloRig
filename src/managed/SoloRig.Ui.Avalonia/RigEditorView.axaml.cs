@@ -7,6 +7,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
+using Avalonia.Threading;
 using SoloRig.Ui;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -76,6 +77,7 @@ public sealed partial class RigEditorView : UserControl
     };
 
     private RigEditorViewModel? viewModel;
+    private DispatcherTimer? runtimeRefreshTimer;
     private bool dragging;
     private string? pendingOutputNode;
 
@@ -378,6 +380,7 @@ public sealed partial class RigEditorView : UserControl
         DataContext = editor;
         editor.PropertyChanged += ViewModelPropertyChanged;
         ApplyTheme(editor.Theme, editor.DarkTheme);
+        StartRuntimeRefreshTimer();
     }
 
     public void HandleWindowKeyDown(KeyEventArgs args)
@@ -417,6 +420,36 @@ public sealed partial class RigEditorView : UserControl
              args.PropertyName == nameof(RigEditorViewModel.Theme)) && viewModel is not null)
         {
             ApplyTheme(viewModel.Theme, viewModel.DarkTheme);
+        }
+    }
+
+    private void StartRuntimeRefreshTimer()
+    {
+        if (runtimeRefreshTimer is not null)
+        {
+            return;
+        }
+        runtimeRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        runtimeRefreshTimer.Tick += RuntimeRefreshTimerTick;
+        runtimeRefreshTimer.Start();
+    }
+
+    private void StopRuntimeRefreshTimer()
+    {
+        if (runtimeRefreshTimer is null)
+        {
+            return;
+        }
+        runtimeRefreshTimer.Stop();
+        runtimeRefreshTimer.Tick -= RuntimeRefreshTimerTick;
+        runtimeRefreshTimer = null;
+    }
+
+    private void RuntimeRefreshTimerTick(object? sender, EventArgs args)
+    {
+        if (viewModel is { AudioRunning: true } || viewModel?.TunerEnabled == true)
+        {
+            viewModel.RefreshRuntimeStatus();
         }
     }
 
@@ -831,6 +864,7 @@ public sealed partial class RigEditorView : UserControl
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        StopRuntimeRefreshTimer();
         if (viewModel is not null)
         {
             viewModel.PropertyChanged -= ViewModelPropertyChanged;
@@ -844,6 +878,7 @@ public sealed partial class RigEditorView : UserControl
         if (viewModel is not null)
         {
             ApplyTheme(viewModel.Theme, viewModel.DarkTheme);
+            StartRuntimeRefreshTimer();
         }
     }
 }

@@ -518,8 +518,9 @@
                   </StackPanel>
                   <StackPanel Orientation="Horizontal" Spacing="4">
                     <Button Classes="srg-button" Content="恢复" IsEnabled="{Binding CanRecoverAsio}" Click="RecoverAsioClick" />
-                    <Button Classes="srg-button" Content="{Binding TunerStatus}" Click="ToggleTunerClick" />
+                    <Button Classes="srg-button" Content="{Binding TunerStatus}" IsEnabled="{Binding CanToggleTuner}" Click="ToggleTunerClick" />
                   </StackPanel>
+                  <TextBlock Text="{Binding TunerReadout}" Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
                 </StackPanel>
               </Expander>
 

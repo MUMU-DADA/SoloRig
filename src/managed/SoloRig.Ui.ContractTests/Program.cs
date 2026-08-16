@@ -70,6 +70,11 @@ foreach (var route in viewModel.AsioInputRoutes.Concat(viewModel.AsioOutputRoute
     route.SetDrivers([]);
 }
 Require(!viewModel.TunerEnabled, "startup keeps the tuner disabled");
+Require(!viewModel.TunerSignalPresent && viewModel.TunerMidiNote == -1 &&
+        !viewModel.CanToggleTuner && viewModel.TunerReadout.Contains("ASIO", StringComparison.Ordinal),
+    "startup exposes a structured tuner state and gates the tuner before audio is running");
+Require(!viewModel.SetTunerEnabled(true) && viewModel.Status.Contains("ASIO", StringComparison.OrdinalIgnoreCase),
+    "tuner enable is rejected before the standalone audio lifecycle is running");
 Require(viewModel.MidiLearnTargets.Count >= 2, "MIDI learn exposes current parameter targets without opening hardware");
 Require(!viewModel.ArmSelectedMidiLearn(), "MIDI learn rejects an unopened MIDI input");
 Require(!viewModel.StartAsio(), "ASIO start is rejected before an explicit device open");
