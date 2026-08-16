@@ -300,6 +300,25 @@ public sealed partial class RigEditorView : UserControl
         }
     }
 
+    public bool ProbeKeyboardShortcuts()
+    {
+        if (viewModel is null)
+        {
+            return false;
+        }
+        var originalDark = viewModel.DarkTheme;
+        var handled = HandleShortcut(Key.T, KeyModifiers.None);
+        var toggled = handled && viewModel.DarkTheme != originalDark;
+        var modifierBaseline = viewModel.DarkTheme;
+        var modifiedHandled = HandleShortcut(Key.T, KeyModifiers.Control);
+        var modifierIgnored = !modifiedHandled && viewModel.DarkTheme == modifierBaseline;
+        if (viewModel.DarkTheme != originalDark)
+        {
+            viewModel.ToggleTheme();
+        }
+        return toggled && modifierIgnored && viewModel.DarkTheme == originalDark;
+    }
+
     private RenderedSurfaceFingerprint? CaptureRenderedSurface()
     {
         var topLevel = TopLevel.GetTopLevel(this);
@@ -385,14 +404,28 @@ public sealed partial class RigEditorView : UserControl
 
     public void HandleWindowKeyDown(KeyEventArgs args)
     {
+        if (HandleShortcut(args.Key, args.KeyModifiers))
+        {
+            args.Handled = true;
+        }
+    }
+
+    public bool HandleShortcut(Key key, KeyModifiers modifiers)
+    {
         if (viewModel is null)
         {
-            return;
+            return false;
+        }
+        var hasModifier = (modifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt)) != KeyModifiers.None;
+        if (!hasModifier && key == Key.T)
+        {
+            viewModel.ToggleTheme();
+            return true;
         }
 
-        if ((args.KeyModifiers & KeyModifiers.Control) != 0 && args.Key == Key.S)
+        if ((modifiers & KeyModifiers.Control) != 0 && key == Key.S)
         {
-            if ((args.KeyModifiers & KeyModifiers.Shift) != 0)
+            if ((modifiers & KeyModifiers.Shift) != 0)
             {
                 _ = SaveAsAsync();
             }
@@ -400,18 +433,19 @@ public sealed partial class RigEditorView : UserControl
             {
                 _ = SaveAsync();
             }
-            args.Handled = true;
+            return true;
         }
-        else if ((args.KeyModifiers & KeyModifiers.Control) != 0 && args.Key == Key.O)
+        if ((modifiers & KeyModifiers.Control) != 0 && key == Key.O)
         {
             _ = OpenAsync();
-            args.Handled = true;
+            return true;
         }
-        else if ((args.KeyModifiers & KeyModifiers.Control) != 0 && args.Key == Key.D1)
+        if ((modifiers & KeyModifiers.Control) != 0 && key == Key.D1)
         {
             viewModel.SelectPreset("SoloRig Default");
-            args.Handled = true;
+            return true;
         }
+        return false;
     }
 
     private void ViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)

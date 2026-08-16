@@ -31,5 +31,7 @@ public sealed partial class MainWindow : Window
 
     public bool ProbeRenderedSurface() => EditorView.ProbeRenderedSurface();
 
+    public bool ProbeKeyboardShortcuts() => EditorView.ProbeKeyboardShortcuts();
+
     private void WindowKeyDown(object? sender, KeyEventArgs args) => EditorView.HandleWindowKeyDown(args);
 }
