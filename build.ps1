@@ -440,12 +440,34 @@ try {
     if ($null -eq $managedStandaloneExe) {
         Fail-Layer -Layer ".NET Avalonia artifacts" -Message "C# Standalone 发布目录缺少 SoloRig.Standalone.exe。"
     }
-    $dotnetSharedRoot = Join-Path $env:ProgramFiles "dotnet\shared\Microsoft.NETCore.App"
-    $dotnetRuntime = Get-ChildItem -LiteralPath $dotnetSharedRoot -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like "8.*" } | Sort-Object Name -Descending | Select-Object -First 1
-    $dotnetHostFxrRoot = Join-Path $env:ProgramFiles "dotnet\host\fxr"
-    $dotnetHostFxrDirectory = Get-ChildItem -LiteralPath $dotnetHostFxrRoot -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like "8.*" } | Sort-Object Name -Descending | Select-Object -First 1
+    # Visual Studio 18 can install the .NET 8 runtime under its private
+    # dotnet tree. Keep the system installation as the first candidate, but
+    # independently probe VS for runtime and hostfxr because a system
+    # installation may expose the 8.x shared runtime without an 8.x hostfxr.
+    $dotnetSharedRoots = @(
+        (Join-Path $env:ProgramFiles "dotnet\shared\Microsoft.NETCore.App"),
+        (Join-Path $vsInstall "dotnet\net8.0\runtime\shared\Microsoft.NETCore.App")
+    )
+    $dotnetRuntime = $null
+    foreach ($dotnetSharedRoot in $dotnetSharedRoots) {
+        if ($null -ne $dotnetRuntime) {
+            break
+        }
+        $dotnetRuntime = Get-ChildItem -LiteralPath $dotnetSharedRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "8.*" } | Sort-Object Name -Descending | Select-Object -First 1
+    }
+    $dotnetHostFxrRoots = @(
+        (Join-Path $env:ProgramFiles "dotnet\host\fxr"),
+        (Join-Path $vsInstall "dotnet\net8.0\runtime\host\fxr")
+    )
+    $dotnetHostFxrDirectory = $null
+    foreach ($dotnetHostFxrRoot in $dotnetHostFxrRoots) {
+        if ($null -ne $dotnetHostFxrDirectory) {
+            break
+        }
+        $dotnetHostFxrDirectory = Get-ChildItem -LiteralPath $dotnetHostFxrRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "8.*" } | Sort-Object Name -Descending | Select-Object -First 1
+    }
     if ($null -eq $dotnetRuntime -or $null -eq $dotnetHostFxrDirectory) {
         Fail-Layer -Layer ".NET Avalonia artifacts" -Message "找不到本机 .NET 8 runtime/hostfxr，无法生成离线独立程序包。"
     }
