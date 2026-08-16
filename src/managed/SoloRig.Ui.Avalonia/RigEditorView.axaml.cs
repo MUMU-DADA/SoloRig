@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using SoloRig.Ui;
@@ -10,6 +11,49 @@ namespace SoloRig.Ui.Avalonia;
 
 public sealed partial class RigEditorView : UserControl
 {
+    private sealed record ThemePalette(
+        string Window,
+        string Topbar,
+        string Panel,
+        string Canvas,
+        string Overlay,
+        string Control,
+        string ControlHover,
+        string Card,
+        string InputPanel,
+        string OutputPanel,
+        string Border,
+        string StrongBorder,
+        string CardBorder,
+        string Text,
+        string Muted,
+        string Accent,
+        string AccentHover,
+        string AccentText,
+        string Input,
+        string InputOutline,
+        string Output,
+        string OutputOutline,
+        string Track,
+        string Knob,
+        string Grid,
+        string CanvasStart,
+        string CanvasEnd,
+        string AccentOutline,
+        string ToolBorder);
+
+    private static readonly ThemePalette DarkPalette = new(
+        "#11151B", "#161B22", "#191F27", "#151C24", "#182029", "#222A34", "#2A3440",
+        "#1B242D", "#1D2A38", "#282038", "#394655", "#3A4753", "#2C3946", "#EEF3F8",
+        "#9AA8B8", "#4DD6A4", "#69E2B5", "#10261F", "#66A7FF", "#E8F2FF", "#B889F5",
+        "#FFF4FF", "#10151A", "#303C47", "#31414F", "#26313C", "#131820", "#D8FAED", "#637384");
+
+    private static readonly ThemePalette LightPalette = new(
+        "#F4F7FB", "#FFFFFF", "#EEF3F7", "#E6EDF4", "#DCE6EF", "#FFFFFF", "#E8F0F6",
+        "#F8FAFC", "#EAF2F9", "#F1ECFB", "#C7D2DE", "#B5C2CF", "#C5D1DC", "#172033",
+        "#5F6B78", "#0F766E", "#0B5F59", "#FFFFFF", "#2F80ED", "#EAF2FF", "#7C3AED",
+        "#F5F3FF", "#CBD5E1", "#E2E8F0", "#B7C5D4", "#DDE7F0", "#F5F8FB", "#D1FAE5", "#94A3B8");
+
     private static readonly FilePickerFileType SrigFileType = new("SoloRig preset")
     {
         Patterns = ["*.srig"],
@@ -27,6 +71,7 @@ public sealed partial class RigEditorView : UserControl
     public RigEditorView()
     {
         InitializeComponent();
+        ApplyTheme(true);
     }
 
     public RigEditorView(RigEditorViewModel editor)
@@ -49,8 +94,32 @@ public sealed partial class RigEditorView : UserControl
 
     public bool HasStandaloneVisualContent => HasEditorControlsVisualContent &&
         RealtimeStatusText is not null && WhiteboxStatusText is not null &&
+        HasThemePalette &&
         !string.IsNullOrWhiteSpace(RealtimeStatusText.Text) &&
         !string.IsNullOrWhiteSpace(WhiteboxStatusText.Text);
+
+    public bool HasThemePalette => Resources["SrgWindowBrush"] is SolidColorBrush &&
+        Resources["SrgTextBrush"] is SolidColorBrush &&
+        Resources["SrgAccentBrush"] is SolidColorBrush;
+
+    public bool ProbeThemeSwitch()
+    {
+        if (viewModel is null || !HasThemePalette)
+        {
+            return false;
+        }
+        var originalDark = viewModel.DarkTheme;
+        var originalWindow = (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color;
+        if (!viewModel.ToggleTheme())
+        {
+            return false;
+        }
+        var switchedWindow = (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color;
+        var changed = viewModel.DarkTheme != originalDark && switchedWindow != originalWindow;
+        var restored = viewModel.ToggleTheme() && viewModel.DarkTheme == originalDark &&
+                       (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == originalWindow;
+        return changed && restored;
+    }
 
     public void AttachEditor(RigEditorViewModel editor)
     {
@@ -112,11 +181,52 @@ public sealed partial class RigEditorView : UserControl
 
     private void ApplyTheme(bool dark)
     {
+        var palette = dark ? DarkPalette : LightPalette;
+        SetBrush("SrgWindowBrush", palette.Window);
+        SetBrush("SrgTopbarBrush", palette.Topbar);
+        SetBrush("SrgPanelBrush", palette.Panel);
+        SetBrush("SrgCanvasBrush", palette.Canvas);
+        SetBrush("SrgOverlayBrush", palette.Overlay);
+        SetBrush("SrgControlBrush", palette.Control);
+        SetBrush("SrgControlHoverBrush", palette.ControlHover);
+        SetBrush("SrgCardBrush", palette.Card);
+        SetBrush("SrgInputPanelBrush", palette.InputPanel);
+        SetBrush("SrgOutputPanelBrush", palette.OutputPanel);
+        SetBrush("SrgBorderBrush", palette.Border);
+        SetBrush("SrgStrongBorderBrush", palette.StrongBorder);
+        SetBrush("SrgCardBorderBrush", palette.CardBorder);
+        SetBrush("SrgTextBrush", palette.Text);
+        SetBrush("SrgMutedBrush", palette.Muted);
+        SetBrush("SrgAccentBrush", palette.Accent);
+        SetBrush("SrgAccentHoverBrush", palette.AccentHover);
+        SetBrush("SrgAccentTextBrush", palette.AccentText);
+        SetBrush("SrgInputBrush", palette.Input);
+        SetBrush("SrgInputOutlineBrush", palette.InputOutline);
+        SetBrush("SrgOutputBrush", palette.Output);
+        SetBrush("SrgOutputOutlineBrush", palette.OutputOutline);
+        SetBrush("SrgTrackBrush", palette.Track);
+        SetBrush("SrgKnobBrush", palette.Knob);
+        SetBrush("SrgGridBrush", palette.Grid);
+        SetBrush("SrgAccentOutlineBrush", palette.AccentOutline);
+        SetBrush("SrgToolBorderBrush", palette.ToolBorder);
+        Resources["SrgCanvasBackgroundBrush"] = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
+            GradientStops =
+            [
+                new GradientStop(Color.Parse(palette.CanvasStart), 0),
+                new GradientStop(Color.Parse(palette.Overlay), 0.55),
+                new GradientStop(Color.Parse(palette.CanvasEnd), 1)
+            ]
+        };
         if (TopLevel.GetTopLevel(this) is TopLevel topLevel)
         {
             topLevel.RequestedThemeVariant = dark ? ThemeVariant.Dark : ThemeVariant.Light;
         }
     }
+
+    private void SetBrush(string key, string color) => Resources[key] = new SolidColorBrush(Color.Parse(color));
 
     private void CanvasSizeChanged(object? sender, SizeChangedEventArgs args)
     {

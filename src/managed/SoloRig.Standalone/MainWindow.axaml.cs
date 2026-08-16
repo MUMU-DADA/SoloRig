@@ -21,5 +21,7 @@ public sealed partial class MainWindow : Window
 
     public bool HasStandaloneVisualContent => EditorView.HasStandaloneVisualContent;
 
+    public bool ProbeThemeSwitch() => EditorView.ProbeThemeSwitch();
+
     private void WindowKeyDown(object? sender, KeyEventArgs args) => EditorView.HandleWindowKeyDown(args);
 }

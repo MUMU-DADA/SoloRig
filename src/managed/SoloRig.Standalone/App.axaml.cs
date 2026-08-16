@@ -28,7 +28,7 @@ public sealed class App : Application
                 probe.Tick += (_, _) =>
                 {
                     attempts++;
-                    if (mainWindow.HasStandaloneVisualContent)
+                    if (mainWindow.HasStandaloneVisualContent && mainWindow.ProbeThemeSwitch())
                     {
                         probe.Stop();
                         desktop.Shutdown(0);

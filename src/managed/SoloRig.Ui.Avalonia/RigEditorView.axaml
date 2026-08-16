@@ -3,57 +3,57 @@
              x:Class="SoloRig.Ui.Avalonia.RigEditorView">
   <UserControl.Styles>
     <Style Selector="TextBlock.srg-text">
-      <Setter Property="Foreground" Value="#EEF3F8" />
+      <Setter Property="Foreground" Value="{DynamicResource SrgTextBrush}" />
     </Style>
     <Style Selector="TextBlock.srg-muted">
-      <Setter Property="Foreground" Value="#9AA8B8" />
+      <Setter Property="Foreground" Value="{DynamicResource SrgMutedBrush}" />
     </Style>
     <Style Selector="TextBlock.srg-small">
-      <Setter Property="Foreground" Value="#9AA8B8" />
+      <Setter Property="Foreground" Value="{DynamicResource SrgMutedBrush}" />
       <Setter Property="FontSize" Value="10" />
     </Style>
     <Style Selector="TextBlock.srg-eyebrow">
-      <Setter Property="Foreground" Value="#9AA8B8" />
+      <Setter Property="Foreground" Value="{DynamicResource SrgMutedBrush}" />
       <Setter Property="FontSize" Value="10" />
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
     <Style Selector="Button.srg-button">
-      <Setter Property="Background" Value="#222A34" />
-      <Setter Property="BorderBrush" Value="#394655" />
+      <Setter Property="Background" Value="{DynamicResource SrgControlBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgBorderBrush}" />
       <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="Foreground" Value="#EEF3F8" />
+      <Setter Property="Foreground" Value="{DynamicResource SrgTextBrush}" />
       <Setter Property="CornerRadius" Value="7" />
       <Setter Property="Padding" Value="10,7" />
       <Setter Property="FontSize" Value="12" />
     </Style>
     <Style Selector="Button.srg-button:pointerover">
-      <Setter Property="Background" Value="#2A3440" />
-      <Setter Property="BorderBrush" Value="#66A7FF" />
+      <Setter Property="Background" Value="{DynamicResource SrgControlHoverBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgInputBrush}" />
     </Style>
     <Style Selector="Button.srg-button.primary">
-      <Setter Property="Background" Value="#4DD6A4" />
-      <Setter Property="BorderBrush" Value="#4DD6A4" />
-      <Setter Property="Foreground" Value="#10261F" />
+      <Setter Property="Background" Value="{DynamicResource SrgAccentBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource SrgAccentTextBrush}" />
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
     <Style Selector="Button.srg-button.primary:pointerover">
-      <Setter Property="Background" Value="#69E2B5" />
-      <Setter Property="BorderBrush" Value="#69E2B5" />
+      <Setter Property="Background" Value="{DynamicResource SrgAccentHoverBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentHoverBrush}" />
     </Style>
     <Style Selector="Button.srg-button.ghost">
       <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="TextBox.srg-input">
-      <Setter Property="Background" Value="#11151B" />
-      <Setter Property="BorderBrush" Value="#394655" />
-      <Setter Property="Foreground" Value="#EEF3F8" />
+      <Setter Property="Background" Value="{DynamicResource SrgWindowBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource SrgTextBrush}" />
       <Setter Property="CornerRadius" Value="6" />
       <Setter Property="Padding" Value="9,7" />
     </Style>
     <Style Selector="ComboBox.srg-input">
-      <Setter Property="Background" Value="#222A34" />
-      <Setter Property="BorderBrush" Value="#394655" />
-      <Setter Property="Foreground" Value="#EEF3F8" />
+      <Setter Property="Background" Value="{DynamicResource SrgControlBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource SrgTextBrush}" />
       <Setter Property="CornerRadius" Value="6" />
     </Style>
     <Style Selector="ListBox.srg-list">
@@ -70,23 +70,23 @@
       <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="Expander.srg-expander">
-      <Setter Property="Background" Value="#191F27" />
-      <Setter Property="BorderBrush" Value="#394655" />
+      <Setter Property="Background" Value="{DynamicResource SrgPanelBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgBorderBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="8" />
       <Setter Property="Padding" Value="10" />
     </Style>
   </UserControl.Styles>
 
-  <Border Classes="srg-window" Background="#11151B" BorderBrush="#394655" BorderThickness="1"
+  <Border Classes="srg-window" Background="{DynamicResource SrgWindowBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1"
           CornerRadius="12" ClipToBounds="True">
     <Grid RowDefinitions="Auto,*,Auto">
-      <Border Grid.Row="0" Background="#161B22" BorderBrush="#394655" BorderThickness="0,0,0,1"
+      <Border Grid.Row="0" Background="{DynamicResource SrgTopbarBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="0,0,0,1"
               Padding="18,12">
         <Grid ColumnDefinitions="Auto,*,Auto,Auto">
           <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-            <Border Width="30" Height="30" CornerRadius="9" Background="#4DD6A4">
-              <TextBlock Text="S" Foreground="#10261F" FontSize="17" FontWeight="Bold"
+            <Border Width="30" Height="30" CornerRadius="9" Background="{DynamicResource SrgAccentBrush}">
+              <TextBlock Text="S" Foreground="{DynamicResource SrgAccentTextBrush}" FontSize="17" FontWeight="Bold"
                          HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <StackPanel Spacing="1" VerticalAlignment="Center">
@@ -117,7 +117,7 @@
       </Border>
 
       <Grid Grid.Row="1" ColumnDefinitions="226,*,286" MinHeight="500">
-        <Border Grid.Column="0" Background="#191F27" BorderBrush="#394655" BorderThickness="0,0,1,0"
+        <Border Grid.Column="0" Background="{DynamicResource SrgPanelBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="0,0,1,0"
                 Padding="15">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="11">
@@ -138,12 +138,12 @@
                        ItemsSource="{Binding FilteredModuleCatalog}" SelectedItem="{Binding SelectedCatalogModule}">
                 <ListBox.ItemTemplate>
                   <DataTemplate>
-                    <Border Padding="8" Background="#1B242D" BorderBrush="#2C3946" BorderThickness="1"
+                    <Border Padding="8" Background="{DynamicResource SrgCardBrush}" BorderBrush="{DynamicResource SrgCardBorderBrush}" BorderThickness="1"
                             CornerRadius="7">
                       <Grid ColumnDefinitions="Auto,*">
-                        <Border Width="28" Height="28" CornerRadius="7" Background="#4DD6A4"
+                        <Border Width="28" Height="28" CornerRadius="7" Background="{DynamicResource SrgAccentBrush}"
                                 VerticalAlignment="Center">
-                          <TextBlock Text="FX" Foreground="#10261F" FontSize="10" FontWeight="Bold"
+                          <TextBlock Text="FX" Foreground="{DynamicResource SrgAccentTextBrush}" FontSize="10" FontWeight="Bold"
                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <StackPanel Grid.Column="1" Spacing="2">
@@ -164,7 +164,7 @@
                   <Button Classes="srg-button" Content="删除节点" Command="{Binding DeleteSelectedCommand}" HorizontalAlignment="Stretch" />
                 </StackPanel>
               </StackPanel>
-              <Border BorderBrush="#394655" BorderThickness="0,1,0,0" Padding="0,12,0,0">
+              <Border BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="0,1,0,0" Padding="0,12,0,0">
                 <StackPanel Spacing="8">
                   <TextBlock Text="资源" Classes="srg-eyebrow" />
                   <TextBlock Text="{Binding ResourceStatus}" Classes="srg-muted" FontSize="11" TextWrapping="Wrap" />
@@ -177,7 +177,7 @@
           </ScrollViewer>
         </Border>
 
-        <Border Grid.Column="1" Background="#151C24">
+        <Border Grid.Column="1" Background="{DynamicResource SrgCanvasBrush}">
           <Grid RowDefinitions="Auto,*">
             <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="17,14,17,10">
               <StackPanel Spacing="2">
@@ -190,20 +190,16 @@
               </StackPanel>
             </Grid>
 
-            <Border Grid.Row="1" Margin="16,0,16,14" BorderBrush="#3A4753" BorderThickness="1"
+            <Border Grid.Row="1" Margin="16,0,16,14" BorderBrush="{DynamicResource SrgStrongBorderBrush}" BorderThickness="1"
                     CornerRadius="8" ClipToBounds="True">
               <Border.Background>
-                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
-                  <GradientStop Color="#26313C" Offset="0" />
-                  <GradientStop Color="#182029" Offset="0.55" />
-                  <GradientStop Color="#131820" Offset="1" />
-                </LinearGradientBrush>
+                <DynamicResource ResourceKey="SrgCanvasBackgroundBrush" />
               </Border.Background>
               <Canvas x:Name="EditorCanvas" ClipToBounds="True"
                       PointerPressed="CanvasPointerPressed" PointerMoved="CanvasPointerMoved"
                       PointerReleased="CanvasPointerReleased" SizeChanged="CanvasSizeChanged">
                 <Border Canvas.Left="18" Canvas.Top="174" Width="132" Height="124" Padding="10"
-                        Background="#1D2A38" BorderBrush="#66A7FF" BorderThickness="1" CornerRadius="9">
+                        Background="{DynamicResource SrgInputPanelBrush}" BorderBrush="{DynamicResource SrgInputBrush}" BorderThickness="1" CornerRadius="9">
                   <Grid RowDefinitions="Auto,*,Auto">
                     <StackPanel Spacing="2">
                       <TextBlock Text="INPUT" Classes="srg-text" FontSize="12" FontWeight="Bold" />
@@ -212,18 +208,18 @@
                     <TextBlock Grid.Row="1" Text="{Binding FixedInputPortText}" Classes="srg-muted" FontSize="10"
                                TextWrapping="Wrap" VerticalAlignment="Center" />
                     <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,9,0,0">
-                      <Border Height="5" Background="#10151A" CornerRadius="3" VerticalAlignment="Center">
-                        <Border Width="48" HorizontalAlignment="Left" Background="#66A7FF" CornerRadius="3" />
+                      <Border Height="5" Background="{DynamicResource SrgTrackBrush}" CornerRadius="3" VerticalAlignment="Center">
+                        <Border Width="48" HorizontalAlignment="Left" Background="{DynamicResource SrgInputBrush}" CornerRadius="3" />
                       </Border>
                       <Ellipse Grid.Column="1" Width="11" Height="11" Margin="8,0,-16,0"
-                               Fill="#66A7FF" Stroke="#E8F2FF" StrokeThickness="2"
+                               Fill="{DynamicResource SrgInputBrush}" Stroke="{DynamicResource SrgInputOutlineBrush}" StrokeThickness="2"
                                Tag="fixed-input" PointerPressed="FixedEndpointPressed" />
                     </Grid>
                   </Grid>
                 </Border>
 
                 <Border Canvas.Right="18" Canvas.Top="174" Width="132" Height="124" Padding="10"
-                        Background="#282038" BorderBrush="#B889F5" BorderThickness="1" CornerRadius="9">
+                        Background="{DynamicResource SrgOutputPanelBrush}" BorderBrush="{DynamicResource SrgOutputBrush}" BorderThickness="1" CornerRadius="9">
                   <Grid RowDefinitions="Auto,*,Auto">
                     <StackPanel Spacing="2">
                       <TextBlock Text="OUTPUT" Classes="srg-text" FontSize="12" FontWeight="Bold" />
@@ -233,17 +229,17 @@
                                TextWrapping="Wrap" VerticalAlignment="Center" />
                     <Grid Grid.Row="2" ColumnDefinitions="Auto,*" Margin="0,9,0,0">
                       <Ellipse Width="11" Height="11" Margin="-16,0,8,0"
-                               Fill="#B889F5" Stroke="#FFF4FF" StrokeThickness="2"
+                               Fill="{DynamicResource SrgOutputBrush}" Stroke="{DynamicResource SrgOutputOutlineBrush}" StrokeThickness="2"
                                Tag="fixed-output" PointerPressed="FixedEndpointPressed" />
-                      <Border Grid.Column="1" Height="5" Background="#10151A" CornerRadius="3" VerticalAlignment="Center">
-                        <Border Width="72" HorizontalAlignment="Left" Background="#B889F5" CornerRadius="3" />
+                      <Border Grid.Column="1" Height="5" Background="{DynamicResource SrgTrackBrush}" CornerRadius="3" VerticalAlignment="Center">
+                        <Border Width="72" HorizontalAlignment="Left" Background="{DynamicResource SrgOutputBrush}" CornerRadius="3" />
                       </Border>
                     </Grid>
                   </Grid>
                 </Border>
 
                 <Line StartPoint="150,236" EndPoint="1000,236"
-                      Stroke="#31414F" StrokeThickness="1" Opacity="0.6" />
+                      Stroke="{DynamicResource SrgGridBrush}" StrokeThickness="1" Opacity="0.6" />
                 <ItemsControl ItemsSource="{Binding CanvasConnections}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
@@ -251,7 +247,7 @@
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
                       <Line StartPoint="{Binding SourcePoint}" EndPoint="{Binding DestinationPoint}"
-                            Stroke="#4DD6A4" StrokeThickness="3" Opacity="0.82" />
+                            Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="3" Opacity="0.82" />
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -282,29 +278,29 @@
                             <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12"
                                         HorizontalAlignment="Center" VerticalAlignment="Center">
                               <StackPanel Spacing="4" HorizontalAlignment="Center">
-                                <Ellipse Width="29" Height="29" Fill="#303C47" Stroke="#4DD6A4" StrokeThickness="3" />
+                                <Ellipse Width="29" Height="29" Fill="{DynamicResource SrgKnobBrush}" Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="3" />
                                 <TextBlock Text="参数" Classes="srg-muted" FontSize="9" HorizontalAlignment="Center" />
                               </StackPanel>
                               <StackPanel Spacing="4" HorizontalAlignment="Center">
-                                <Ellipse Width="29" Height="29" Fill="#303C47" Stroke="#4DD6A4" StrokeThickness="3" />
+                                <Ellipse Width="29" Height="29" Fill="{DynamicResource SrgKnobBrush}" Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="3" />
                                 <TextBlock Text="混合" Classes="srg-muted" FontSize="9" HorizontalAlignment="Center" />
                               </StackPanel>
                               <StackPanel Spacing="4" HorizontalAlignment="Center">
-                                <Ellipse Width="29" Height="29" Fill="#303C47" Stroke="#4DD6A4" StrokeThickness="3" />
+                                <Ellipse Width="29" Height="29" Fill="{DynamicResource SrgKnobBrush}" Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="3" />
                                 <TextBlock Text="输出" Classes="srg-muted" FontSize="9" HorizontalAlignment="Center" />
                               </StackPanel>
                             </StackPanel>
                             <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,5,0,0">
-                              <TextBlock Text="{Binding NodeStateText}" Foreground="#4DD6A4" FontSize="10" />
+                              <TextBlock Text="{Binding NodeStateText}" Foreground="{DynamicResource SrgAccentBrush}" FontSize="10" />
                               <TextBlock Grid.Column="1" Text="{Binding LatencyText}" Classes="srg-muted" FontSize="9" />
                             </Grid>
                           </Grid>
                         </Border>
                         <Ellipse Width="13" Height="13" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                 Margin="-7,0,0,0" Fill="#4DD6A4" Stroke="#D8FAED" StrokeThickness="2"
+                                 Margin="-7,0,0,0" Fill="{DynamicResource SrgAccentBrush}" Stroke="{DynamicResource SrgAccentOutlineBrush}" StrokeThickness="2"
                                  Tag="{Binding InstanceId}" PointerPressed="NodeInputEndpointPressed" />
                         <Ellipse Width="13" Height="13" HorizontalAlignment="Right" VerticalAlignment="Center"
-                                 Margin="0,0,-7,0" Fill="#B889F5" Stroke="#FFF4FF" StrokeThickness="2"
+                                 Margin="0,0,-7,0" Fill="{DynamicResource SrgOutputBrush}" Stroke="{DynamicResource SrgOutputOutlineBrush}" StrokeThickness="2"
                                  Tag="{Binding InstanceId}" PointerPressed="NodeOutputEndpointPressed" />
                       </Grid>
                     </DataTemplate>
@@ -314,7 +310,7 @@
                 <TextBlock Canvas.Left="16" Canvas.Bottom="12"
                            Text="模块可拖动 · 连接操作：先点击源输出端点，再点击目标输入端点"
                            Classes="srg-muted" FontSize="10" />
-                <Border Canvas.Right="14" Canvas.Bottom="9" Background="#182029" BorderBrush="#637384"
+                <Border Canvas.Right="14" Canvas.Bottom="9" Background="{DynamicResource SrgOverlayBrush}" BorderBrush="{DynamicResource SrgToolBorderBrush}"
                         BorderThickness="1" CornerRadius="7" Padding="9,6">
                   <Button Classes="srg-button ghost" Content="＋ 添加模块" Command="{Binding AddModuleCommand}" />
                 </Border>
@@ -323,7 +319,7 @@
           </Grid>
         </Border>
 
-        <Border Grid.Column="2" Background="#191F27" BorderBrush="#394655" BorderThickness="1,0,0,0"
+        <Border Grid.Column="2" Background="{DynamicResource SrgPanelBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1,0,0,0"
                 Padding="15">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="12">
@@ -332,8 +328,8 @@
                 <TextBlock Text="拓扑编辑" Classes="srg-muted" FontSize="10" />
               </Grid>
               <Grid ColumnDefinitions="Auto,*">
-                <Border Width="34" Height="34" CornerRadius="8" Background="#4DD6A4">
-                  <TextBlock Text="FX" Foreground="#10261F" FontSize="10" FontWeight="Bold"
+                <Border Width="34" Height="34" CornerRadius="8" Background="{DynamicResource SrgAccentBrush}">
+                  <TextBlock Text="FX" Foreground="{DynamicResource SrgAccentTextBrush}" FontSize="10" FontWeight="Bold"
                              HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
                 <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
@@ -343,14 +339,14 @@
                 </StackPanel>
               </Grid>
               <Grid ColumnDefinitions="Auto,Auto,Auto">
-                <Border Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="99" Padding="7,3">
+                <Border Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1" CornerRadius="99" Padding="7,3">
                   <TextBlock Text="Whitebox" Classes="srg-muted" FontSize="9" />
                 </Border>
-                <Border Grid.Column="1" Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="99" Padding="7,3">
+                <Border Grid.Column="1" Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1" CornerRadius="99" Padding="7,3">
                   <TextBlock Text="Float32" Classes="srg-muted" FontSize="9" />
                 </Border>
-                <Border Grid.Column="2" Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="99" Padding="7,3">
-                  <TextBlock Text="实时" Foreground="#4DD6A4" FontSize="9" />
+                <Border Grid.Column="2" Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1" CornerRadius="99" Padding="7,3">
+                  <TextBlock Text="实时" Foreground="{DynamicResource SrgAccentBrush}" FontSize="9" />
                 </Border>
               </Grid>
               <Grid ColumnDefinitions="*,*,*">
@@ -361,11 +357,11 @@
                 <Button Grid.Column="2" Classes="srg-button ghost" Content="资源" Tag="资源"
                         Click="InspectorTabClick" HorizontalContentAlignment="Center" />
               </Grid>
-              <Border IsVisible="{Binding IsPortInspectorVisible}" Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="7" Padding="9">
+              <Border IsVisible="{Binding IsPortInspectorVisible}" Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1" CornerRadius="7" Padding="9">
                 <StackPanel Spacing="7">
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="连接端口" Classes="srg-muted" FontSize="10" />
-                    <TextBlock Text="点击端点操作" Foreground="#4DD6A4" FontSize="10" />
+                    <TextBlock Text="点击端点操作" Foreground="{DynamicResource SrgAccentBrush}" FontSize="10" />
                   </Grid>
                   <TextBlock Text="输入 · audio / 2ch" Classes="srg-text" FontSize="11" />
                   <TextBlock Text="输出 · audio / 2ch" Classes="srg-text" FontSize="11" />
@@ -387,7 +383,7 @@
                 <Button Classes="srg-button" Content="复制" Command="{Binding DuplicateSelectedCommand}" HorizontalAlignment="Stretch" />
                 <Button Classes="srg-button" Content="删除" Command="{Binding DeleteSelectedCommand}" HorizontalAlignment="Stretch" />
               </StackPanel>
-              <Border IsVisible="{Binding IsResourceInspectorVisible}" Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="7" Padding="9">
+              <Border IsVisible="{Binding IsResourceInspectorVisible}" Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1" CornerRadius="7" Padding="9">
                 <StackPanel Spacing="5">
                   <TextBlock Text="{Binding ResourceStatus}" Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
                   <Button Classes="srg-button" Content="导入模块资源" Click="ImportResourceClick" />
@@ -463,7 +459,7 @@
                     <Button Classes="srg-button" Content="学习 CC" Click="ArmMidiLearnClick" />
                     <Button Classes="srg-button" Content="取消学习" Click="CancelMidiLearnClick" />
                   </StackPanel>
-                  <TextBlock Text="{Binding MidiLearnStatus}" Foreground="#4DD6A4" FontSize="10" />
+                  <TextBlock Text="{Binding MidiLearnStatus}" Foreground="{DynamicResource SrgAccentBrush}" FontSize="10" />
                   <ListBox x:Name="MidiBindingList" Classes="srg-list" Height="82" ItemsSource="{Binding MidiBindings}"
                            SelectedIndex="{Binding SelectedMidiBindingIndex, Mode=TwoWay}">
                     <ListBox.ItemTemplate>
@@ -478,7 +474,7 @@
                 </StackPanel>
               </Expander>
 
-              <Border Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="7" Padding="9">
+              <Border Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1" CornerRadius="7" Padding="9">
                 <TextBlock Text="C# 界面只负责交互与控制线程；ASIO、MIDI、实时白盒处理由原生后端执行。"
                            Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
               </Border>
@@ -487,7 +483,7 @@
         </Border>
       </Grid>
 
-      <Border Grid.Row="2" Background="#161B22" BorderBrush="#394655" BorderThickness="0,1,0,0"
+      <Border Grid.Row="2" Background="{DynamicResource SrgTopbarBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="0,1,0,0"
               Padding="18,10">
         <Grid ColumnDefinitions="1.15*,1.2*,1.05*,1.1*,1.15*">
           <StackPanel Grid.Column="0" Spacing="2">
@@ -512,7 +508,7 @@
           </StackPanel>
           <StackPanel Grid.Column="4" Spacing="2">
             <TextBlock Text="实时白盒" Classes="srg-eyebrow" />
-            <TextBlock x:Name="RealtimeStatusText" Text="{Binding RealtimeStatus}" Foreground="#4DD6A4" FontSize="10"
+            <TextBlock x:Name="RealtimeStatusText" Text="{Binding RealtimeStatus}" Foreground="{DynamicResource SrgAccentBrush}" FontSize="10"
                        TextTrimming="CharacterEllipsis" />
             <TextBlock x:Name="WhiteboxStatusText" Text="{Binding WhiteboxStatusText}" Classes="srg-muted" FontSize="9"
                        TextTrimming="CharacterEllipsis" />

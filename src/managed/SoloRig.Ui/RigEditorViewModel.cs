@@ -5,7 +5,7 @@ using System.Windows.Input;
 
 namespace SoloRig.Ui;
 
-public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, double CanvasY)
+public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, double CanvasY, bool DarkTheme)
 {
     public string InstanceId => Source.InstanceId;
     public string ModuleId => Source.ModuleId;
@@ -25,8 +25,12 @@ public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, dou
     public string NodeStateText => Unresolved ? "资源缺失" : "已启用";
     public double Width => 196.0;
     public double Height => 154.0;
-    public string CardBackground => Selected ? "#29463F" : "#232D37";
-    public string CardBorder => Selected ? "#4DD6A4" : "#4B5B6A";
+    public string CardBackground => Selected
+        ? (DarkTheme ? "#29463F" : "#D8F3E9")
+        : (DarkTheme ? "#232D37" : "#FFFFFF");
+    public string CardBorder => Selected
+        ? (DarkTheme ? "#4DD6A4" : "#0F766E")
+        : (DarkTheme ? "#4B5B6A" : "#B9C6D3");
 
     private static string FormatModuleName(string moduleId, string fallback)
     {
@@ -1105,7 +1109,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private void RebuildCanvasProjections()
     {
         var scale = Math.Max(snapshot.DpiScale, 1.0);
-        canvasNodes = snapshot.Nodes.Select(node => new CanvasNodeSnapshot(node, node.LayoutX / scale, node.LayoutY / scale)).ToArray();
+        canvasNodes = snapshot.Nodes.Select(node =>
+            new CanvasNodeSnapshot(node, node.LayoutX / scale, node.LayoutY / scale, snapshot.DarkTheme)).ToArray();
         canvasConnections = snapshot.Connections.Select(connection => new CanvasConnectionSnapshot(
             connection.SourceInstanceId, connection.DestinationInstanceId,
             connection.SourceX / scale, connection.SourceY / scale,
