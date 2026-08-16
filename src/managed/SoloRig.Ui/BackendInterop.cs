@@ -55,6 +55,17 @@ internal struct NativeAudioStateView
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct NativeMidiStateView
+{
+    public byte IsOpen;
+    public byte LearnArmed;
+    public byte State;
+    public byte Reserved;
+    public uint SelectedDeviceIndex;
+    public ulong DroppedMessageCount;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal struct NativeNodeView
 {
     public IntPtr InstanceId;
@@ -228,6 +239,9 @@ internal static class NativeMethods
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_snapshot_audio_state(IntPtr snapshot, out NativeAudioStateView state);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_snapshot_midi_state(IntPtr snapshot, out NativeMidiStateView state);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_snapshot_node(IntPtr snapshot, uint index, out NativeNodeView node);
@@ -596,7 +610,12 @@ public sealed record BackendSnapshot(
     bool AudioRunning,
     bool AudioResetRequested,
     bool AudioDropoutReported,
-    double AudioSampleRateChangedTo);
+    double AudioSampleRateChangedTo,
+    bool MidiOpen,
+    bool MidiLearnArmed,
+    byte MidiState,
+    uint MidiSelectedDeviceIndex,
+    ulong MidiDroppedMessageCount);
 
 public sealed class BackendSession : IDisposable
 {
@@ -664,6 +683,7 @@ public sealed class BackendSession : IDisposable
         {
             Ensure(NativeMethods.solorig_snapshot_info(snapshot, out var info), "snapshot info");
             Ensure(NativeMethods.solorig_snapshot_audio_state(snapshot, out var audioState), "snapshot audio state");
+            Ensure(NativeMethods.solorig_snapshot_midi_state(snapshot, out var midiState), "snapshot midi state");
             var nodes = new List<NodeSnapshot>((int)info.NodeCount);
             for (uint nodeIndex = 0; nodeIndex < info.NodeCount; nodeIndex++)
             {
@@ -710,7 +730,8 @@ public sealed class BackendSession : IDisposable
                 info.MeasuredCpuPercent, info.PeakCpuPercent, info.MeasuredNodeCount,
                 info.MeasurementAvailable != 0, audioState.IsOpen != 0, audioState.IsRunning != 0,
                 audioState.ResetRequested != 0, audioState.DropoutReported != 0,
-                audioState.SampleRateChangedTo);
+                audioState.SampleRateChangedTo, midiState.IsOpen != 0, midiState.LearnArmed != 0,
+                midiState.State, midiState.SelectedDeviceIndex, midiState.DroppedMessageCount);
         }
         finally
         {

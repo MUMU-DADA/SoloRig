@@ -264,7 +264,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private static BackendSnapshot EmptySnapshot => new(
         0, true, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty,
         1280, 720, 1, false, [], [], [], 0, 0, "No external resource imported", 0, 0, 0, false,
-        false, false, false, false, 0.0);
+        false, false, false, false, 0.0, false, false, 0, 0U, 0UL);
 
     public RigEditorViewModel()
     {
@@ -369,6 +369,11 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public bool AudioDropoutReported => snapshot.AudioDropoutReported;
     public double AudioSampleRateChangedTo => snapshot.AudioSampleRateChangedTo;
     public string MidiStatus => $"MIDI: {snapshot.MidiStatus} | mappings: {snapshot.Bindings.Count}";
+    public bool MidiOpen => snapshot.MidiOpen;
+    public bool MidiLearnArmed => snapshot.MidiLearnArmed;
+    public byte MidiState => snapshot.MidiState;
+    public uint MidiSelectedDeviceIndex => snapshot.MidiSelectedDeviceIndex;
+    public ulong MidiDroppedMessageCount => snapshot.MidiDroppedMessageCount;
     public string FileStatus => string.IsNullOrWhiteSpace(snapshot.SourcePath)
         ? $"Preset: unsaved default{(snapshot.Dirty ? " *" : string.Empty)}"
         : $"Preset: {snapshot.SourcePath}{(snapshot.Dirty ? " *" : string.Empty)}";
@@ -417,8 +422,14 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public bool CanRecoverAsio => AudioOpen &&
         (AudioResetRequested || AudioDropoutReported || (double.IsFinite(AudioSampleRateChangedTo) && AudioSampleRateChangedTo > 0.0));
     public IReadOnlyList<MidiDeviceSnapshot> MidiDevices => midiDevices;
+    public bool HasMidiDevices => midiDevices.Count > 0;
     public IReadOnlyList<MidiLearnTargetSnapshot> MidiLearnTargets => midiLearnTargets;
     public IReadOnlyList<BindingSnapshot> MidiBindings => snapshot.Bindings;
+    public bool CanOpenMidi => SelectedMidiDevice is not null && !MidiOpen;
+    public bool CanCloseMidi => MidiOpen;
+    public bool CanDrainMidi => MidiOpen;
+    public bool CanArmMidiLearn => MidiOpen && SelectedMidiLearnTarget is not null && !MidiLearnArmed;
+    public bool CanCancelMidiLearn => MidiLearnArmed;
     public IReadOnlyList<uint> AsioInputPorts => asioInputPorts;
     public IReadOnlyList<uint> AsioOutputPorts => asioOutputPorts;
     public int SelectedAsioDriverIndex
@@ -438,12 +449,24 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public int SelectedMidiDeviceIndex
     {
         get => selectedMidiDeviceIndex;
-        set => Set(ref selectedMidiDeviceIndex, value);
+        set
+        {
+            if (Set(ref selectedMidiDeviceIndex, value))
+            {
+                OnPropertiesChanged(nameof(SelectedMidiDevice), nameof(CanOpenMidi));
+            }
+        }
     }
     public int SelectedMidiTargetIndex
     {
         get => selectedMidiTargetIndex;
-        set => Set(ref selectedMidiTargetIndex, value);
+        set
+        {
+            if (Set(ref selectedMidiTargetIndex, value))
+            {
+                OnPropertiesChanged(nameof(SelectedMidiLearnTarget), nameof(CanArmMidiLearn));
+            }
+        }
     }
     public int SelectedMidiBindingIndex
     {
@@ -535,7 +558,17 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public string FixedInputPortText => "输入路由 · " + string.Join(" | ", asioInputRoutes.Select(route => route.RouteText));
     public string FixedOutputPortText => "输出路由 · " + string.Join(" | ", asioOutputRoutes.Select(route => route.RouteText));
     public string TunerStatus => $"调音器: {(TunerEnabled ? "开启" : "关闭")}";
-    public string MidiLearnStatus => snapshot.MidiStatus.Contains("learn armed", StringComparison.OrdinalIgnoreCase)
+    public string MidiLifecycleText => $"MIDI 生命周期: {snapshot.MidiState switch
+    {
+        0 => "closed",
+        1 => "no device",
+        2 => "open",
+        3 => "learn armed",
+        4 => "learned",
+        5 => "error",
+        _ => "unknown"
+    }} · 丢弃 {snapshot.MidiDroppedMessageCount} 条";
+    public string MidiLearnStatus => MidiLearnArmed
         ? "学习中：等待 CC"
         : "未进入学习";
     public IReadOnlyList<string> PresetNames =>
@@ -618,11 +651,14 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 nameof(WindowTitle), nameof(AudioStatus), nameof(AudioOpen), nameof(AudioRunning),
                 nameof(AudioResetRequested), nameof(AudioDropoutReported), nameof(AudioSampleRateChangedTo),
                 nameof(CanOpenAsio), nameof(CanStartAsio), nameof(CanStopAsio), nameof(CanCloseAsio),
-                nameof(CanRecoverAsio), nameof(MidiStatus), nameof(FileStatus),
+                nameof(CanRecoverAsio), nameof(MidiStatus), nameof(MidiOpen), nameof(MidiLearnArmed),
+                nameof(MidiState), nameof(MidiSelectedDeviceIndex), nameof(MidiDroppedMessageCount),
+                nameof(MidiLifecycleText), nameof(CanOpenMidi), nameof(CanCloseMidi), nameof(CanDrainMidi),
+                nameof(CanArmMidiLearn), nameof(CanCancelMidiLearn), nameof(FileStatus),
                 nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames), nameof(SelectedPresetName),
                 nameof(ModuleCatalog), nameof(ModuleCatalogSummaryText), nameof(FilteredModuleCatalog),
                 nameof(SelectedCatalogModule),
-                nameof(MidiLearnTargets), nameof(MidiBindings), nameof(SelectedMidiLearnTarget),
+                nameof(MidiDevices), nameof(HasMidiDevices), nameof(MidiLearnTargets), nameof(MidiBindings), nameof(SelectedMidiDevice), nameof(SelectedMidiLearnTarget),
                 nameof(SelectedMidiTargetIndex), nameof(SelectedMidiBindingIndex), nameof(MidiLearnStatus),
                 nameof(RealtimeContract),
                 nameof(RealtimeStatus), nameof(WhiteboxStatus), nameof(WhiteboxStatusText),
@@ -1023,7 +1059,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         {
             backend.RefreshMidiDevices();
             midiDevices = backend.ReadMidiDevices();
-            OnPropertiesChanged(nameof(MidiDevices));
+            OnPropertiesChanged(nameof(MidiDevices), nameof(HasMidiDevices));
             SelectedMidiDeviceIndex = midiDevices.Count == 0 ? -1 : 0;
             Refresh();
             Status = midiDevices.Count == 0
@@ -1040,9 +1076,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     public bool OpenSelectedMidi()
     {
-        if (backend is null || SelectedMidiDevice is null)
+        if (backend is null || !CanOpenMidi || SelectedMidiDevice is null)
         {
-            Status = "请先刷新并选择 MIDI 输入设备";
+            Status = MidiOpen ? "MIDI 输入已经打开" : "请先刷新并选择未打开的 MIDI 输入设备";
             return false;
         }
         try
@@ -1062,8 +1098,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     public bool CloseMidi()
     {
-        if (backend is null)
+        if (backend is null || !CanCloseMidi)
         {
+            Status = "MIDI 输入当前未打开";
             return false;
         }
         try
@@ -1082,8 +1119,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     public bool DrainMidi()
     {
-        if (backend is null)
+        if (backend is null || !CanDrainMidi)
         {
+            Status = "MIDI 输入当前未打开";
             return false;
         }
         try
@@ -1102,9 +1140,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     public bool ArmSelectedMidiLearn()
     {
-        if (backend is null || SelectedMidiLearnTarget is null)
+        if (backend is null || !CanArmMidiLearn || SelectedMidiLearnTarget is null)
         {
-            Status = "请先选择 MIDI Learn 目标";
+            Status = "请先打开 MIDI 输入并选择未学习的 MIDI Learn 目标";
             return false;
         }
         try
@@ -1124,8 +1162,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     public bool CancelMidiLearn()
     {
-        if (backend is null)
+        if (backend is null || !CanCancelMidiLearn)
         {
+            Status = "当前没有正在进行的 MIDI Learn";
             return false;
         }
         try

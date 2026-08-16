@@ -41,6 +41,11 @@ struct SoloRigSnapshot {
     bool audio_reset_requested{};
     bool audio_dropout_reported{};
     double audio_sample_rate_changed_to{};
+    bool midi_open{};
+    bool midi_learn_armed{};
+    std::uint8_t midi_state{};
+    std::uint32_t midi_selected_device_index{};
+    std::uint64_t midi_dropped_message_count{};
 };
 
 namespace {
@@ -410,6 +415,14 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_snapshot_create(
         snapshot->midi_status = backend->midi_session != nullptr
             ? backend->midi_session->StatusText()
             : "MIDI control unavailable";
+        if (backend->midi_session != nullptr) {
+            const auto& midi_status = backend->midi_session->Status();
+            snapshot->midi_open = backend->midi_session->IsOpen();
+            snapshot->midi_learn_armed = backend->midi_session->IsLearnArmed();
+            snapshot->midi_state = static_cast<std::uint8_t>(midi_status.state);
+            snapshot->midi_selected_device_index = midi_status.selected_device_index;
+            snapshot->midi_dropped_message_count = midi_status.dropped_messages;
+        }
         if (backend->audio_engine != nullptr) {
             snapshot->audio_open = backend->audio_engine->IsOpen();
             snapshot->audio_running = backend->audio_engine->IsRunning();
@@ -474,6 +487,21 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_audio_state(
     out_state->reset_requested = snapshot->audio_reset_requested ? 1U : 0U;
     out_state->dropout_reported = snapshot->audio_dropout_reported ? 1U : 0U;
     out_state->sample_rate_changed_to = snapshot->audio_sample_rate_changed_to;
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_midi_state(
+    const SoloRigSnapshot* snapshot,
+    SoloRigMidiStateView* out_state) {
+    if (snapshot == nullptr || out_state == nullptr) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    out_state->is_open = snapshot->midi_open ? 1U : 0U;
+    out_state->learn_armed = snapshot->midi_learn_armed ? 1U : 0U;
+    out_state->state = snapshot->midi_state;
+    out_state->reserved = 0U;
+    out_state->selected_device_index = snapshot->midi_selected_device_index;
+    out_state->dropped_message_count = snapshot->midi_dropped_message_count;
     return SOLO_RIG_STATUS_OK;
 }
 

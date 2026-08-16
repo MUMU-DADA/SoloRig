@@ -217,6 +217,15 @@ TEST_CASE("C ABI exposes catalog, transactional editing and performance snapshot
     REQUIRE(audio_state.reset_requested == 0U);
     REQUIRE(audio_state.dropout_reported == 0U);
     REQUIRE(audio_state.sample_rate_changed_to == 0.0);
+    SoloRigMidiStateView midi_state{};
+    REQUIRE(solorig_snapshot_midi_state(snapshot, &midi_state) == SOLO_RIG_STATUS_OK);
+    REQUIRE(midi_state.is_open == 0U);
+    REQUIRE(midi_state.learn_armed == 0U);
+    REQUIRE(midi_state.state == 0U);
+    REQUIRE(midi_state.selected_device_index == 0U);
+    REQUIRE(midi_state.dropped_message_count == 0U);
+    REQUIRE(solorig_snapshot_midi_state(nullptr, &midi_state) == SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    REQUIRE(solorig_snapshot_midi_state(snapshot, nullptr) == SOLO_RIG_STATUS_INVALID_ARGUMENT);
     SoloRigNodeView node{};
     REQUIRE(solorig_snapshot_node(snapshot, 0U, &node) == SOLO_RIG_STATUS_OK);
     REQUIRE(node.estimated_cpu_percent > 0.0);

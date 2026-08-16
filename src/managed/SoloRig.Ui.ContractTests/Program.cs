@@ -25,6 +25,11 @@ Require(!viewModel.AudioOpen && !viewModel.AudioRunning && !viewModel.HasAsioDri
 Require(!viewModel.CanOpenAsio && !viewModel.CanStartAsio && !viewModel.CanStopAsio &&
         !viewModel.CanCloseAsio && !viewModel.CanRecoverAsio,
     "startup disables ASIO actions that have no valid device or lifecycle state");
+Require(!viewModel.MidiOpen && !viewModel.MidiLearnArmed && viewModel.MidiState == 0U,
+    "startup exposes a closed MIDI lifecycle state");
+Require(!viewModel.CanOpenMidi && !viewModel.CanCloseMidi && !viewModel.CanDrainMidi &&
+        !viewModel.CanArmMidiLearn && !viewModel.CanCancelMidiLearn,
+    "startup disables MIDI actions without an enumerated or open input");
 var routedDriverFixtures = new[]
 {
     new AsioDriverSnapshot("fixture-input", "Fixture Input", 4U, 2U, 44100.0),

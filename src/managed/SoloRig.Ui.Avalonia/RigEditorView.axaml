@@ -527,26 +527,29 @@
                 <StackPanel Spacing="7" Margin="0,8,0,0">
                   <Button Classes="srg-button" Content="刷新 MIDI 设备" Click="RefreshMidiClick" />
                   <ComboBox x:Name="MidiDeviceSelector" Classes="srg-input" ItemsSource="{Binding MidiDevices}"
-                            SelectedIndex="{Binding SelectedMidiDeviceIndex, Mode=TwoWay}" PlaceholderText="选择 MIDI 输入">
+                            SelectedIndex="{Binding SelectedMidiDeviceIndex, Mode=TwoWay}" IsEnabled="{Binding HasMidiDevices}"
+                            PlaceholderText="选择 MIDI 输入">
                     <ComboBox.ItemTemplate>
                       <DataTemplate><TextBlock Text="{Binding DisplayText}" Classes="srg-text" FontSize="10" /></DataTemplate>
                     </ComboBox.ItemTemplate>
                   </ComboBox>
                   <StackPanel Orientation="Horizontal" Spacing="4">
-                    <Button Classes="srg-button" Content="打开" Click="OpenMidiClick" />
-                    <Button Classes="srg-button" Content="关闭" Click="CloseMidiClick" />
-                    <Button Classes="srg-button" Content="排空" Click="DrainMidiClick" />
+                    <Button Classes="srg-button" Content="打开" IsEnabled="{Binding CanOpenMidi}" Click="OpenMidiClick" />
+                    <Button Classes="srg-button" Content="关闭" IsEnabled="{Binding CanCloseMidi}" Click="CloseMidiClick" />
+                    <Button Classes="srg-button" Content="排空" IsEnabled="{Binding CanDrainMidi}" Click="DrainMidiClick" />
                   </StackPanel>
+                  <TextBlock Text="{Binding MidiLifecycleText}" Classes="srg-muted" FontSize="10" />
                   <TextBlock Text="CC Learn 目标" Classes="srg-muted" FontSize="10" />
                   <ComboBox x:Name="MidiTargetSelector" Classes="srg-input" ItemsSource="{Binding MidiLearnTargets}"
-                            SelectedIndex="{Binding SelectedMidiTargetIndex, Mode=TwoWay}" PlaceholderText="选择要控制的参数">
+                            SelectedIndex="{Binding SelectedMidiTargetIndex, Mode=TwoWay}" IsEnabled="{Binding MidiOpen}"
+                            PlaceholderText="选择要控制的参数">
                     <ComboBox.ItemTemplate>
                       <DataTemplate><TextBlock Text="{Binding DisplayText}" Classes="srg-text" FontSize="10" /></DataTemplate>
                     </ComboBox.ItemTemplate>
                   </ComboBox>
                   <StackPanel Orientation="Horizontal" Spacing="4">
-                    <Button Classes="srg-button" Content="学习 CC" Click="ArmMidiLearnClick" />
-                    <Button Classes="srg-button" Content="取消学习" Click="CancelMidiLearnClick" />
+                    <Button Classes="srg-button" Content="学习 CC" IsEnabled="{Binding CanArmMidiLearn}" Click="ArmMidiLearnClick" />
+                    <Button Classes="srg-button" Content="取消学习" IsEnabled="{Binding CanCancelMidiLearn}" Click="CancelMidiLearnClick" />
                   </StackPanel>
                   <TextBlock Text="{Binding MidiLearnStatus}" Foreground="{DynamicResource SrgAccentBrush}" FontSize="10" />
                   <ListBox x:Name="MidiBindingList" Classes="srg-list" Height="82" ItemsSource="{Binding MidiBindings}"
