@@ -168,6 +168,13 @@ using (var hostProbe = new BackendSession())
 Require(viewModel.AddModule("org.mumu-dada.solorig.drive", "drive-extra", 640, 320), "module add uses the C ABI transaction");
 Require(viewModel.Snapshot.Nodes.Any(node => node.InstanceId == "drive-extra" && node.Parameters.Any(parameter => parameter.Id == "drive" && parameter.Value == 4.0F)),
     "added module receives validated defaults");
+Require(viewModel.Snapshot.Connections.Any(connection => connection.DestinationInstanceId == "drive-extra"),
+    "added module is appended to the visible effect chain");
+Require(viewModel.AddModuleAtCanvasPoint("org.mumu-dada.solorig.digital-delay", 420, 420),
+    "canvas drop creates a module at the requested editor point");
+var droppedNode = viewModel.CanvasNodes.FirstOrDefault(node => node.InstanceId.StartsWith("digital-delay", StringComparison.Ordinal));
+Require(droppedNode is not null && Math.Abs(droppedNode.CanvasX - 322.0) < 0.001 && Math.Abs(droppedNode.CanvasY - 343.0) < 0.001,
+    "canvas drop exposes the new module at the requested canvas point");
 Require(viewModel.DuplicateNode("drive-extra", "drive-copy"), "node duplication uses the C ABI transaction");
 Require(viewModel.ConnectNodes("drive-extra", "drive-copy"), "serial connection edit succeeds");
 Require(viewModel.Snapshot.Connections.Any(connection => connection.SourceInstanceId == "drive-extra"), "connection feedback is visible");

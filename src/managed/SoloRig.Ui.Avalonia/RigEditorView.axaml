@@ -1,7 +1,8 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="using:SoloRig.Ui.Avalonia"
-             x:Class="SoloRig.Ui.Avalonia.RigEditorView">
+             x:Class="SoloRig.Ui.Avalonia.RigEditorView"
+             PointerMoved="RootPointerMoved" PointerReleased="RootPointerReleased">
   <UserControl.Resources>
     <local:SkinImageConverter x:Key="SkinImageConverter" />
   </UserControl.Resources>
@@ -174,7 +175,7 @@
                 <ListBox.ItemTemplate>
                   <DataTemplate>
                     <Border Padding="8" Background="{DynamicResource SrgCardBrush}" BorderBrush="{DynamicResource SrgCardBorderBrush}" BorderThickness="1"
-                            CornerRadius="7">
+                            CornerRadius="7" PointerPressed="ModuleCatalogItemPointerPressed">
                       <Grid ColumnDefinitions="Auto,*">
                         <Border Width="28" Height="28" CornerRadius="7" Background="{DynamicResource SrgAccentBrush}"
                                 VerticalAlignment="Center">
@@ -207,7 +208,7 @@
                   <TextBlock Text="资源" Classes="srg-eyebrow" />
                   <TextBlock Text="{Binding ResourceStatus}" Classes="srg-muted" FontSize="11" TextWrapping="Wrap" />
                   <Button Classes="srg-button" Content="导入 NAM / A2 / IR / Circuit" Click="ImportResourceClick" />
-                  <TextBlock Text="选择模块后点击添加，拖动卡片可改变拓扑位置。"
+                  <TextBlock Text="点击添加，或把模块卡片拖到画布中；画布卡片可继续拖动。"
                              Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
                 </StackPanel>
               </Border>

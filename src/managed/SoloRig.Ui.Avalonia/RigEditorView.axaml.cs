@@ -88,6 +88,9 @@ public sealed partial class RigEditorView : UserControl
     private DispatcherTimer? runtimeRefreshTimer;
     private bool dragging;
     private string? pendingOutputNode;
+    private ModuleCatalogSnapshot? draggedModule;
+    private Point moduleDragStart;
+    private bool draggingModule;
 
     public RigEditorView()
     {
@@ -896,6 +899,63 @@ public sealed partial class RigEditorView : UserControl
         dragging = false;
         viewModel.EndDrag();
         args.Pointer.Capture(null);
+        args.Handled = true;
+    }
+
+    private void ModuleCatalogItemPointerPressed(object? sender, PointerPressedEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control ||
+            control.DataContext is not ModuleCatalogSnapshot module ||
+            !args.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+        viewModel.SelectedCatalogModule = module;
+        draggedModule = module;
+        moduleDragStart = args.GetPosition(this);
+        draggingModule = false;
+        args.Pointer.Capture(this);
+        args.Handled = true;
+    }
+
+    private void RootPointerMoved(object? sender, PointerEventArgs args)
+    {
+        if (draggedModule is null || args.Pointer.Captured != this)
+        {
+            return;
+        }
+        var point = args.GetPosition(this);
+        var deltaX = point.X - moduleDragStart.X;
+        var deltaY = point.Y - moduleDragStart.Y;
+        if (!draggingModule && Math.Sqrt(deltaX * deltaX + deltaY * deltaY) >= 6.0)
+        {
+            draggingModule = true;
+            viewModel?.ReportInteractionStatus($"拖动 {draggedModule.DisplayName} 到画布中放置");
+        }
+        if (draggingModule)
+        {
+            args.Handled = true;
+        }
+    }
+
+    private void RootPointerReleased(object? sender, PointerReleasedEventArgs args)
+    {
+        if (draggedModule is null || args.Pointer.Captured != this)
+        {
+            return;
+        }
+        var module = draggedModule;
+        var wasDragging = draggingModule;
+        var canvasPoint = args.GetPosition(EditorCanvas);
+        draggedModule = null;
+        draggingModule = false;
+        args.Pointer.Capture(null);
+        if (wasDragging && viewModel is not null &&
+            canvasPoint.X >= 0 && canvasPoint.Y >= 0 &&
+            canvasPoint.X <= EditorCanvas.Bounds.Width && canvasPoint.Y <= EditorCanvas.Bounds.Height)
+        {
+            viewModel.AddModuleAtCanvasPoint(module.ModuleId, canvasPoint.X, canvasPoint.Y);
+        }
         args.Handled = true;
     }
 

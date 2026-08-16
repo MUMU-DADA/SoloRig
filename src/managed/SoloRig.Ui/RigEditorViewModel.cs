@@ -1082,8 +1082,49 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public bool AddModule(string moduleId, string instanceId, double x, double y)
     {
         if (backend is null) return false;
-        try { backend.AddNode(moduleId, instanceId, x, y); Refresh(); Status = $"Added module: {instanceId}"; return true; }
-        catch (Exception exception) { Status = exception.Message; Refresh(); return false; }
+        var terminalNode = snapshot.Nodes.LastOrDefault(node =>
+            !snapshot.Connections.Any(connection => connection.SourceInstanceId == node.InstanceId))?.InstanceId;
+        try
+        {
+            backend.AddNode(moduleId, instanceId, x, y);
+            if (!string.IsNullOrWhiteSpace(terminalNode) && !string.Equals(terminalNode, instanceId, StringComparison.Ordinal))
+            {
+                backend.Connect(terminalNode, instanceId);
+            }
+            Refresh();
+            Status = string.IsNullOrWhiteSpace(terminalNode)
+                ? $"已添加效果器: {instanceId}"
+                : $"已添加效果器并接入链路: {instanceId}";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                backend.DeleteNode(instanceId);
+            }
+            catch
+            {
+                // Preserve the original error while keeping the graph best-effort transactional.
+            }
+            Status = exception.Message;
+            Refresh();
+            return false;
+        }
+    }
+
+    public bool AddModuleAtCanvasPoint(string moduleId, double canvasX, double canvasY)
+    {
+        if (string.IsNullOrWhiteSpace(moduleId) || !double.IsFinite(canvasX) || !double.IsFinite(canvasY))
+        {
+            return false;
+        }
+        const double cardWidth = 196.0;
+        const double cardHeight = 154.0;
+        var scale = Math.Max(snapshot.DpiScale, 1.0);
+        var layoutX = Math.Max(0.0, (canvasX - cardWidth * 0.5) * scale);
+        var layoutY = Math.Max(0.0, (canvasY - cardHeight * 0.5) * scale);
+        return AddModule(moduleId, CreateUniqueNodeId(moduleId.Split('.').LastOrDefault() ?? "module"), layoutX, layoutY);
     }
 
     public bool DeleteNode(string instanceId)
@@ -1626,7 +1667,14 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         if (module is null) return;
         var baseId = module.ModuleId.Split('.').LastOrDefault() ?? "module";
         var id = CreateUniqueNodeId(baseId);
-        AddModule(module.ModuleId, id, 64 + snapshot.Nodes.Count * 32, 300);
+        var scale = Math.Max(snapshot.DpiScale, 1.0);
+        var canvasWidth = Math.Max(snapshot.ViewportWidth / scale, 420.0);
+        var slot = snapshot.Nodes.Count;
+        var columns = Math.Max(1, (int)Math.Floor((canvasWidth - 32.0) / 220.0));
+        var canvasX = 32.0 + (slot % columns) * 220.0 + 98.0;
+        var canvasY = 90.0 + (slot / columns) * 180.0 + 77.0;
+        AddModule(module.ModuleId, id, Math.Max(0.0, (canvasX - 98.0) * scale),
+            Math.Max(0.0, (canvasY - 77.0) * scale));
     }
 
     private bool MatchesModuleCatalogFilter(ModuleCatalogSnapshot module) => moduleCatalogFilter switch
