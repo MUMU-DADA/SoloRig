@@ -112,6 +112,17 @@ Require(viewModel.CanAddModule && viewModel.CanConnectNodes && viewModel.CanDisc
     "graph actions expose enabled gates when a valid catalog and connection exist");
 Require(!viewModel.CanDuplicateSelected && !viewModel.CanDeleteSelected,
     "node copy/delete gates stay disabled without a selected node");
+viewModel.SetViewport(620, 430, 1.0);
+viewModel.SelectedCatalogModule = viewModel.ModuleCatalog.First(module =>
+    module.ModuleId == "org.mumu-dada.solorig.drive");
+var buttonAddedIds = viewModel.CanvasNodes.Select(node => node.InstanceId).ToHashSet(StringComparer.Ordinal);
+viewModel.AddModuleCommand.Execute(null);
+var buttonAddedNode = viewModel.CanvasNodes.FirstOrDefault(node => !buttonAddedIds.Contains(node.InstanceId));
+Require(buttonAddedNode is not null && buttonAddedNode.CanvasX >= 0.0 && buttonAddedNode.CanvasY >= 0.0 &&
+        buttonAddedNode.CanvasX + buttonAddedNode.Width <= viewModel.Snapshot.ViewportWidth + 0.001 &&
+        buttonAddedNode.CanvasY + buttonAddedNode.Height <= viewModel.Snapshot.ViewportHeight + 0.001,
+    "button-added module is projected fully inside the visible canvas bounds");
+viewModel.SetViewport(1280, 720, 1.0);
 Require(!viewModel.CanDeleteMidiBinding && !viewModel.CanClearMidiBindings,
     "MIDI binding removal gates stay disabled without bindings");
 Require(viewModel.SelectInspectorTab("端口") && viewModel.IsPortInspectorVisible && !viewModel.IsParameterInspectorVisible,

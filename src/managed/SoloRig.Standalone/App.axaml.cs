@@ -42,9 +42,10 @@ public sealed class App : Application
                     var selectionState = keyboardShortcuts && RunVisualProbe("selection state", mainWindow.ProbeSelectionState);
                     var documentStatus = selectionState && RunVisualProbe("document status", mainWindow.ProbeDocumentStatus);
                     var actionGates = documentStatus && RunVisualProbe("action gates", mainWindow.ProbeActionGates);
-                    var presetLibrary = actionGates && RunVisualProbe("preset library", mainWindow.ProbePresetLibrary);
+                    var moduleInsertion = actionGates && RunVisualProbe("module insertion", mainWindow.ProbeModuleInsertion);
+                    var presetLibrary = moduleInsertion && RunVisualProbe("preset library", mainWindow.ProbePresetLibrary);
                     if (visualContent && externalTheme && themeSwitch && parameterBinding && dpiScaling && renderedSurface &&
-                        keyboardShortcuts && selectionState && documentStatus && actionGates && presetLibrary)
+                        keyboardShortcuts && selectionState && documentStatus && actionGates && moduleInsertion && presetLibrary)
                     {
                         probe.Stop();
                         desktop.Shutdown(0);

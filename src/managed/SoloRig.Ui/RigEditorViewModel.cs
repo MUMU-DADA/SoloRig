@@ -1121,9 +1121,16 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         const double cardWidth = 196.0;
         const double cardHeight = 154.0;
+        const double canvasMargin = 16.0;
         var scale = Math.Max(snapshot.DpiScale, 1.0);
-        var layoutX = Math.Max(0.0, (canvasX - cardWidth * 0.5) * scale);
-        var layoutY = Math.Max(0.0, (canvasY - cardHeight * 0.5) * scale);
+        var canvasWidth = Math.Max(snapshot.ViewportWidth / scale, cardWidth + canvasMargin * 2.0);
+        var canvasHeight = Math.Max(snapshot.ViewportHeight / scale, cardHeight + canvasMargin * 2.0);
+        var maxX = Math.Max(canvasMargin, canvasWidth - cardWidth - canvasMargin);
+        var maxY = Math.Max(canvasMargin, canvasHeight - cardHeight - canvasMargin);
+        var left = Math.Clamp(canvasX - cardWidth * 0.5, canvasMargin, maxX);
+        var top = Math.Clamp(canvasY - cardHeight * 0.5, canvasMargin, maxY);
+        var layoutX = left * scale;
+        var layoutY = top * scale;
         return AddModule(moduleId, CreateUniqueNodeId(moduleId.Split('.').LastOrDefault() ?? "module"), layoutX, layoutY);
     }
 
@@ -1668,13 +1675,52 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         var baseId = module.ModuleId.Split('.').LastOrDefault() ?? "module";
         var id = CreateUniqueNodeId(baseId);
         var scale = Math.Max(snapshot.DpiScale, 1.0);
-        var canvasWidth = Math.Max(snapshot.ViewportWidth / scale, 420.0);
-        var slot = snapshot.Nodes.Count;
-        var columns = Math.Max(1, (int)Math.Floor((canvasWidth - 32.0) / 220.0));
-        var canvasX = 32.0 + (slot % columns) * 220.0 + 98.0;
-        var canvasY = 90.0 + (slot / columns) * 180.0 + 77.0;
-        AddModule(module.ModuleId, id, Math.Max(0.0, (canvasX - 98.0) * scale),
-            Math.Max(0.0, (canvasY - 77.0) * scale));
+        var placement = FindVisibleModulePlacement();
+        AddModule(module.ModuleId, id, placement.X * scale, placement.Y * scale);
+    }
+
+    private (double X, double Y) FindVisibleModulePlacement()
+    {
+        const double cardWidth = 196.0;
+        const double cardHeight = 154.0;
+        const double canvasMargin = 16.0;
+        const double placementGap = 20.0;
+        var scale = Math.Max(snapshot.DpiScale, 1.0);
+        var canvasWidth = Math.Max(snapshot.ViewportWidth / scale, cardWidth + canvasMargin * 2.0);
+        var canvasHeight = Math.Max(snapshot.ViewportHeight / scale, cardHeight + canvasMargin * 2.0);
+        var maxX = Math.Max(canvasMargin, canvasWidth - cardWidth - canvasMargin);
+        var maxY = Math.Max(canvasMargin, canvasHeight - cardHeight - canvasMargin);
+        var xCandidates = new[]
+        {
+            canvasMargin,
+            Math.Clamp((canvasWidth - cardWidth) * 0.5, canvasMargin, maxX),
+            maxX,
+        }.Distinct().ToArray();
+        var yCandidates = new[]
+        {
+            canvasMargin,
+            Math.Clamp((canvasHeight - cardHeight) * 0.5, canvasMargin, maxY),
+            maxY,
+        }.Distinct().ToArray();
+
+        foreach (var y in yCandidates)
+        {
+            foreach (var x in xCandidates)
+            {
+                if (CanvasNodes.All(node =>
+                        x + cardWidth + placementGap <= node.CanvasX ||
+                        node.CanvasX + node.Width + placementGap <= x ||
+                        y + cardHeight + placementGap <= node.CanvasY ||
+                        node.CanvasY + node.Height + placementGap <= y))
+                {
+                    return (x, y);
+                }
+            }
+        }
+
+        // A dense chain may have no collision-free slot. Keep the new card fully
+        // inside the visible canvas so it can still be selected and moved.
+        return (canvasMargin, canvasMargin);
     }
 
     private bool MatchesModuleCatalogFilter(ModuleCatalogSnapshot module) => moduleCatalogFilter switch

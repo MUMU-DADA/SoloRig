@@ -497,6 +497,55 @@ public sealed partial class RigEditorView : UserControl
         return probePassed && restored;
     }
 
+    public bool ProbeModuleInsertion()
+    {
+        if (viewModel is null || !HasGraphVisualContent || CaptureRenderedSurface() is not { } originalSurface)
+        {
+            return false;
+        }
+
+        var originalDirty = viewModel.IsDirty;
+        var originalSelectedCatalogModule = viewModel.SelectedCatalogModule;
+        var originalNodeIds = viewModel.CanvasNodes.Select(node => node.InstanceId).ToHashSet(StringComparer.Ordinal);
+        ModuleCatalogSnapshot? probeModule = viewModel.FilteredModuleCatalog.FirstOrDefault();
+        CanvasNodeSnapshot? addedNode = null;
+        var added = false;
+        try
+        {
+            if (probeModule is null)
+            {
+                return false;
+            }
+            viewModel.SelectedCatalogModule = probeModule;
+            viewModel.AddModuleCommand.Execute(null);
+            addedNode = viewModel.CanvasNodes.FirstOrDefault(node => !originalNodeIds.Contains(node.InstanceId));
+            if (addedNode is null)
+            {
+                return false;
+            }
+            added = true;
+            var scale = Math.Max(viewModel.Snapshot.DpiScale, 1.0);
+            var visibleWidth = viewModel.Snapshot.ViewportWidth / scale;
+            var visibleHeight = viewModel.Snapshot.ViewportHeight / scale;
+            var projectedInsideCanvas = addedNode.CanvasX >= 0.0 && addedNode.CanvasY >= 0.0 &&
+                                         addedNode.CanvasX + addedNode.Width <= visibleWidth + 0.001 &&
+                                         addedNode.CanvasY + addedNode.Height <= visibleHeight + 0.001;
+            var linkedToChain = viewModel.CanvasConnections.Any(connection =>
+                connection.DestinationInstanceId == addedNode.InstanceId);
+            var afterSurface = CaptureRenderedSurface();
+            return projectedInsideCanvas && linkedToChain && afterSurface is not null && afterSurface != originalSurface;
+        }
+        finally
+        {
+            if (added && addedNode is not null)
+            {
+                viewModel.DeleteNode(addedNode.InstanceId);
+            }
+            viewModel.RestoreDocumentState(originalDirty);
+            viewModel.SelectedCatalogModule = originalSelectedCatalogModule;
+        }
+    }
+
     public bool ProbePresetLibrary()
     {
         if (viewModel is null || PresetLibraryList is null || PresetLibraryLoadButton is null)
