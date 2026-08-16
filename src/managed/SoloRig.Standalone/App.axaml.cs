@@ -31,7 +31,8 @@ public sealed class App : Application
                     if (mainWindow.HasStandaloneVisualContent && mainWindow.ProbeExternalTheme() &&
                         mainWindow.ProbeThemeSwitch() && mainWindow.ProbeParameterBinding() &&
                         mainWindow.ProbeDpiScaling() && mainWindow.ProbeRenderedSurface() &&
-                        mainWindow.ProbeKeyboardShortcuts() && mainWindow.ProbeSelectionState())
+                        mainWindow.ProbeKeyboardShortcuts() && mainWindow.ProbeSelectionState() &&
+                        mainWindow.ProbeDocumentStatus())
                     {
                         probe.Stop();
                         desktop.Shutdown(0);

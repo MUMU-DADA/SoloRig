@@ -38,6 +38,8 @@ public sealed partial class MainWindow : Window
 
     public bool ProbeSelectionState() => EditorView.ProbeSelectionState();
 
+    public bool ProbeDocumentStatus() => EditorView.ProbeDocumentStatus();
+
     private void WindowKeyDown(object? sender, KeyEventArgs args) => EditorView.HandleWindowKeyDown(args);
 
     private async void WindowClosing(object? sender, WindowClosingEventArgs args)

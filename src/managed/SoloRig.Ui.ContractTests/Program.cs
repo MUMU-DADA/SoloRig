@@ -170,9 +170,15 @@ Require(viewModel.Snapshot.TotalLatencySamples > 0 && viewModel.Snapshot.Estimat
 Require(viewModel.PresetNames.Contains("SoloRig Default"), "preset list exposes the in-memory default");
 viewModel.NewPresetCommand.Execute(null);
 Require(string.IsNullOrEmpty(viewModel.Snapshot.SourcePath) && !viewModel.IsDirty, "quick default preset switching stays in memory and clean");
+Require(viewModel.FileStatus.Contains("unsaved default", StringComparison.Ordinal) &&
+        !viewModel.FileStatus.Contains("*", StringComparison.Ordinal),
+    "document status identifies the clean in-memory default");
 Require(viewModel.SetParameter("drive-1.drive", 6.0F), "C ABI parameter edit succeeds");
 Require(viewModel.Nodes.SelectMany(node => node.Parameters).Any(parameter => parameter.Id == "drive" && parameter.Value == 6.0F),
     "edited parameter is visible in the next snapshot");
+Require(viewModel.IsDirty && viewModel.FileStatus.Contains("*", StringComparison.Ordinal) &&
+        viewModel.WindowTitle.Contains("*", StringComparison.Ordinal),
+    "document status exposes the dirty marker after an edit");
 Require(!viewModel.SetParameter("drive-1.drive", 20.0F), "shared UI rejects a parameter value outside the descriptor range");
 Require(viewModel.SelectPreset("SoloRig Default"), "preset selector activates the quick default action");
 Require(viewModel.SelectedPresetName == "SoloRig Default" && !viewModel.IsDirty,

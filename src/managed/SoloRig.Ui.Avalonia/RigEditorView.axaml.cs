@@ -114,8 +114,9 @@ public sealed partial class RigEditorView : UserControl
         PresetSelector is not null && PresetSelector.Bounds.Width > 0;
 
     public bool HasStandaloneVisualContent => HasEditorControlsVisualContent &&
-        RealtimeStatusText is not null && WhiteboxStatusText is not null &&
+        DocumentStatusText is not null && RealtimeStatusText is not null && WhiteboxStatusText is not null &&
         HasThemePalette &&
+        !string.IsNullOrWhiteSpace(DocumentStatusText.Text) &&
         !string.IsNullOrWhiteSpace(RealtimeStatusText.Text) &&
         !string.IsNullOrWhiteSpace(WhiteboxStatusText.Text);
 
@@ -367,6 +368,56 @@ public sealed partial class RigEditorView : UserControl
         return probePassed && BuildVisualRegressionFingerprint() == originalFingerprint && filterRestored && tabRestored;
     }
 
+    public bool ProbeDocumentStatus()
+    {
+        if (viewModel is null || DocumentStatusText is null)
+        {
+            return false;
+        }
+
+        var canvasNode = viewModel.CanvasNodes.FirstOrDefault();
+        var sourceParameter = canvasNode?.Parameters.FirstOrDefault(parameter => parameter.IsValidRange);
+        if (canvasNode is null || sourceParameter is null)
+        {
+            return false;
+        }
+
+        if (!viewModel.SelectAt(canvasNode.CanvasX + 10.0, canvasNode.CanvasY + 10.0))
+        {
+            return false;
+        }
+
+        var originalValue = sourceParameter.Value;
+        var originalDirty = viewModel.IsDirty;
+        var originalFileStatus = viewModel.FileStatus;
+        var originalWindowTitle = viewModel.WindowTitle;
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        var midpoint = (sourceParameter.Minimum + sourceParameter.Maximum) * 0.5F;
+        var fraction = originalValue <= midpoint ? 0.75F : 0.25F;
+        var candidate = sourceParameter.Minimum +
+                        (sourceParameter.Maximum - sourceParameter.Minimum) * fraction;
+        if (Math.Abs(candidate - originalValue) < 0.00001F)
+        {
+            candidate = midpoint;
+        }
+
+        if (Math.Abs(candidate - originalValue) < 0.00001F ||
+            !viewModel.SetParameter($"{canvasNode.InstanceId}.{sourceParameter.Id}", candidate))
+        {
+            return false;
+        }
+
+        var dirtyMarkerVisible = viewModel.IsDirty &&
+                                 DocumentStatusText.Text?.Contains("*", StringComparison.Ordinal) == true &&
+                                 viewModel.WindowTitle.Contains("*", StringComparison.Ordinal);
+        var restored = viewModel.SetParameter($"{canvasNode.InstanceId}.{sourceParameter.Id}", originalValue);
+        return dirtyMarkerVisible && restored &&
+               viewModel.IsDirty == originalDirty &&
+               viewModel.FileStatus == originalFileStatus &&
+               viewModel.WindowTitle == originalWindowTitle &&
+               BuildVisualRegressionFingerprint() == originalFingerprint;
+    }
+
     private RenderedSurfaceFingerprint? CaptureRenderedSurface()
     {
         var topLevel = TopLevel.GetTopLevel(this);
@@ -417,7 +468,7 @@ public sealed partial class RigEditorView : UserControl
             $"images={node.Skin.HasKnobImage},{node.Skin.HasToggleImage},{node.Skin.HasFootswitchImage}:" +
             string.Join(",", node.Controls.Select(control =>
                 $"{control.Id}:{control.Value:0.######}:{control.KnobAngle:0.###}:{control.IsToggle}"))));
-        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};filter={viewModel.ModuleCatalogFilter};inspector={viewModel.InspectorTab};resources={resources};nodes={nodes};connections={viewModel.CanvasConnections.Count}";
+        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};file={viewModel.FileStatus};filter={viewModel.ModuleCatalogFilter};inspector={viewModel.InspectorTab};resources={resources};nodes={nodes};connections={viewModel.CanvasConnections.Count}";
     }
 
     private void NodeFootswitchClick(object? sender, RoutedEventArgs args)

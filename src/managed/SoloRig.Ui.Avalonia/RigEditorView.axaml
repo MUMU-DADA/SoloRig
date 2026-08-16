@@ -129,6 +129,8 @@
           <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
             <TextBlock Text="当前工程" Classes="srg-eyebrow" />
             <TextBlock Text="{Binding WindowTitle}" Classes="srg-text" FontSize="15" />
+            <TextBlock x:Name="DocumentStatusText" Text="{Binding FileStatus}" Classes="srg-muted" FontSize="9"
+                       TextTrimming="CharacterEllipsis" />
             <TextBlock Text="{Binding Status}" Classes="srg-muted" FontSize="9" TextTrimming="CharacterEllipsis" />
           </StackPanel>
 
