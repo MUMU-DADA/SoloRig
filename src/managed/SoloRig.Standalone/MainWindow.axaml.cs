@@ -42,6 +42,8 @@ public sealed partial class MainWindow : Window
 
     public bool ProbeActionGates() => EditorView.ProbeActionGates();
 
+    public bool ProbePresetLibrary() => EditorView.ProbePresetLibrary();
+
     private void WindowKeyDown(object? sender, KeyEventArgs args) => EditorView.HandleWindowKeyDown(args);
 
     private async void WindowClosing(object? sender, WindowClosingEventArgs args)

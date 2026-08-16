@@ -112,6 +112,12 @@ public sealed record ParameterEditorSnapshot(string Target, string Id, float Val
     public bool IsValidRange => float.IsFinite(Minimum) && float.IsFinite(Maximum) && Maximum > Minimum;
 }
 
+public sealed record PresetLibraryEntry(string DisplayName, string SourcePath, bool IsValid, string StatusText)
+{
+    public string FileName => Path.GetFileName(SourcePath);
+    public string DetailText => IsValid ? $"{DisplayName} · 可加载" : $"{FileName} · {StatusText}";
+}
+
 public sealed class AsioRouteSelection : INotifyPropertyChanged
 {
     private Func<bool> canEdit;
@@ -252,6 +258,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     ];
     private IReadOnlyList<MidiDeviceSnapshot> midiDevices = [];
     private IReadOnlyList<MidiLearnTargetSnapshot> midiLearnTargets = [];
+    private IReadOnlyList<PresetLibraryEntry> presetLibraryEntries = [];
+    private string presetLibraryDirectory = string.Empty;
+    private int selectedPresetLibraryIndex = -1;
     private IReadOnlyList<uint> asioInputPorts = [];
     private IReadOnlyList<uint> asioOutputPorts = [];
     private int selectedAsioDriverIndex = -1;
@@ -620,6 +629,28 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         string.Equals(snapshot.PresetName, "SoloRig Default", StringComparison.Ordinal)
             ? ["SoloRig Default"]
             : ["SoloRig Default", snapshot.PresetName];
+    public IReadOnlyList<PresetLibraryEntry> PresetLibraryEntries => presetLibraryEntries;
+    public string PresetLibraryDirectory => presetLibraryDirectory;
+    public string PresetLibraryDirectoryText => string.IsNullOrWhiteSpace(presetLibraryDirectory)
+        ? "未选择预设目录"
+        : $"目录: {presetLibraryDirectory}";
+    public bool CanRefreshPresetLibrary => !string.IsNullOrWhiteSpace(presetLibraryDirectory);
+    public int SelectedPresetLibraryIndex
+    {
+        get => selectedPresetLibraryIndex;
+        set
+        {
+            if (Set(ref selectedPresetLibraryIndex, value))
+            {
+                OnPropertiesChanged(nameof(SelectedPresetLibraryEntry), nameof(CanLoadSelectedPresetLibraryEntry));
+            }
+        }
+    }
+    public PresetLibraryEntry? SelectedPresetLibraryEntry =>
+        selectedPresetLibraryIndex >= 0 && selectedPresetLibraryIndex < presetLibraryEntries.Count
+            ? presetLibraryEntries[selectedPresetLibraryIndex]
+            : null;
+    public bool CanLoadSelectedPresetLibraryEntry => SelectedPresetLibraryEntry?.IsValid == true;
     public string SelectedPresetName
     {
         get => selectedPresetName;
@@ -669,6 +700,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 ? null
                 : moduleCatalog.FirstOrDefault(module => module.ModuleId == selectedCatalogModuleId);
             snapshot = nextSnapshot;
+            selectedPresetLibraryIndex = FindPresetLibraryIndex(snapshot.SourcePath);
             foreach (var route in asioInputRoutes.Concat(asioOutputRoutes))
             {
                 route.NotifyEditingStateChanged();
@@ -711,6 +743,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 nameof(CanArmMidiLearn), nameof(CanCancelMidiLearn), nameof(CanDeleteMidiBinding), nameof(CanClearMidiBindings), nameof(FileStatus),
                 nameof(CanAddModule),
                 nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames), nameof(SelectedPresetName),
+                nameof(PresetLibraryEntries), nameof(PresetLibraryDirectory), nameof(PresetLibraryDirectoryText), nameof(CanRefreshPresetLibrary),
+                nameof(SelectedPresetLibraryIndex),
+                nameof(SelectedPresetLibraryEntry), nameof(CanLoadSelectedPresetLibraryEntry),
                 nameof(ModuleCatalog), nameof(ModuleCatalogSummaryText), nameof(FilteredModuleCatalog),
                 nameof(SelectedCatalogModule),
                 nameof(MidiDevices), nameof(HasMidiDevices), nameof(CanSelectMidiDevice), nameof(MidiLearnTargets), nameof(MidiBindings), nameof(SelectedMidiDevice), nameof(SelectedMidiLearnTarget),
@@ -1432,6 +1467,80 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public bool LoadPresetLibrary(string directoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(directoryPath))
+        {
+            Status = "预设库目录不能为空";
+            return false;
+        }
+        try
+        {
+            if (!Directory.Exists(directoryPath))
+            {
+                Status = "预设库目录不存在";
+                return false;
+            }
+
+            var paths = Directory.EnumerateFiles(directoryPath, "*", SearchOption.TopDirectoryOnly)
+                .Where(path => string.Equals(Path.GetExtension(path), ".srig", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+                .Take(128)
+                .ToArray();
+            var entries = paths.Select(InspectPresetFile).ToArray();
+            presetLibraryDirectory = Path.GetFullPath(directoryPath);
+            presetLibraryEntries = entries;
+            selectedPresetLibraryIndex = FindPresetLibraryIndex(snapshot.SourcePath);
+            if (selectedPresetLibraryIndex < 0 && entries.Length > 0)
+            {
+                selectedPresetLibraryIndex = 0;
+            }
+            OnPropertiesChanged(nameof(PresetLibraryEntries), nameof(PresetLibraryDirectoryText),
+                nameof(CanRefreshPresetLibrary), nameof(SelectedPresetLibraryIndex), nameof(SelectedPresetLibraryEntry),
+                nameof(CanLoadSelectedPresetLibraryEntry));
+            var invalidCount = entries.Count(entry => !entry.IsValid);
+            Status = invalidCount == 0
+                ? $"预设库已加载: {entries.Length} 个可用预设"
+                : $"预设库已加载: {entries.Length} 个文件，其中 {invalidCount} 个不可用";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            return false;
+        }
+    }
+
+    public bool RefreshPresetLibrary()
+    {
+        if (string.IsNullOrWhiteSpace(presetLibraryDirectory))
+        {
+            Status = "请先选择预设库目录";
+            return false;
+        }
+        return LoadPresetLibrary(presetLibraryDirectory);
+    }
+
+    public void ClearPresetLibrary()
+    {
+        presetLibraryEntries = [];
+        presetLibraryDirectory = string.Empty;
+        selectedPresetLibraryIndex = -1;
+        OnPropertiesChanged(nameof(PresetLibraryEntries), nameof(PresetLibraryDirectory), nameof(PresetLibraryDirectoryText),
+            nameof(CanRefreshPresetLibrary), nameof(SelectedPresetLibraryIndex), nameof(SelectedPresetLibraryEntry),
+            nameof(CanLoadSelectedPresetLibraryEntry));
+    }
+
+    public bool OpenPresetLibraryEntry(PresetLibraryEntry? entry)
+    {
+        if (entry is null || !entry.IsValid)
+        {
+            Status = entry is null ? "请先选择可加载的预设" : $"预设不可用: {entry.StatusText}";
+            return false;
+        }
+        return OpenFromPath(entry.SourcePath);
+    }
+
     public void ReportFileDialogCancelled(string operation) => Status = $"{operation} cancelled; current preset unchanged.";
 
     public void ReportInteractionStatus(string message) => Status = message;
@@ -1643,6 +1752,42 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             connection.SourceInstanceId, connection.DestinationInstanceId,
             connection.SourceX / scale, connection.SourceY / scale,
             connection.DestinationX / scale, connection.DestinationY / scale)).ToArray();
+    }
+
+    private int FindPresetLibraryIndex(string sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+        {
+            return -1;
+        }
+        var fullPath = Path.GetFullPath(sourcePath);
+        foreach (var (entry, index) in presetLibraryEntries.Select((entry, index) => (entry, index)))
+        {
+            if (string.Equals(Path.GetFullPath(entry.SourcePath), fullPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private static PresetLibraryEntry InspectPresetFile(string path)
+    {
+        try
+        {
+            using var probe = new BackendSession();
+            probe.Open(path);
+            var snapshot = probe.ReadSnapshot();
+            var displayName = string.IsNullOrWhiteSpace(snapshot.PresetName)
+                ? Path.GetFileNameWithoutExtension(path)
+                : snapshot.PresetName;
+            return new PresetLibraryEntry(displayName, Path.GetFullPath(path), true, "可加载");
+        }
+        catch (Exception exception)
+        {
+            return new PresetLibraryEntry(Path.GetFileNameWithoutExtension(path), Path.GetFullPath(path), false,
+                exception.Message);
+        }
     }
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

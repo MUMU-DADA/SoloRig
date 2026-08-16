@@ -27,8 +27,8 @@
 | 8 | NAM 与 NAM A2 | 部分完成 | `third_party/NeuralAmpModelerCore`、NAM/NAM A2 runtime 和外部包测试 | 产品端到端导入、错误恢复、真实模型回归及明确的黑盒精度口径；不计入白盒元件证据 |
 | 9 | 拖动效果器改变位置 | 已验证（编辑器层） | C ABI/Windows UI/C# contract 覆盖选择、拖动、网格吸附和脏状态 | 与任意拓扑图编辑、撤销/重做和保存恢复联合验收 |
 | 10 | 每个效果器预期延迟与性能占用 | 部分完成 | 静态估算、声明延迟、`RealtimeLoadMeter`、`PerformanceSnapshot` 和 C#/C ABI 面板；Win32 ASIO 状态持续显示回调计数、最近 block 大小和 reset/dropout 恢复提示 | 真实宿主回灌、过载状态和可复验基准；“实测未连接”不得升级为实测 |
-| 11 | 保存/读取当前链路配置 | 已验证（核心文件层） | `src/content/preset.*`、schema v1/v2、主题/MIDI 扩展和 Save/Open 测试；M25-R 为 Standalone 关闭、打开、新建、默认和 `Ctrl+1` 替换增加保存/放弃/取消保护，M25-S 进一步覆盖顶部预设下拉选择，M25-V 将当前预设路径/未保存标记显示到顶栏并由 visual probe 验证编辑后的 `*` 与恢复；保存取消/失败保留当前文档和原预设选择；打开/导入在 runtime 准备失败时仍恢复原文档路径、脏状态和外部包上下文 | 完整任意拓扑、模块包引用失效、版本迁移和独立程序端到端回归 |
-| 12 | 快捷键和界面切换配置 | 部分完成 | `shortcut_registry`、`preset_controller`、托管 UI contract；M25-Q 将无修饰 `T` 主题切换、`Ctrl+S`/`Ctrl+Shift+S`/`Ctrl+O`/`Ctrl+1` 统一到共享 Standalone/VST3 `RigEditorView`，visual probe 覆盖修饰键不误触发；M25-U 为模块库筛选和检查器页签增加 selected 视觉状态，M25-V 将文档 dirty 状态呈现在共享顶栏，并由 visual probe 验证切换/恢复 | 真实输入设备/窗口生命周期、快捷键冲突和多预设 bank 的音频图原子替换 |
+| 11 | 保存/读取当前链路配置 | 已验证（核心文件层） | `src/content/preset.*`、schema v1/v2、主题/MIDI 扩展和 Save/Open 测试；M25-R 为 Standalone 关闭、打开、新建、默认和 `Ctrl+1` 替换增加保存/放弃/取消保护，M25-S 进一步覆盖顶部预设下拉选择，M25-V 将当前预设路径/未保存标记显示到顶栏并由 visual probe 验证编辑后的 `*` 与恢复，M25-X 增加显式预设目录逐项校验与 dirty guard 加载；保存取消/失败保留当前文档和原预设选择；打开/导入在 runtime 准备失败时仍恢复原文档路径、脏状态和外部包上下文 | 完整任意拓扑、模块包引用失效、版本迁移和独立程序端到端回归 |
+| 12 | 快捷键和界面切换配置 | 部分完成 | `shortcut_registry`、`preset_controller`、托管 UI contract；M25-Q 将无修饰 `T` 主题切换、`Ctrl+S`/`Ctrl+Shift+S`/`Ctrl+O`/`Ctrl+1` 统一到共享 Standalone/VST3 `RigEditorView`，visual probe 覆盖修饰键不误触发；M25-U 为模块库筛选和检查器页签增加 selected 视觉状态，M25-V 将文档 dirty 状态呈现在共享顶栏，M25-X 增加预设库目录校验、界面加载按钮和 `Ctrl+PageUp/PageDown` 相邻切换 | 真实输入设备/窗口生命周期、快捷键冲突、多预设 bank 的音频图原子替换和完整迁移策略 |
 | 13 | MIDI 控制 | 部分完成 | WinMM 输入、无锁队列、CC/Program Change 映射与测试；C# 共享 UI 已通过 C ABI 支持 MIDI 目标枚举、CC Learn/取消、绑定删除/清空和 MIDI Bank 目录导入，按排序后的 `.srig` 文件自动建立 Program Change `0..N-1` 绑定并在共享映射列表显示；M25-O 新增独立 MIDI 生命周期 view，Standalone/VST3 共享按钮按 open/learn 状态门禁；M25-T 在 MIDI 打开期间锁定设备选择和刷新入口；C ABI/C# startup contract 已覆盖闭合状态 | 独立程序真实设备断连/溢出硬件演练、更多 MIDI 通道策略和图参数实时发布 |
 | 14 | 外部标准化主题 | 已验证（解析与默认主题） | `src/content/theme.*`、外部主题 parser 和测试；主题文件在读取前限制为 4 MiB，并限制颜色/指标集合与字符串长度，超限时保持当前主题 | 独立程序全控件渲染、版本迁移和更完整恶意输入审计 |
 | 15 | 内置深色/浅色主题 | 已验证 | `DefaultDarkTheme`、`DefaultLightTheme` 和 UI/ABI 状态 | 真实窗口全组件视觉回归 |
@@ -46,6 +46,8 @@
 补充：M25-U 将模块库筛选和检查器页签的 selected 状态纳入共享 Avalonia 视觉样式与 Standalone visual probe；探针会切换“模拟/端口”并恢复原始筛选、页签和视觉 fingerprint。M25-V 将 `FileStatus` 纳入 Standalone 顶栏与视觉 fingerprint；探针会验证编辑后 `*` 出现，并恢复原始文档状态。
 
 补充：M25-W 增加显式 `clear_selection` C ABI、空白画布清除选中、节点/拓扑/MIDI 操作入口的可用态与探针状态隔离；无选中节点、无连接或无 MIDI 绑定时对应入口不再依赖点击后的错误提示。
+
+补充：M25-X 增加共享预设库状态：用户显式选择目录后最多扫描 128 个 `.srig`，每个条目由独立 backend 会话校验；无效文件保留在列表中但不可加载。加载选中项复用 `ConfirmPendingChangesAsync`，打开成功后将当前源路径映射回库内条目；`Ctrl+PageUp/PageDown` 只在已校验条目间循环。Standalone visual probe 与 C# contract 覆盖有效/无效条目、按钮门禁、加载和状态恢复；启动时不自动扫描本地目录。
 
 ## 白盒专用覆盖
 

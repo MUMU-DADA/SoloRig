@@ -591,6 +591,42 @@
                 </StackPanel>
               </Expander>
 
+              <Expander Classes="srg-expander" Header="预设库" IsExpanded="False">
+                <StackPanel Spacing="7" Margin="0,8,0,0">
+                  <TextBlock Text="显式选择一个目录后，Standalone 会校验其中的 .srig 文件。"
+                             Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding PresetLibraryDirectoryText}" Classes="srg-muted" FontSize="9"
+                             TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Button Classes="srg-button" Content="选择目录" Click="LoadPresetLibraryClick" />
+                    <Button Classes="srg-button" Content="刷新" IsEnabled="{Binding CanRefreshPresetLibrary}"
+                            Click="RefreshPresetLibraryClick" />
+                  </StackPanel>
+                  <ListBox x:Name="PresetLibraryList" Classes="srg-list" Height="128"
+                           ItemsSource="{Binding PresetLibraryEntries}"
+                           SelectedIndex="{Binding SelectedPresetLibraryIndex, Mode=TwoWay}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate>
+                        <Border Padding="7" Background="{DynamicResource SrgControlBrush}"
+                                BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1" CornerRadius="6">
+                          <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding DisplayName}" Classes="srg-text" FontSize="10"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding DetailText}" Classes="srg-muted" FontSize="9"
+                                       TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <Button x:Name="PresetLibraryLoadButton" Classes="srg-button primary" Content="加载选中预设"
+                          IsEnabled="{Binding CanLoadSelectedPresetLibraryEntry}"
+                          Click="LoadSelectedPresetLibraryClick" />
+                  <TextBlock Text="Ctrl+PageUp / Ctrl+PageDown 可在已校验的预设间切换。"
+                             Classes="srg-muted" FontSize="9" TextWrapping="Wrap" />
+                </StackPanel>
+              </Expander>
+
               <Border Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1" CornerRadius="7" Padding="9">
                 <TextBlock Text="C# 界面只负责交互与控制线程；ASIO、MIDI、实时白盒处理由原生后端执行。"
                            Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />

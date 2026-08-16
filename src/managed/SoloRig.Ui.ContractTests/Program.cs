@@ -210,6 +210,7 @@ var corruptPath = Path.Combine(Path.GetTempPath(), "solorig-m2-corrupt.srig");
 var themePath = Path.Combine(Path.GetTempPath(), "solorig-m25-contract-theme.json");
 var resourcePath = Path.Combine(Path.GetTempPath(), "solorig-m5-resource.nam");
 var midiBankDirectory = Path.Combine(Path.GetTempPath(), "solorig-m2-midi-bank");
+var presetLibraryDirectory = Path.Combine(Path.GetTempPath(), "solorig-m25-preset-library");
 var skinPackageDirectory = Path.Combine(Path.GetTempPath(), "solorig-m25-skin-package");
 try
 {
@@ -219,6 +220,10 @@ try
     if (Directory.Exists(midiBankDirectory))
     {
         Directory.Delete(midiBankDirectory, true);
+    }
+    if (Directory.Exists(presetLibraryDirectory))
+    {
+        Directory.Delete(presetLibraryDirectory, true);
     }
     if (Directory.Exists(skinPackageDirectory))
     {
@@ -314,6 +319,19 @@ try
         "bypass state reaches the shared node card projection");
     Require(viewModel.SaveToPath(path), "explicit Save writes a validated preset");
     Require(!viewModel.IsDirty, "successful Save clears dirty state");
+    Directory.CreateDirectory(presetLibraryDirectory);
+    File.Copy(path, Path.Combine(presetLibraryDirectory, "01-default.srig"), true);
+    File.Copy(path, Path.Combine(presetLibraryDirectory, "02-default-copy.srig"), true);
+    File.WriteAllText(Path.Combine(presetLibraryDirectory, "99-invalid.srig"), "{not-json");
+    Require(viewModel.LoadPresetLibrary(presetLibraryDirectory), "explicit preset library directory loads");
+    Require(viewModel.PresetLibraryEntries.Count == 3 && viewModel.PresetLibraryEntries.Count(entry => entry.IsValid) == 2,
+        "preset library scans valid and invalid .srig files with deterministic ordering");
+    var invalidLibraryEntry = viewModel.PresetLibraryEntries.Single(entry => !entry.IsValid);
+    Require(!viewModel.OpenPresetLibraryEntry(invalidLibraryEntry), "invalid preset library entry is rejected before load");
+    var validLibraryEntry = viewModel.PresetLibraryEntries.First(entry => entry.IsValid);
+    Require(viewModel.OpenPresetLibraryEntry(validLibraryEntry), "selected preset library entry opens through the shared backend");
+    Require(viewModel.Snapshot.SourcePath == validLibraryEntry.SourcePath && !viewModel.IsDirty,
+        "preset library load updates the current source path and keeps a clean document");
     Directory.CreateDirectory(midiBankDirectory);
     File.Copy(path, Path.Combine(midiBankDirectory, "01-default.srig"), true);
     Require(viewModel.ImportMidiBank(midiBankDirectory), "MIDI Bank directory import uses the C ABI");
@@ -352,6 +370,10 @@ finally
     if (Directory.Exists(midiBankDirectory))
     {
         Directory.Delete(midiBankDirectory, true);
+    }
+    if (Directory.Exists(presetLibraryDirectory))
+    {
+        Directory.Delete(presetLibraryDirectory, true);
     }
     if (Directory.Exists(skinPackageDirectory))
     {

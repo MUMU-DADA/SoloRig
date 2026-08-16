@@ -494,6 +494,69 @@ public sealed partial class RigEditorView : UserControl
         return probePassed && restored;
     }
 
+    public bool ProbePresetLibrary()
+    {
+        if (viewModel is null || PresetLibraryList is null || PresetLibraryLoadButton is null)
+        {
+            return false;
+        }
+
+        var originalDirectory = viewModel.PresetLibraryDirectory;
+        var originalIndex = viewModel.SelectedPresetLibraryIndex;
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        var probeDirectory = Path.Combine(Path.GetTempPath(), $"solorig-preset-library-probe-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(probeDirectory);
+        var firstPath = Path.Combine(probeDirectory, "01-clean.srig");
+        var secondPath = Path.Combine(probeDirectory, "02-edited.srig");
+        var invalidPath = Path.Combine(probeDirectory, "99-invalid.srig");
+        var probePassed = false;
+        try
+        {
+            using (var seed = new BackendSession())
+            {
+                seed.Save(firstPath);
+                seed.SetParameter("drive-1.drive", 5.0F);
+                seed.Save(secondPath);
+            }
+            File.WriteAllText(invalidPath, "{not-json");
+
+            if (!viewModel.LoadPresetLibrary(probeDirectory) || PresetLibraryList.ItemCount != 3)
+            {
+                return false;
+            }
+            var invalidIndex = viewModel.PresetLibraryEntries
+                .Select((entry, index) => (entry, index))
+                .FirstOrDefault(item => !item.entry.IsValid).index;
+            viewModel.SelectedPresetLibraryIndex = invalidIndex;
+            var invalidGate = !viewModel.CanLoadSelectedPresetLibraryEntry && !PresetLibraryLoadButton.IsEnabled;
+            var validIndex = viewModel.PresetLibraryEntries
+                .Select((entry, index) => (entry, index))
+                .FirstOrDefault(item => item.entry.IsValid).index;
+            viewModel.SelectedPresetLibraryIndex = validIndex;
+            var validGate = viewModel.CanLoadSelectedPresetLibraryEntry && PresetLibraryLoadButton.IsEnabled;
+            probePassed = invalidGate && validGate && viewModel.PresetLibraryEntries.Count(entry => entry.IsValid) == 2;
+        }
+        catch
+        {
+            probePassed = false;
+        }
+        finally
+        {
+            if (string.IsNullOrWhiteSpace(originalDirectory))
+            {
+                viewModel.ClearPresetLibrary();
+            }
+            else if (viewModel.LoadPresetLibrary(originalDirectory))
+            {
+                viewModel.SelectedPresetLibraryIndex = originalIndex;
+            }
+            try { Directory.Delete(probeDirectory, true); } catch { }
+        }
+        return probePassed && BuildVisualRegressionFingerprint() == originalFingerprint &&
+               viewModel.SelectedPresetLibraryIndex == originalIndex &&
+               string.Equals(viewModel.PresetLibraryDirectory, originalDirectory, StringComparison.OrdinalIgnoreCase);
+    }
+
     private RenderedSurfaceFingerprint? CaptureRenderedSurface()
     {
         var topLevel = TopLevel.GetTopLevel(this);
@@ -544,7 +607,9 @@ public sealed partial class RigEditorView : UserControl
             $"images={node.Skin.HasKnobImage},{node.Skin.HasToggleImage},{node.Skin.HasFootswitchImage}:" +
             string.Join(",", node.Controls.Select(control =>
                 $"{control.Id}:{control.Value:0.######}:{control.KnobAngle:0.###}:{control.IsToggle}"))));
-        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};file={viewModel.FileStatus};filter={viewModel.ModuleCatalogFilter};inspector={viewModel.InspectorTab};resources={resources};nodes={nodes};connections={viewModel.CanvasConnections.Count}";
+        var library = string.Join("|", viewModel.PresetLibraryEntries.Select(entry =>
+            $"{entry.DisplayName}:{entry.IsValid}:{entry.SourcePath}"));
+        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};file={viewModel.FileStatus};filter={viewModel.ModuleCatalogFilter};inspector={viewModel.InspectorTab};library={viewModel.PresetLibraryDirectory}:{viewModel.SelectedPresetLibraryIndex}:{library};resources={resources};nodes={nodes};connections={viewModel.CanvasConnections.Count}";
     }
 
     private void NodeFootswitchClick(object? sender, RoutedEventArgs args)
@@ -598,6 +663,12 @@ public sealed partial class RigEditorView : UserControl
         if (!hasModifier && key == Key.T)
         {
             viewModel.ToggleTheme(markDirty);
+            return true;
+        }
+
+        if ((modifiers & KeyModifiers.Control) != 0 && (key == Key.PageUp || key == Key.PageDown))
+        {
+            _ = SelectAdjacentPresetAsync(key == Key.PageUp ? -1 : 1);
             return true;
         }
 
@@ -915,6 +986,9 @@ public sealed partial class RigEditorView : UserControl
     private void DeleteMidiBindingClick(object? sender, RoutedEventArgs args) => viewModel?.DeleteSelectedMidiBinding();
     private void ClearMidiBindingsClick(object? sender, RoutedEventArgs args) => viewModel?.ClearMidiBindings();
     private void ImportMidiBankClick(object? sender, RoutedEventArgs args) => _ = ImportMidiBankAsync();
+    private void LoadPresetLibraryClick(object? sender, RoutedEventArgs args) => _ = LoadPresetLibraryAsync();
+    private void RefreshPresetLibraryClick(object? sender, RoutedEventArgs args) => viewModel?.RefreshPresetLibrary();
+    private void LoadSelectedPresetLibraryClick(object? sender, RoutedEventArgs args) => _ = LoadSelectedPresetLibraryAsync();
 
     private void NodeOutputEndpointPressed(object? sender, PointerPressedEventArgs args)
     {
@@ -1039,6 +1113,49 @@ public sealed partial class RigEditorView : UserControl
         viewModel.ImportMidiBank(path);
     }
 
+    private async Task LoadPresetLibraryAsync()
+    {
+        if (viewModel is null)
+        {
+            return;
+        }
+        var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
+        if (storage is null)
+        {
+            viewModel.ReportFileDialogCancelled("Preset library load");
+            return;
+        }
+        var folders = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "选择 SoloRig 预设库目录",
+            AllowMultiple = false
+        });
+        var path = folders.FirstOrDefault()?.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            viewModel.ReportFileDialogCancelled("Preset library load");
+            return;
+        }
+        viewModel.LoadPresetLibrary(path);
+    }
+
+    private async Task LoadSelectedPresetLibraryAsync()
+    {
+        if (viewModel is null || !viewModel.CanLoadSelectedPresetLibraryEntry)
+        {
+            return;
+        }
+        var entry = viewModel.SelectedPresetLibraryEntry;
+        if (!await ConfirmPendingChangesAsync())
+        {
+            return;
+        }
+        if (!viewModel.OpenPresetLibraryEntry(entry))
+        {
+            PresetLibraryList.SelectedIndex = viewModel.SelectedPresetLibraryIndex;
+        }
+    }
+
     private async Task OpenAsync()
     {
         if (viewModel is null)
@@ -1087,6 +1204,38 @@ public sealed partial class RigEditorView : UserControl
         if (!await ConfirmPendingChangesAsync() || !viewModel.SelectPreset(presetName))
         {
             PresetSelector.SelectedItem = viewModel.SelectedPresetName;
+        }
+    }
+
+    private async Task SelectAdjacentPresetAsync(int direction)
+    {
+        if (viewModel is null || viewModel.PresetLibraryEntries.Count == 0)
+        {
+            return;
+        }
+        var validIndexes = viewModel.PresetLibraryEntries
+            .Select((entry, index) => (entry, index))
+            .Where(item => item.entry.IsValid)
+            .Select(item => item.index)
+            .ToArray();
+        if (validIndexes.Length == 0)
+        {
+            viewModel.ReportInteractionStatus("预设库中没有可加载的预设");
+            return;
+        }
+        var currentPosition = Array.IndexOf(validIndexes, viewModel.SelectedPresetLibraryIndex);
+        var nextPosition = currentPosition < 0
+            ? (direction > 0 ? 0 : validIndexes.Length - 1)
+            : (currentPosition + direction + validIndexes.Length) % validIndexes.Length;
+        var nextIndex = validIndexes[nextPosition];
+        if (!await ConfirmPendingChangesAsync())
+        {
+            return;
+        }
+        viewModel.SelectedPresetLibraryIndex = nextIndex;
+        if (!viewModel.OpenPresetLibraryEntry(viewModel.SelectedPresetLibraryEntry))
+        {
+            viewModel.SelectedPresetLibraryIndex = currentPosition >= 0 ? validIndexes[currentPosition] : -1;
         }
     }
 
