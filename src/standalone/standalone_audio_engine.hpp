@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -78,7 +79,12 @@ private:
                                     HWND system_window,
                                     RigPreset preset,
                                     StandaloneAudioRouting routing);
+    [[nodiscard]] bool PrepareRuntimeCandidate(const RigPreset& preset,
+                                               const AudioFormat& format,
+                                               PreparedPreset& output);
     [[nodiscard]] bool BuildRuntime(const RigPreset& preset, const AudioFormat& format);
+    [[nodiscard]] bool QueueRuntimeTransition(RigPreset preset);
+    void ReclaimCompletedTransition() noexcept;
     void ReleaseRuntime() noexcept;
     void SetStatus(std::string status);
     void SetErrorStatus(std::string prefix);
@@ -96,7 +102,8 @@ private:
     AsioDeviceCoordinator asio_coordinator_;
     RigModuleRegistry module_registry_;
     RealtimePresetMailbox mailbox_;
-    std::optional<PreparedPreset> prepared_runtime_;
+    std::unique_ptr<PreparedPreset> prepared_runtime_;
+    std::unique_ptr<PreparedPreset> queued_runtime_;
     std::optional<RigRuntime> rig_runtime_;
     // Control-thread snapshot used to restore the previous graph when a
     // stopped-boundary preset reload fails validation or preparation.

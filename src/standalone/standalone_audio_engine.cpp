@@ -4,6 +4,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <new>
 #include <numbers>
 #include <utility>
 
@@ -212,10 +213,20 @@ bool StandaloneAudioEngine::SetNodeBypassed(std::string_view instance_id, bool b
         return false;
     }
     node->bypassed = bypassed;
+    ReclaimCompletedTransition();
+    if (queued_runtime_ != nullptr) {
+        error_text_ = "audio graph transition is still in progress";
+        SetErrorStatus("Standalone graph bypass rejected");
+        return false;
+    }
+    if (prepared_runtime_ != nullptr && rig_runtime_.has_value() && mailbox_.Active() != nullptr &&
+        mailbox_.Pending() == nullptr) {
+        return QueueRuntimeTransition(std::move(candidate));
+    }
     if (asio_coordinator_.IsOpen()) {
         return ReloadPreset(std::move(candidate));
     }
-    if (format_.Validate().size() != 0U || !prepared_runtime_.has_value() || !rig_runtime_.has_value()) {
+    if (format_.Validate().size() != 0U || prepared_runtime_ == nullptr || !rig_runtime_.has_value()) {
         return false;
     }
     const auto previous = *active_preset_;
@@ -229,6 +240,42 @@ bool StandaloneAudioEngine::SetNodeBypassed(std::string_view instance_id, bool b
     static_cast<void>(BuildRuntime(previous, format_));
     SetErrorStatus("Standalone graph bypass change failed; previous graph restored");
     return false;
+}
+
+bool StandaloneAudioEngine::QueueRuntimeTransition(RigPreset preset) {
+    if (format_.Validate().size() != 0U || prepared_runtime_ == nullptr || !rig_runtime_.has_value() ||
+        mailbox_.Active() == nullptr || mailbox_.Pending() != nullptr || queued_runtime_ != nullptr) {
+        return false;
+    }
+    PreparedPreset candidate;
+    if (!PrepareRuntimeCandidate(preset, format_, candidate)) {
+        error_text_ = "selected preset could not be prepared for a running graph transition";
+        SetErrorStatus("Standalone graph transition failed");
+        return false;
+    }
+    try {
+        queued_runtime_ = std::make_unique<PreparedPreset>(std::move(candidate));
+    } catch (const std::bad_alloc&) {
+        error_text_ = "not enough memory to queue the running graph transition";
+        SetErrorStatus("Standalone graph transition failed");
+        return false;
+    }
+    mailbox_.Submit(*queued_runtime_);
+    active_preset_ = queued_runtime_->preset;
+    error_text_.clear();
+    SetStatus("Graph transition queued without stopping audio");
+    return true;
+}
+
+void StandaloneAudioEngine::ReclaimCompletedTransition() noexcept {
+    if (queued_runtime_ == nullptr || mailbox_.Active() != queued_runtime_.get()) {
+        return;
+    }
+    // RigRuntime has committed the new graph at an audio control point. The
+    // old graph is no longer referenced by the realtime path, so ownership
+    // can move without changing the prepared object's address.
+    prepared_runtime_.reset();
+    prepared_runtime_ = std::move(queued_runtime_);
 }
 
 bool StandaloneAudioEngine::RecoverAudio() {
@@ -365,10 +412,18 @@ bool StandaloneAudioEngine::RunExternalModulePackageRuntimeSelfTest() {
             std::filesystem::remove_all(directory, cleanup);
             return false;
         }
-        input[0] = 1.0F;
-        output[0] = 0.0F;
-        engine.ProcessBlock(inputs, outputs, 1U, 1U);
-        const auto bypassed = std::fabs(output[0] - 1.0F) < 0.0001F;
+        const auto queued_without_stop = engine.StatusText().find("without stopping audio") != std::string::npos;
+        bool saw_transition = false;
+        for (std::size_t block = 0U; block < 32U; ++block) {
+            input.fill(0.0F);
+            output.fill(0.0F);
+            input[0] = 1.0F;
+            engine.ProcessBlock(inputs, outputs, 1U, 64U);
+            saw_transition = saw_transition || (output[0] > 0.2501F && output[0] < 0.9999F);
+        }
+        engine.ReclaimCompletedTransition();
+        const auto bypassed = std::fabs(output[0] - 1.0F) < 0.0001F &&
+            engine.queued_runtime_ == nullptr;
         if (!engine.active_preset_.has_value() || engine.active_preset_->preset_id != preset.preset_id) {
             std::filesystem::remove_all(directory, cleanup);
             return false;
@@ -420,14 +475,17 @@ bool StandaloneAudioEngine::RunExternalModulePackageRuntimeSelfTest() {
         direct_engine.ProcessBlock(direct_inputs, direct_outputs, 1U, 2U);
         direct_engine.ReleaseRuntime();
         std::filesystem::remove_all(directory, cleanup);
-        return valid && bypassed && std::isfinite(direct_output[0]) && direct_output[0] > 0.5F;
+        return valid && queued_without_stop && saw_transition && bypassed &&
+            std::isfinite(direct_output[0]) && direct_output[0] > 0.5F;
     } catch (...) {
         std::filesystem::remove_all(directory, cleanup);
         return false;
     }
 }
 
-bool StandaloneAudioEngine::BuildRuntime(const RigPreset& preset, const AudioFormat& format) {
+bool StandaloneAudioEngine::PrepareRuntimeCandidate(const RigPreset& preset,
+                                                    const AudioFormat& format,
+                                                    PreparedPreset& output) {
     try {
         auto candidate = preset;
         if (candidate.preset_id.empty()) {
@@ -476,10 +534,22 @@ bool StandaloneAudioEngine::BuildRuntime(const RigPreset& preset, const AudioFor
         if (std::holds_alternative<RigBuildError>(built)) {
             return false;
         }
-        auto built_preset = std::get<PreparedPreset>(built);
+        output = std::get<PreparedPreset>(built);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool StandaloneAudioEngine::BuildRuntime(const RigPreset& preset, const AudioFormat& format) {
+    try {
+        PreparedPreset built_preset;
+        if (!PrepareRuntimeCandidate(preset, format, built_preset)) {
+            return false;
+        }
         processing_input_ = AudioBuffer(format.channel_count, format.max_block_size);
         processing_output_ = AudioBuffer(format.channel_count, format.max_block_size);
-        prepared_runtime_.emplace(std::move(built_preset));
+        prepared_runtime_ = std::make_unique<PreparedPreset>(std::move(built_preset));
         rig_runtime_.emplace(mailbox_, format);
         if (!processing_input_.IsValid() || !processing_output_.IsValid() || !rig_runtime_->Prepare()) {
             ReleaseRuntime();
@@ -502,6 +572,7 @@ void StandaloneAudioEngine::ReleaseRuntime() noexcept {
     } else {
         mailbox_.ResetForReconfigure();
     }
+    queued_runtime_.reset();
     prepared_runtime_.reset();
 }
 
