@@ -30,7 +30,7 @@ public sealed class App : Application
                     attempts++;
                     if (mainWindow.HasStandaloneVisualContent && mainWindow.ProbeExternalTheme() &&
                         mainWindow.ProbeThemeSwitch() && mainWindow.ProbeParameterBinding() &&
-                        mainWindow.ProbeDpiScaling())
+                        mainWindow.ProbeDpiScaling() && mainWindow.ProbeRenderedSurface())
                     {
                         probe.Stop();
                         desktop.Shutdown(0);

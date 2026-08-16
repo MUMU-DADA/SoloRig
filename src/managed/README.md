@@ -8,7 +8,7 @@ VST3 Controller 通过 bundle 内标准布局的 hostfxr/runtime 加载同一 So
 
 - `SoloRig.Ui`：不依赖 Avalonia 的共享 ViewModel 和 `BackendSession`。它只通过稳定 C ABI 获取不可变快照，并完成 DPI 坐标投影、节点选择/拖拽吸附、参数/主题编辑和显式 Save/Open 的事务状态。
 - `SoloRig.Ui.Avalonia`：可被 Standalone 和 VST3 `IPlugView` 宿主复用的 `RigEditorView` 控件；界面代码不再绑定到 Standalone 窗口壳。
-- `SoloRig.Standalone`：C# Avalonia 桌面程序壳，承载共享 `RigEditorView`，显示模块目录/搜索、节点添加/删除/复制、连接反馈、连接线、节点卡片、参数编辑、主题切换、预设列表/新建/快捷默认、打开/保存/另存为、性能/延迟、显式资源识别和取消/错误状态。`--standalone-visual-probe` 检查真实窗口并自动退出。
+- `SoloRig.Standalone`：C# Avalonia 桌面程序壳，承载共享 `RigEditorView`，显示模块目录/搜索、节点添加/删除/复制、连接反馈、连接线、节点卡片、参数编辑、主题切换、预设列表/新建/快捷默认、打开/保存/另存为、性能/延迟、显式资源识别和取消/错误状态。`--standalone-visual-probe` 检查真实窗口、跨 DPI 几何和实际 PNG 渲染面并自动退出。
 - `SoloRig.Ui.ContractTests`：无测试框架依赖的端到端契约冒烟，验证 C# → P/Invoke → C++ 的布局、参数、模块目录、事务编辑、主题、性能、显式资源导入、预设快捷切换、Save/Open 往返以及失败保持状态。
 
 当前机器已有 Avalonia 11.0.10 本地包缓存。离线构建示例：

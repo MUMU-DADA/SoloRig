@@ -4,15 +4,19 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using SoloRig.Ui;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace SoloRig.Ui.Avalonia;
 
 public sealed partial class RigEditorView : UserControl
 {
+    private sealed record RenderedSurfaceFingerprint(int Width, int Height, string Sha256, int PngBytes);
+
     private sealed record ThemePalette(
         string Window,
         string Topbar,
@@ -254,6 +258,81 @@ public sealed partial class RigEditorView : UserControl
     }
 
     public bool ProbeDpiScaling() => viewModel is not null && viewModel.ProbeDpiScaling();
+
+    public bool ProbeRenderedSurface()
+    {
+        if (viewModel is null || !HasStandaloneVisualContent || Bounds.Width <= 0 || Bounds.Height <= 0)
+        {
+            return false;
+        }
+
+        var original = CaptureRenderedSurface();
+        var repeated = CaptureRenderedSurface();
+        if (original is null || repeated is null || original != repeated)
+        {
+            return false;
+        }
+
+        var originalDark = viewModel.DarkTheme;
+        if (!viewModel.ToggleTheme())
+        {
+            return false;
+        }
+
+        try
+        {
+            var switched = CaptureRenderedSurface();
+            if (switched is null || switched == original || !viewModel.ToggleTheme() ||
+                viewModel.DarkTheme != originalDark)
+            {
+                return false;
+            }
+            return CaptureRenderedSurface() == original;
+        }
+        finally
+        {
+            if (viewModel.DarkTheme != originalDark)
+            {
+                viewModel.ToggleTheme();
+            }
+        }
+    }
+
+    private RenderedSurfaceFingerprint? CaptureRenderedSurface()
+    {
+        var topLevel = TopLevel.GetTopLevel(this);
+        var renderScale = topLevel?.RenderScaling ?? 1.0;
+        if (!double.IsFinite(renderScale) || renderScale <= 0 ||
+            !double.IsFinite(Bounds.Width) || !double.IsFinite(Bounds.Height))
+        {
+            return null;
+        }
+
+        var pixelSize = new PixelSize(
+            Math.Max(1, (int)Math.Ceiling(Bounds.Width * renderScale)),
+            Math.Max(1, (int)Math.Ceiling(Bounds.Height * renderScale)));
+        try
+        {
+            using var bitmap = new RenderTargetBitmap(pixelSize, new Vector(96 * renderScale, 96 * renderScale));
+            bitmap.Render(this);
+            using var stream = new MemoryStream();
+            bitmap.Save(stream);
+            var png = stream.ToArray();
+            if (png.Length < 32 || png[0] != 0x89 || png[1] != 0x50 || png[2] != 0x4E || png[3] != 0x47)
+            {
+                return null;
+            }
+            return new RenderedSurfaceFingerprint(
+                pixelSize.Width,
+                pixelSize.Height,
+                Convert.ToHexString(SHA256.HashData(png)),
+                png.Length);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     private string BuildVisualRegressionFingerprint()
     {
