@@ -375,13 +375,21 @@ try {
     }
     Invoke-Tool -Layer "CMake build" -Executable $cmake -Arguments $cmakeBuildArguments
 
+    # A pre-M24-E incremental build may still contain the retired native
+    # executable. Remove only that exact generated artifact before publishing
+    # the C# standalone, so an old cache cannot look like a second product.
+    $legacyStandaloneArtifacts = @(Find-Artifact -Root $outputBuildRoot -Name "SoloRigStandalone.exe")
+    foreach ($legacyStandaloneArtifact in $legacyStandaloneArtifacts) {
+        if ($null -ne $legacyStandaloneArtifact) {
+            Remove-Item -LiteralPath $legacyStandaloneArtifact.FullName -Force
+        }
+    }
+
     $backendDll = Find-Artifact -Root $outputBuildRoot -Name "SoloRigBackend.dll"
-    $standaloneExe = Find-Artifact -Root $outputBuildRoot -Name "SoloRigStandalone.exe"
     $validatorExe = Find-Artifact -Root $outputBuildRoot -Name "validator.exe"
     $vst3Bundle = Find-Artifact -Root $outputBuildRoot -Name "SoloRig.vst3" -Directory
     foreach ($artifact in @(
         @{ Name = "SoloRigBackend.dll"; Value = $backendDll },
-        @{ Name = "SoloRigStandalone.exe"; Value = $standaloneExe },
         @{ Name = "validator.exe"; Value = $validatorExe },
         @{ Name = "SoloRig.vst3"; Value = $vst3Bundle }
     )) {
@@ -428,6 +436,10 @@ try {
     Invoke-Tool -Layer ".NET Avalonia Release build" -Executable $dotnet -Arguments @(
         "publish", $standaloneProject, "-c", "Release", "--no-restore", "-o", $managedStandaloneOutput
     )
+    $managedStandaloneExe = Find-Artifact -Root $managedStandaloneOutput -Name "SoloRig.Standalone.exe"
+    if ($null -eq $managedStandaloneExe) {
+        Fail-Layer -Layer ".NET Avalonia artifacts" -Message "C# Standalone 发布目录缺少 SoloRig.Standalone.exe。"
+    }
     Invoke-Tool -Layer ".NET VST3 C# UI bridge Release build" -Executable $dotnet -Arguments @(
         "publish", $vst3UiProject, "-c", "Release", "--no-restore", "-o", $managedVst3UiOutput
     )
@@ -486,7 +498,7 @@ try {
         testsExecuted = (-not $SkipTests)
         artifacts = [ordered]@{
             backend = $backendDll.FullName
-            standalone = $standaloneExe.FullName
+            standalone = $managedStandaloneExe.FullName
             validator = $validatorExe.FullName
             vst3 = $vst3Bundle.FullName
             managedStandalone = $managedStandaloneOutput

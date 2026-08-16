@@ -25,7 +25,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Incremental
 
 首次从旧生成器切换到 Ninja 时，`-Incremental` 会自动执行一次兼容性重建；后续运行才复用缓存。默认并行度由构建工具按机器配置决定，也可用 `-ParallelJobs 8` 显式限制。临时浅克隆因源码目录每次变化，不支持 `-Incremental`。
 
-产物位于 `build`：native/Win32/VST3 在 `build\bin` 与 `build\VST3\Release`，Avalonia 发布输出在 `build\managed`。`build\build.log` 同步记录每个外部命令的标准输出和错误输出，`build\SoloRigBuildManifest.json` 记录源码模式、生成器、产物位置及 `testsExecuted`。
+产物位于 `build`：native backend/ASIO probe 在 `build\bin`，VST3 在 `build\VST3\Release`，C# Avalonia Standalone 在 `build\managed\standalone`，共享 VST3 C# UI 在 `build\managed\vst3-ui`。旧 Direct2D 窗口只作为 Windows 回归夹具编译，不再生成或交付第二个独立程序。`build\build.log` 同步记录每个外部命令的标准输出和错误输出，`build\SoloRigBuildManifest.json` 记录源码模式、生成器、产物位置及 `testsExecuted`。
 
 离线构建使用本机 `%USERPROFILE%\.nuget\packages` 缓存；缺少 CMake、Visual Studio x64 工具链、dotnet 或 NuGet 包时，脚本会以非零退出并标明失败层级。脚本不访问 MIDI/ASIO，也不会在默认启动时读写用户预设。
 

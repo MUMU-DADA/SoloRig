@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 
 option(SOLO_RIG_BUILD_VST3 "Build the SoloRig VST3 plug-in" ON)
-option(SOLO_RIG_BUILD_STANDALONE "Build the SoloRig Windows standalone editor" ON)
+option(SOLO_RIG_BUILD_STANDALONE "Build native support and diagnostic targets for the C# standalone" ON)
 
 set(NAM_CORE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/NeuralAmpModelerCore")
 file(GLOB NAM_CORE_SOURCES CONFIGURE_DEPENDS
@@ -181,25 +181,6 @@ if(WIN32)
 endif()
 
 if(WIN32 AND SOLO_RIG_BUILD_STANDALONE)
-    add_executable(SoloRigStandalone WIN32
-        src/standalone/main.cpp
-        src/standalone/windows_rig_window.cpp
-        src/standalone/midi_control_session.cpp
-        src/standalone/standalone_audio_engine.cpp
-    )
-    target_include_directories(SoloRigStandalone PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-    target_compile_definitions(SoloRigStandalone PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_link_libraries(SoloRigStandalone PRIVATE solo_rig_core d2d1 dwrite windowscodecs user32 gdi32 comdlg32)
-    set_target_properties(SoloRigStandalone PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-        OUTPUT_NAME "SoloRigStandalone"
-    )
-    add_custom_command(TARGET SoloRigStandalone POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-            "$<TARGET_FILE_DIR:SoloRigStandalone>/resources"
-    )
-
     add_executable(solo_rig_asio_probe
         tools/asio_probe.cpp
         src/standalone/standalone_audio_engine.cpp
@@ -213,6 +194,9 @@ if(WIN32 AND SOLO_RIG_BUILD_STANDALONE)
     enable_solo_rig_warnings(solo_rig_asio_probe)
 
     if(BUILD_TESTING)
+        # The retired Direct2D window remains a native regression fixture only.
+        # The shipped standalone product is the C# Avalonia application built by
+        # build.ps1; this target must not become a second production UI again.
         add_executable(solo_rig_windows_ui_tests
             tests/test_main.cpp
             tests/windows_ui_smoke_tests.cpp
