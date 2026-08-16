@@ -35,6 +35,11 @@ struct SoloRigSnapshot {
     std::string midi_status;
     std::vector<std::vector<std::pair<float, float>>> parameter_ranges;
     std::vector<std::array<std::string, 4>> node_skin_images_utf8;
+    bool audio_open{};
+    bool audio_running{};
+    bool audio_reset_requested{};
+    bool audio_dropout_reported{};
+    double audio_sample_rate_changed_to{};
 };
 
 namespace {
@@ -284,6 +289,13 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_snapshot_create(
         snapshot->midi_status = backend->midi_session != nullptr
             ? backend->midi_session->StatusText()
             : "MIDI control unavailable";
+        if (backend->audio_engine != nullptr) {
+            snapshot->audio_open = backend->audio_engine->IsOpen();
+            snapshot->audio_running = backend->audio_engine->IsRunning();
+            snapshot->audio_reset_requested = backend->audio_engine->ResetRequested();
+            snapshot->audio_dropout_reported = backend->audio_engine->DropoutReported();
+            snapshot->audio_sample_rate_changed_to = backend->audio_engine->SampleRateChangedTo();
+        }
         *out_snapshot = snapshot.release();
         backend->last_error.clear();
         return SOLO_RIG_STATUS_OK;
@@ -327,6 +339,20 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_info(
     out_info->peak_cpu_percent = snapshot->scene.performance.peak_cpu_percent;
     out_info->measured_node_count = snapshot->scene.performance.measured_node_count;
     out_info->measurement_available = snapshot->scene.performance.measurement_available ? 1U : 0U;
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_audio_state(
+    const SoloRigSnapshot* snapshot,
+    SoloRigAudioStateView* out_state) {
+    if (snapshot == nullptr || out_state == nullptr) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    out_state->is_open = snapshot->audio_open ? 1U : 0U;
+    out_state->is_running = snapshot->audio_running ? 1U : 0U;
+    out_state->reset_requested = snapshot->audio_reset_requested ? 1U : 0U;
+    out_state->dropout_reported = snapshot->audio_dropout_reported ? 1U : 0U;
+    out_state->sample_rate_changed_to = snapshot->audio_sample_rate_changed_to;
     return SOLO_RIG_STATUS_OK;
 }
 

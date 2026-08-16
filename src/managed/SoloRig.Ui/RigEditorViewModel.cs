@@ -150,7 +150,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     private static BackendSnapshot EmptySnapshot => new(
         0, true, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty,
-        1280, 720, 1, false, [], [], [], 0, 0, "No external resource imported", 0, 0, 0, false);
+        1280, 720, 1, false, [], [], [], 0, 0, "No external resource imported", 0, 0, 0, false,
+        false, false, false, false, 0.0);
 
     public RigEditorViewModel()
     {
@@ -245,6 +246,11 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         ? "SoloRig"
         : $"SoloRig - {snapshot.PresetName}{(snapshot.Dirty ? " *" : string.Empty)}";
     public string AudioStatus => $"Audio: {snapshot.AudioStatus}";
+    public bool AudioOpen => snapshot.AudioOpen;
+    public bool AudioRunning => snapshot.AudioRunning;
+    public bool AudioResetRequested => snapshot.AudioResetRequested;
+    public bool AudioDropoutReported => snapshot.AudioDropoutReported;
+    public double AudioSampleRateChangedTo => snapshot.AudioSampleRateChangedTo;
     public string MidiStatus => $"MIDI: {snapshot.MidiStatus} | mappings: {snapshot.Bindings.Count}";
     public string FileStatus => string.IsNullOrWhiteSpace(snapshot.SourcePath)
         ? $"Preset: unsaved default{(snapshot.Dirty ? " *" : string.Empty)}"
@@ -263,6 +269,15 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         ? "白盒状态: unavailable"
         : $"白盒: {whiteboxStatus.RuntimeStatus} · 证据: {whiteboxStatus.EvidenceStatus}";
     public IReadOnlyList<AsioDriverSnapshot> AsioDrivers => asioDrivers;
+    public bool HasAsioDrivers => asioDrivers.Count > 0;
+    public bool HasSelectedAsio => SelectedAsioDriver is not null;
+    public bool CanOpenAsio => SelectedAsioDriver is not null &&
+        SelectedAsioDriver.InputChannelCount >= 2 && SelectedAsioDriver.OutputChannelCount >= 2 && !AudioOpen;
+    public bool CanStartAsio => AudioOpen && !AudioRunning;
+    public bool CanStopAsio => AudioRunning;
+    public bool CanCloseAsio => AudioOpen;
+    public bool CanRecoverAsio => AudioOpen &&
+        (AudioResetRequested || AudioDropoutReported || (double.IsFinite(AudioSampleRateChangedTo) && AudioSampleRateChangedTo > 0.0));
     public IReadOnlyList<MidiDeviceSnapshot> MidiDevices => midiDevices;
     public IReadOnlyList<MidiLearnTargetSnapshot> MidiLearnTargets => midiLearnTargets;
     public IReadOnlyList<BindingSnapshot> MidiBindings => snapshot.Bindings;
@@ -277,7 +292,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             {
                 UpdateAsioPortLists();
                 OnPropertiesChanged(nameof(SelectedAsioDriver), nameof(AsioRouteText),
-                    nameof(FixedInputPortText), nameof(FixedOutputPortText));
+                    nameof(FixedInputPortText), nameof(FixedOutputPortText), nameof(HasSelectedAsio),
+                    nameof(CanOpenAsio));
             }
         }
     }
@@ -467,7 +483,10 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
                 nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
                 nameof(Theme), nameof(ThemeDisplayName),
-                nameof(WindowTitle), nameof(AudioStatus), nameof(MidiStatus), nameof(FileStatus),
+                nameof(WindowTitle), nameof(AudioStatus), nameof(AudioOpen), nameof(AudioRunning),
+                nameof(AudioResetRequested), nameof(AudioDropoutReported), nameof(AudioSampleRateChangedTo),
+                nameof(CanOpenAsio), nameof(CanStartAsio), nameof(CanStopAsio), nameof(CanCloseAsio),
+                nameof(CanRecoverAsio), nameof(MidiStatus), nameof(FileStatus),
                 nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames), nameof(SelectedPresetName),
                 nameof(ModuleCatalog), nameof(ModuleCatalogSummaryText), nameof(FilteredModuleCatalog),
                 nameof(SelectedCatalogModule),
@@ -475,7 +494,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 nameof(SelectedMidiTargetIndex), nameof(SelectedMidiBindingIndex), nameof(MidiLearnStatus),
                 nameof(RealtimeContract),
                 nameof(RealtimeStatus), nameof(WhiteboxStatus), nameof(WhiteboxStatusText),
-                nameof(AsioRouteText), nameof(TunerStatus));
+                nameof(HasAsioDrivers), nameof(HasSelectedAsio), nameof(AsioRouteText), nameof(TunerStatus));
         }
         catch (Exception exception)
         {

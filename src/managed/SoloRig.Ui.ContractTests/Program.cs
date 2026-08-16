@@ -20,6 +20,11 @@ Require(viewModel.ProbeDpiScaling(), "shared geometry and hit testing remain ali
 Require(viewModel.MidiStatus.Contains("closed", StringComparison.OrdinalIgnoreCase), "startup MIDI remains closed");
 Require(viewModel.AsioDrivers.Count == 0 && viewModel.MidiDevices.Count == 0,
     "startup keeps ASIO and MIDI enumeration explicit and side-effect free");
+Require(!viewModel.AudioOpen && !viewModel.AudioRunning && !viewModel.HasAsioDrivers && !viewModel.HasSelectedAsio,
+    "startup exposes an explicit closed ASIO lifecycle without a selected device");
+Require(!viewModel.CanOpenAsio && !viewModel.CanStartAsio && !viewModel.CanStopAsio &&
+        !viewModel.CanCloseAsio && !viewModel.CanRecoverAsio,
+    "startup disables ASIO actions that have no valid device or lifecycle state");
 Require(!viewModel.TunerEnabled, "startup keeps the tuner disabled");
 Require(viewModel.MidiLearnTargets.Count >= 2, "MIDI learn exposes current parameter targets without opening hardware");
 Require(!viewModel.ArmSelectedMidiLearn(), "MIDI learn rejects an unopened MIDI input");

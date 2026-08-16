@@ -45,6 +45,16 @@ internal struct NativeSnapshotInfo
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct NativeAudioStateView
+{
+    public byte IsOpen;
+    public byte IsRunning;
+    public byte ResetRequested;
+    public byte DropoutReported;
+    public double SampleRateChangedTo;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal struct NativeNodeView
 {
     public IntPtr InstanceId;
@@ -207,6 +217,9 @@ internal static class NativeMethods
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_snapshot_info(IntPtr snapshot, out NativeSnapshotInfo info);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_snapshot_audio_state(IntPtr snapshot, out NativeAudioStateView state);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_snapshot_node(IntPtr snapshot, uint index, out NativeNodeView node);
@@ -559,7 +572,12 @@ public sealed record BackendSnapshot(
     double MeasuredCpuPercent,
     double PeakCpuPercent,
     uint MeasuredNodeCount,
-    bool MeasurementAvailable);
+    bool MeasurementAvailable,
+    bool AudioOpen,
+    bool AudioRunning,
+    bool AudioResetRequested,
+    bool AudioDropoutReported,
+    double AudioSampleRateChangedTo);
 
 public sealed class BackendSession : IDisposable
 {
@@ -626,6 +644,7 @@ public sealed class BackendSession : IDisposable
         try
         {
             Ensure(NativeMethods.solorig_snapshot_info(snapshot, out var info), "snapshot info");
+            Ensure(NativeMethods.solorig_snapshot_audio_state(snapshot, out var audioState), "snapshot audio state");
             var nodes = new List<NodeSnapshot>((int)info.NodeCount);
             for (uint nodeIndex = 0; nodeIndex < info.NodeCount; nodeIndex++)
             {
@@ -670,7 +689,9 @@ public sealed class BackendSession : IDisposable
                 info.ViewportHeight, info.DpiScale, info.Dirty != 0, nodes, connections, bindings,
                 info.TotalLatencySamples, info.EstimatedCpuPercent, NativeMethods.Utf8(info.ResourceStatus),
                 info.MeasuredCpuPercent, info.PeakCpuPercent, info.MeasuredNodeCount,
-                info.MeasurementAvailable != 0);
+                info.MeasurementAvailable != 0, audioState.IsOpen != 0, audioState.IsRunning != 0,
+                audioState.ResetRequested != 0, audioState.DropoutReported != 0,
+                audioState.SampleRateChangedTo);
         }
         finally
         {

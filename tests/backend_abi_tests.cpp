@@ -199,6 +199,13 @@ TEST_CASE("C ABI exposes catalog, transactional editing and performance snapshot
     REQUIRE(info.schema_version == 4U);
     REQUIRE(info.measured_node_count == 0U);
     REQUIRE(info.measurement_available == 0U);
+    SoloRigAudioStateView audio_state{};
+    REQUIRE(solorig_snapshot_audio_state(snapshot, &audio_state) == SOLO_RIG_STATUS_OK);
+    REQUIRE(audio_state.is_open == 0U);
+    REQUIRE(audio_state.is_running == 0U);
+    REQUIRE(audio_state.reset_requested == 0U);
+    REQUIRE(audio_state.dropout_reported == 0U);
+    REQUIRE(audio_state.sample_rate_changed_to == 0.0);
     SoloRigNodeView node{};
     REQUIRE(solorig_snapshot_node(snapshot, 0U, &node) == SOLO_RIG_STATUS_OK);
     REQUIRE(node.estimated_cpu_percent > 0.0);

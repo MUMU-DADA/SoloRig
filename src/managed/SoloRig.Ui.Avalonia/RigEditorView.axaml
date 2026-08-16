@@ -464,7 +464,8 @@
                   <TextBlock Text="{Binding AsioRouteText}" Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
                   <Button Classes="srg-button" Content="刷新 ASIO 设备" Click="RefreshAsioClick" />
                   <ComboBox x:Name="AsioDeviceSelector" Classes="srg-input" ItemsSource="{Binding AsioDrivers}"
-                            SelectedIndex="{Binding SelectedAsioDriverIndex, Mode=TwoWay}" PlaceholderText="选择 ASIO 设备">
+                            SelectedIndex="{Binding SelectedAsioDriverIndex, Mode=TwoWay}" IsEnabled="{Binding HasAsioDrivers}"
+                            PlaceholderText="选择 ASIO 设备">
                     <ComboBox.ItemTemplate>
                       <DataTemplate>
                         <StackPanel Spacing="1">
@@ -478,26 +479,26 @@
                     <TextBlock Text="输入 1" Classes="srg-muted" FontSize="9" />
                     <TextBlock Grid.Column="1" Text="输入 2" Classes="srg-muted" FontSize="9" />
                     <ComboBox Grid.Row="1" Classes="srg-input" ItemsSource="{Binding AsioInputPorts}"
-                              SelectedItem="{Binding SelectedInputChannel0, Mode=TwoWay}" FontSize="10" />
+                              SelectedItem="{Binding SelectedInputChannel0, Mode=TwoWay}" IsEnabled="{Binding HasSelectedAsio}" FontSize="10" />
                     <ComboBox Grid.Row="1" Grid.Column="1" Classes="srg-input" ItemsSource="{Binding AsioInputPorts}"
-                              SelectedItem="{Binding SelectedInputChannel1, Mode=TwoWay}" FontSize="10" />
+                              SelectedItem="{Binding SelectedInputChannel1, Mode=TwoWay}" IsEnabled="{Binding HasSelectedAsio}" FontSize="10" />
                   </Grid>
                   <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
                     <TextBlock Text="输出 1" Classes="srg-muted" FontSize="9" />
                     <TextBlock Grid.Column="1" Text="输出 2" Classes="srg-muted" FontSize="9" />
                     <ComboBox Grid.Row="1" Classes="srg-input" ItemsSource="{Binding AsioOutputPorts}"
-                              SelectedItem="{Binding SelectedOutputChannel0, Mode=TwoWay}" FontSize="10" />
+                              SelectedItem="{Binding SelectedOutputChannel0, Mode=TwoWay}" IsEnabled="{Binding HasSelectedAsio}" FontSize="10" />
                     <ComboBox Grid.Row="1" Grid.Column="1" Classes="srg-input" ItemsSource="{Binding AsioOutputPorts}"
-                              SelectedItem="{Binding SelectedOutputChannel1, Mode=TwoWay}" FontSize="10" />
+                              SelectedItem="{Binding SelectedOutputChannel1, Mode=TwoWay}" IsEnabled="{Binding HasSelectedAsio}" FontSize="10" />
                   </Grid>
                   <StackPanel Orientation="Horizontal" Spacing="4">
-                    <Button Classes="srg-button" Content="打开" Click="OpenAsioClick" />
-                    <Button Classes="srg-button" Content="启动" Click="StartAsioClick" />
-                    <Button Classes="srg-button" Content="停止" Click="StopAsioClick" />
-                    <Button Classes="srg-button" Content="关闭" Click="CloseAsioClick" />
+                    <Button Classes="srg-button" Content="打开" IsEnabled="{Binding CanOpenAsio}" Click="OpenAsioClick" />
+                    <Button Classes="srg-button" Content="启动" IsEnabled="{Binding CanStartAsio}" Click="StartAsioClick" />
+                    <Button Classes="srg-button" Content="停止" IsEnabled="{Binding CanStopAsio}" Click="StopAsioClick" />
+                    <Button Classes="srg-button" Content="关闭" IsEnabled="{Binding CanCloseAsio}" Click="CloseAsioClick" />
                   </StackPanel>
                   <StackPanel Orientation="Horizontal" Spacing="4">
-                    <Button Classes="srg-button" Content="恢复" Click="RecoverAsioClick" />
+                    <Button Classes="srg-button" Content="恢复" IsEnabled="{Binding CanRecoverAsio}" Click="RecoverAsioClick" />
                     <Button Classes="srg-button" Content="{Binding TunerStatus}" Click="ToggleTunerClick" />
                   </StackPanel>
                 </StackPanel>

@@ -56,6 +56,16 @@ typedef struct SoloRigSnapshotInfo {
     uint8_t measurement_available;
 } SoloRigSnapshotInfo;
 
+// Additive control-plane view for ASIO lifecycle state. Kept separate from
+// SoloRigSnapshotInfo so existing C ABI consumers retain their struct size.
+typedef struct SoloRigAudioStateView {
+    uint8_t is_open;
+    uint8_t is_running;
+    uint8_t reset_requested;
+    uint8_t dropout_reported;
+    double sample_rate_changed_to;
+} SoloRigAudioStateView;
+
 typedef struct SoloRigModuleCatalogView {
     const char* module_id_utf8;
     const char* display_name_utf8;
@@ -199,6 +209,9 @@ SOLO_RIG_BACKEND_API void solorig_snapshot_destroy(SoloRigSnapshot* snapshot);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_info(
     const SoloRigSnapshot* snapshot,
     SoloRigSnapshotInfo* out_info);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_audio_state(
+    const SoloRigSnapshot* snapshot,
+    SoloRigAudioStateView* out_state);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node(
     const SoloRigSnapshot* snapshot,
     uint32_t index,
