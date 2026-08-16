@@ -466,7 +466,14 @@ try {
     if (-not (Test-Path -LiteralPath $runtimeConfig)) {
         Fail-Layer -Layer ".NET VST3 C# UI bridge artifacts" -Message "Standalone runtimeconfig.json 不存在，无法初始化 hostfxr。"
     }
-    Copy-Item -LiteralPath $runtimeConfig -Destination (Join-Path $managedVst3UiOutput "SoloRig.Ui.Avalonia.runtimeconfig.json") -Force
+    $managedVst3RuntimeConfig = Join-Path $managedVst3UiOutput "SoloRig.Ui.Avalonia.runtimeconfig.json"
+    Copy-Item -LiteralPath $runtimeConfig -Destination $managedVst3RuntimeConfig -Force
+    $vst3RuntimeOutput = Join-Path $managedVst3UiOutput ("shared\Microsoft.NETCore.App\{0}" -f $dotnetRuntime.Name)
+    New-Item -ItemType Directory -Path $vst3RuntimeOutput -Force | Out-Null
+    Copy-Item -Path (Join-Path $dotnetRuntime.FullName "*") -Destination $vst3RuntimeOutput -Recurse -Force
+    $vst3HostFxrOutput = Join-Path $managedVst3UiOutput ("host\fxr\{0}" -f $dotnetHostFxrDirectory.Name)
+    New-Item -ItemType Directory -Path $vst3HostFxrOutput -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $dotnetHostFxrDirectory.FullName "hostfxr.dll") -Destination (Join-Path $vst3HostFxrOutput "hostfxr.dll") -Force
     $dotnetHostPackRoot = Join-Path $env:ProgramFiles "dotnet\packs\Microsoft.NETCore.App.Host.win-x64"
     $nethost = Get-ChildItem -LiteralPath $dotnetHostPackRoot -Recurse -Filter "nethost.dll" -File -ErrorAction SilentlyContinue |
         Sort-Object FullName -Descending | Select-Object -First 1

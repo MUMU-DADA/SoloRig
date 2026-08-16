@@ -4,6 +4,8 @@
 
 #include <windows.h>
 
+#include <algorithm>
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <cstring>
@@ -19,6 +21,57 @@ namespace solo_rig::vst3 {
 using UiStart = void* (CORECLR_DELEGATE_CALLTYPE*)(void* parent, int width, int height);
 using UiResize = int (CORECLR_DELEGATE_CALLTYPE*)(int width, int height);
 using UiStop = void (CORECLR_DELEGATE_CALLTYPE*)();
+
+class ScopedDotnetRoot final {
+public:
+    explicit ScopedDotnetRoot(const std::filesystem::path& root) {
+        Set(L"DOTNET_MULTILEVEL_LOOKUP", L"0", &saved_[0]);
+        Set(L"DOTNET_ROOT", root.c_str(), &saved_[1]);
+        Set(L"DOTNET_ROOT_X64", root.c_str(), &saved_[2]);
+    }
+
+    ~ScopedDotnetRoot() {
+        Restore(saved_[2]);
+        Restore(saved_[1]);
+        Restore(saved_[0]);
+    }
+
+    ScopedDotnetRoot(const ScopedDotnetRoot&) = delete;
+    ScopedDotnetRoot& operator=(const ScopedDotnetRoot&) = delete;
+
+private:
+    struct SavedValue {
+        LPCWSTR name{};
+        std::optional<std::wstring> value;
+    };
+
+    static std::optional<std::wstring> Read(LPCWSTR name) {
+        std::array<wchar_t, 4096> buffer{};
+        const auto length = GetEnvironmentVariableW(name, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0U) {
+            return GetLastError() == ERROR_ENVVAR_NOT_FOUND ? std::nullopt : std::optional<std::wstring>{L""};
+        }
+        if (length < buffer.size()) {
+            return std::wstring(buffer.data(), length);
+        }
+        return std::nullopt;
+    }
+
+    static void Set(LPCWSTR name, LPCWSTR value, SavedValue* saved) {
+        saved->name = name;
+        saved->value = Read(name);
+        SetEnvironmentVariableW(name, value);
+    }
+
+    static void Restore(const SavedValue& saved) {
+        if (saved.name == nullptr) {
+            return;
+        }
+        SetEnvironmentVariableW(saved.name, saved.value.has_value() ? saved.value->c_str() : nullptr);
+    }
+
+    std::array<SavedValue, 3> saved_{};
+};
 
 class ManagedUiBridge final {
 public:
@@ -73,16 +126,7 @@ private:
             return false;
         }
 
-        if (!LoadNethost()) {
-            return false;
-        }
-        char_t hostfxr_path[4096]{};
-        size_t hostfxr_path_size = std::size(hostfxr_path);
-        if (get_hostfxr_path_(hostfxr_path, &hostfxr_path_size, nullptr) != 0) {
-            return false;
-        }
-        hostfxr_ = LoadLibraryW(hostfxr_path);
-        if (hostfxr_ == nullptr) {
+        if (!LoadBundledHostFxr(*managed_directory) && !LoadHostFxrFromNethost()) {
             return false;
         }
         const auto initialize = GetFunction<hostfxr_initialize_for_runtime_config_fn>(
@@ -93,8 +137,12 @@ private:
         if (initialize == nullptr || get_delegate == nullptr || close_runtime_ == nullptr) {
             return false;
         }
-        if (initialize(runtime_config.c_str(), nullptr, &runtime_context_) != 0 ||
-            runtime_context_ == nullptr) {
+        int initialize_result = -1;
+        {
+            ScopedDotnetRoot runtime_root(*managed_directory);
+            initialize_result = initialize(runtime_config.c_str(), nullptr, &runtime_context_);
+        }
+        if (initialize_result != 0 || runtime_context_ == nullptr) {
             return false;
         }
         load_assembly_ = nullptr;
@@ -123,6 +171,45 @@ private:
     template <typename Function>
     [[nodiscard]] Function GetFunction(const char* name) const {
         return reinterpret_cast<Function>(GetProcAddress(hostfxr_, name));
+    }
+
+    [[nodiscard]] bool LoadBundledHostFxr(const std::filesystem::path& managed_directory) {
+        const auto hostfxr_root = managed_directory / L"host" / L"fxr";
+        std::error_code error;
+        if (std::filesystem::is_directory(hostfxr_root, error)) {
+            std::vector<std::filesystem::path> versions;
+            for (const auto& entry : std::filesystem::directory_iterator(hostfxr_root, error)) {
+                if (!error && entry.is_directory(error)) {
+                    versions.push_back(entry.path());
+                }
+            }
+            std::ranges::sort(versions, [](const auto& left, const auto& right) {
+                return left.filename().wstring() > right.filename().wstring();
+            });
+            for (const auto& version : versions) {
+                const auto bundled_hostfxr = version / L"hostfxr.dll";
+                if (std::filesystem::is_regular_file(bundled_hostfxr, error)) {
+                    hostfxr_ = LoadLibraryW(bundled_hostfxr.c_str());
+                    if (hostfxr_ != nullptr) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    [[nodiscard]] bool LoadHostFxrFromNethost() {
+        if (!LoadNethost()) {
+            return false;
+        }
+        char_t hostfxr_path[4096]{};
+        size_t hostfxr_path_size = std::size(hostfxr_path);
+        if (get_hostfxr_path_(hostfxr_path, &hostfxr_path_size, nullptr) != 0) {
+            return false;
+        }
+        hostfxr_ = LoadLibraryW(hostfxr_path);
+        return hostfxr_ != nullptr;
     }
 
     [[nodiscard]] bool LoadNethost() {

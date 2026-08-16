@@ -303,7 +303,7 @@ if(SOLO_RIG_BUILD_VST3)
         target_link_libraries(solo_rig_vst3_tests PRIVATE sdk sdk_hosting solo_rig_core user32)
         add_test(NAME solo_rig_vst3_tests COMMAND solo_rig_vst3_tests)
         set_tests_properties(solo_rig_vst3_tests PROPERTIES
-            ENVIRONMENT "SOLO_RIG_VST3_UI_DIR=${CMAKE_BINARY_DIR}/VST3/Release/SoloRig.vst3/Contents/Resources/managed")
+            ENVIRONMENT "SOLO_RIG_VST3_UI_DIR=${CMAKE_BINARY_DIR}/VST3/Release/SoloRig.vst3/Contents/Resources/managed;DOTNET_MULTILEVEL_LOOKUP=0;DOTNET_ROOT=${CMAKE_BINARY_DIR}/VST3/Release/SoloRig.vst3/Contents/Resources/managed;DOTNET_ROOT_X64=${CMAKE_BINARY_DIR}/VST3/Release/SoloRig.vst3/Contents/Resources/managed")
         add_test(
             NAME solo_rig_vst3_validator
             COMMAND $<TARGET_FILE:validator>
