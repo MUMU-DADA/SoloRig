@@ -280,6 +280,11 @@ internal static class NativeMethods
         [MarshalAs(UnmanagedType.LPUTF8Str)] string parameterId, float value);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_set_parameter_utf8_with_dirty(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string instanceId,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string parameterId, float value, byte markDirty);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_set_node_bypassed_utf8(
         IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string instanceId, byte bypassed);
 
@@ -292,11 +297,21 @@ internal static class NativeMethods
     internal static extern NativeStatus solorig_backend_clear_node_performance(IntPtr backend);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_restore_document_state(IntPtr backend, byte dirty);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_set_theme_dark(IntPtr backend, byte dark);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_set_theme_dark_with_dirty(IntPtr backend, byte dark, byte markDirty);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_load_theme_utf8(
         IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_load_theme_utf8_with_dirty(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, byte markDirty);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_theme_info(
@@ -312,6 +327,9 @@ internal static class NativeMethods
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_select_at(IntPtr backend, double x, double y);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_clear_selection(IntPtr backend);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_begin_drag(IntPtr backend, double x, double y);
@@ -764,14 +782,17 @@ public sealed class BackendSession : IDisposable
         }
     }
 
-    public void SetParameter(string target, float value)
+    public void SetParameter(string target, float value) => SetParameter(target, value, markDirty: true);
+
+    public void SetParameter(string target, float value, bool markDirty)
     {
         var separator = target.LastIndexOf('.');
         if (separator <= 0 || separator == target.Length - 1)
         {
             throw new ArgumentException("Target must be instanceId.parameterId", nameof(target));
         }
-        Ensure(NativeMethods.solorig_backend_set_parameter_utf8(handle, target[..separator], target[(separator + 1)..], value), "set parameter");
+        Ensure(NativeMethods.solorig_backend_set_parameter_utf8_with_dirty(handle, target[..separator], target[(separator + 1)..], value,
+            markDirty ? (byte)1 : (byte)0), "set parameter");
     }
 
     public void SetNodeBypassed(string instanceId, bool bypassed) =>
@@ -786,15 +807,27 @@ public sealed class BackendSession : IDisposable
     public void ClearNodePerformance() =>
         Ensure(NativeMethods.solorig_backend_clear_node_performance(handle), "clear node performance");
 
-    public void SetTheme(bool dark) => Ensure(NativeMethods.solorig_backend_set_theme_dark(handle, dark ? (byte)1 : (byte)0), "set theme");
+    public void RestoreDocumentState(bool dirty) =>
+        Ensure(NativeMethods.solorig_backend_restore_document_state(handle, dirty ? (byte)1 : (byte)0),
+            "restore document state");
 
-    public void LoadTheme(string path) =>
-        Ensure(NativeMethods.solorig_backend_load_theme_utf8(handle, path), "load theme");
+    public void SetTheme(bool dark) => SetTheme(dark, markDirty: true);
+
+    public void SetTheme(bool dark, bool markDirty) =>
+        Ensure(NativeMethods.solorig_backend_set_theme_dark_with_dirty(handle, dark ? (byte)1 : (byte)0,
+            markDirty ? (byte)1 : (byte)0), "set theme");
+
+    public void LoadTheme(string path) => LoadTheme(path, true);
+
+    public void LoadTheme(string path, bool markDirty) =>
+        Ensure(NativeMethods.solorig_backend_load_theme_utf8_with_dirty(handle, path, markDirty ? (byte)1 : (byte)0), "load theme");
 
     public void SetViewport(double width, double height, double dpiScale) =>
         Ensure(NativeMethods.solorig_backend_set_viewport(handle, width, height, dpiScale), "set viewport");
 
     public void SelectAt(double x, double y) => Ensure(NativeMethods.solorig_backend_select_at(handle, x, y), "select node");
+
+    public void ClearSelection() => Ensure(NativeMethods.solorig_backend_clear_selection(handle), "clear selection");
 
     public void BeginDrag(double x, double y) => Ensure(NativeMethods.solorig_backend_begin_drag(handle, x, y), "begin drag");
 

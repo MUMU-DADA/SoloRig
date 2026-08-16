@@ -387,7 +387,8 @@ EditorFileResult RigEditorViewModel::SaveCurrent() {
 
 bool RigEditorViewModel::SetNodeParameter(std::string_view instance_id,
                                           std::string_view parameter_id,
-                                          float value) {
+                                          float value,
+                                          bool mark_dirty) {
     const auto node = std::ranges::find_if(preset_.nodes, [instance_id](const PresetNode& candidate) {
         return candidate.instance_id == instance_id;
     });
@@ -399,8 +400,10 @@ bool RigEditorViewModel::SetNodeParameter(std::string_view instance_id,
         return false;
     }
     parameter->second = value;
-    dirty_ = true;
-    SetFileStatus("Unsaved changes");
+    if (mark_dirty) {
+        dirty_ = true;
+        SetFileStatus("Unsaved changes");
+    }
     return true;
 }
 
@@ -492,11 +495,13 @@ bool RigEditorViewModel::LoadThemeFile(const std::filesystem::path& source, bool
     return false;
 }
 
-void RigEditorViewModel::SetThemeMode(bool dark) {
+void RigEditorViewModel::SetThemeMode(bool dark, bool mark_dirty) {
     dark_theme_ = dark;
     theme_ = dark ? DefaultDarkTheme() : DefaultLightTheme();
-    dirty_ = true;
-    SetFileStatus("Unsaved changes");
+    if (mark_dirty) {
+        dirty_ = true;
+        SetFileStatus("Unsaved changes");
+    }
     RebuildScene();
 }
 
@@ -819,6 +824,12 @@ bool RigEditorViewModel::SelectAt(EditorPoint point) {
         node.selected = hit.has_value() && node.instance_id == *hit;
     }
     return hit.has_value();
+}
+
+void RigEditorViewModel::ClearSelection() noexcept {
+    for (auto& node : scene_.nodes) {
+        node.selected = false;
+    }
 }
 
 bool RigEditorViewModel::BeginDrag(EditorPoint point) {

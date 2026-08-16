@@ -28,11 +28,22 @@ public sealed class App : Application
                 probe.Tick += (_, _) =>
                 {
                     attempts++;
-                    if (mainWindow.HasStandaloneVisualContent && mainWindow.ProbeExternalTheme() &&
-                        mainWindow.ProbeThemeSwitch() && mainWindow.ProbeParameterBinding() &&
-                        mainWindow.ProbeDpiScaling() && mainWindow.ProbeRenderedSurface() &&
-                        mainWindow.ProbeKeyboardShortcuts() && mainWindow.ProbeSelectionState() &&
-                        mainWindow.ProbeDocumentStatus())
+                    var visualContent = mainWindow.HasStandaloneVisualContent;
+                    if (!visualContent)
+                    {
+                        ReportVisualProbeFailure("visual content");
+                    }
+                    var externalTheme = visualContent && RunVisualProbe("external theme", mainWindow.ProbeExternalTheme);
+                    var themeSwitch = externalTheme && RunVisualProbe("theme switch", mainWindow.ProbeThemeSwitch);
+                    var parameterBinding = themeSwitch && RunVisualProbe("parameter binding", mainWindow.ProbeParameterBinding);
+                    var dpiScaling = parameterBinding && RunVisualProbe("DPI scaling", mainWindow.ProbeDpiScaling);
+                    var renderedSurface = dpiScaling && RunVisualProbe("rendered surface", mainWindow.ProbeRenderedSurface);
+                    var keyboardShortcuts = renderedSurface && RunVisualProbe("keyboard shortcuts", mainWindow.ProbeKeyboardShortcuts);
+                    var selectionState = keyboardShortcuts && RunVisualProbe("selection state", mainWindow.ProbeSelectionState);
+                    var documentStatus = selectionState && RunVisualProbe("document status", mainWindow.ProbeDocumentStatus);
+                    var actionGates = documentStatus && RunVisualProbe("action gates", mainWindow.ProbeActionGates);
+                    if (visualContent && externalTheme && themeSwitch && parameterBinding && dpiScaling && renderedSurface &&
+                        keyboardShortcuts && selectionState && documentStatus && actionGates)
                     {
                         probe.Stop();
                         desktop.Shutdown(0);
@@ -48,4 +59,17 @@ public sealed class App : Application
         }
         base.OnFrameworkInitializationCompleted();
     }
+
+    private static bool RunVisualProbe(string name, Func<bool> probe)
+    {
+        var passed = probe();
+        if (!passed)
+        {
+            ReportVisualProbeFailure(name);
+        }
+        return passed;
+    }
+
+    private static void ReportVisualProbeFailure(string name) =>
+        Console.Error.WriteLine($"[standalone-visual-probe] failed: {name}");
 }

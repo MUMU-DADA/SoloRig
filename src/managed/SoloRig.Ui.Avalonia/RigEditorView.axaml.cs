@@ -135,7 +135,7 @@ public sealed partial class RigEditorView : UserControl
         var originalDark = viewModel.DarkTheme;
         var originalWindow = (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color;
         var originalFingerprint = BuildVisualRegressionFingerprint();
-        if (!viewModel.ToggleTheme())
+        if (!viewModel.ToggleTheme(markDirty: false))
         {
             return false;
         }
@@ -143,7 +143,7 @@ public sealed partial class RigEditorView : UserControl
         var switchedFingerprint = BuildVisualRegressionFingerprint();
         var changed = viewModel.DarkTheme != originalDark && switchedWindow != originalWindow &&
                       switchedFingerprint != originalFingerprint;
-        var restored = viewModel.ToggleTheme() && viewModel.DarkTheme == originalDark &&
+        var restored = viewModel.ToggleTheme(markDirty: false) && viewModel.DarkTheme == originalDark &&
                        (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == originalWindow &&
                        BuildVisualRegressionFingerprint() == originalFingerprint;
         return changed && restored;
@@ -191,12 +191,12 @@ public sealed partial class RigEditorView : UserControl
                 metrics = new { gridSize = 16, cornerRadius = 8 }
             }));
 
-            var loaded = viewModel.LoadTheme(customPath);
+            var loaded = viewModel.LoadTheme(customPath, markDirty: false);
             var applied = loaded && viewModel.Theme.Id == "probe.external" &&
                           (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == Color.Parse("#0B1120") &&
                           (Resources["SrgAccentBrush"] as SolidColorBrush)?.Color == Color.Parse("#F97316") &&
                           BuildVisualRegressionFingerprint() != originalFingerprint;
-            var restored = viewModel.LoadTheme(restorePath) && viewModel.Theme.Id == originalTheme.Id &&
+            var restored = viewModel.LoadTheme(restorePath, markDirty: false) && viewModel.Theme.Id == originalTheme.Id &&
                            (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == originalWindow &&
                            BuildVisualRegressionFingerprint() == originalFingerprint;
             return applied && restored;
@@ -247,7 +247,8 @@ public sealed partial class RigEditorView : UserControl
         {
             candidate = midpoint;
         }
-        if (Math.Abs(candidate - original) < 0.00001F || !viewModel.SetParameter(selectedParameter.Target, candidate))
+        if (Math.Abs(candidate - original) < 0.00001F ||
+            !viewModel.SetParameter(selectedParameter.Target, candidate, markDirty: false))
         {
             return false;
         }
@@ -258,7 +259,7 @@ public sealed partial class RigEditorView : UserControl
                                Math.Abs(changed.Value - candidate) < 0.00001F &&
                                Math.Abs(changedControl.Value - candidate) < 0.00001F &&
                                BuildVisualRegressionFingerprint() != originalFingerprint;
-        var restored = viewModel.SetParameter(selectedParameter.Target, original);
+        var restored = viewModel.SetParameter(selectedParameter.Target, original, markDirty: false);
         var restoredParameter = viewModel.SelectedParameters.FirstOrDefault(item => item.Target == selectedParameter.Target);
         var restoredControl = viewModel.CanvasNodes.SelectMany(item => item.Controls)
             .FirstOrDefault(item => item.Id == selectedParameter.Id);
@@ -285,7 +286,7 @@ public sealed partial class RigEditorView : UserControl
         }
 
         var originalDark = viewModel.DarkTheme;
-        if (!viewModel.ToggleTheme())
+        if (!viewModel.ToggleTheme(markDirty: false))
         {
             return false;
         }
@@ -293,7 +294,7 @@ public sealed partial class RigEditorView : UserControl
         try
         {
             var switched = CaptureRenderedSurface();
-            if (switched is null || switched == original || !viewModel.ToggleTheme() ||
+            if (switched is null || switched == original || !viewModel.ToggleTheme(markDirty: false) ||
                 viewModel.DarkTheme != originalDark)
             {
                 return false;
@@ -304,7 +305,7 @@ public sealed partial class RigEditorView : UserControl
         {
             if (viewModel.DarkTheme != originalDark)
             {
-                viewModel.ToggleTheme();
+                viewModel.ToggleTheme(markDirty: false);
             }
         }
     }
@@ -316,14 +317,14 @@ public sealed partial class RigEditorView : UserControl
             return false;
         }
         var originalDark = viewModel.DarkTheme;
-        var handled = HandleShortcut(Key.T, KeyModifiers.None);
+        var handled = HandleShortcut(Key.T, KeyModifiers.None, markDirty: false);
         var toggled = handled && viewModel.DarkTheme != originalDark;
         var modifierBaseline = viewModel.DarkTheme;
         var modifiedHandled = HandleShortcut(Key.T, KeyModifiers.Control);
         var modifierIgnored = !modifiedHandled && viewModel.DarkTheme == modifierBaseline;
         if (viewModel.DarkTheme != originalDark)
         {
-            viewModel.ToggleTheme();
+            viewModel.ToggleTheme(markDirty: false);
         }
         return toggled && modifierIgnored && viewModel.DarkTheme == originalDark;
     }
@@ -392,6 +393,11 @@ public sealed partial class RigEditorView : UserControl
         var originalFileStatus = viewModel.FileStatus;
         var originalWindowTitle = viewModel.WindowTitle;
         var originalFingerprint = BuildVisualRegressionFingerprint();
+        (double X, double Y)? originalPoint = null;
+        if (viewModel.CanvasNodes.FirstOrDefault(node => node.InstanceId == canvasNode.InstanceId) is { } originalCanvasNode)
+        {
+            originalPoint = (originalCanvasNode.CanvasX + 10.0, originalCanvasNode.CanvasY + 10.0);
+        }
         var midpoint = (sourceParameter.Minimum + sourceParameter.Maximum) * 0.5F;
         var fraction = originalValue <= midpoint ? 0.75F : 0.25F;
         var candidate = sourceParameter.Minimum +
@@ -410,12 +416,82 @@ public sealed partial class RigEditorView : UserControl
         var dirtyMarkerVisible = viewModel.IsDirty &&
                                  DocumentStatusText.Text?.Contains("*", StringComparison.Ordinal) == true &&
                                  viewModel.WindowTitle.Contains("*", StringComparison.Ordinal);
-        var restored = viewModel.SetParameter($"{canvasNode.InstanceId}.{sourceParameter.Id}", originalValue);
+        var restored = viewModel.SetParameter($"{canvasNode.InstanceId}.{sourceParameter.Id}", originalValue, markDirty: false) &&
+                       viewModel.RestoreDocumentState(originalDirty);
+        if (restored)
+        {
+            restored = originalPoint is { } point
+                ? viewModel.SelectAt(point.X, point.Y)
+                : viewModel.SelectAt(5.0, 5.0);
+        }
         return dirtyMarkerVisible && restored &&
                viewModel.IsDirty == originalDirty &&
                viewModel.FileStatus == originalFileStatus &&
                viewModel.WindowTitle == originalWindowTitle &&
                BuildVisualRegressionFingerprint() == originalFingerprint;
+    }
+
+    public bool ProbeActionGates()
+    {
+        if (viewModel is null || CatalogAddButton is null || CatalogDuplicateButton is null ||
+            CatalogDeleteButton is null || CanvasAddModuleButton is null || CanvasConnectButton is null ||
+            CanvasDisconnectButton is null || InspectorDuplicateButton is null || InspectorDeleteButton is null)
+        {
+            return false;
+        }
+
+        var originalNode = viewModel.SelectedNode;
+        (double X, double Y)? originalPoint = null;
+        if (originalNode is not null &&
+            viewModel.CanvasNodes.FirstOrDefault(node => node.InstanceId == originalNode.InstanceId) is { } node)
+        {
+            originalPoint = (node.CanvasX + 10.0, node.CanvasY + 10.0);
+        }
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        var probePassed = false;
+        var cleared = false;
+        var graphActions = false;
+        var selected = false;
+        var clearButtonDuplicate = true;
+        var clearButtonDelete = true;
+        try
+        {
+            viewModel.ClearSelection();
+            clearButtonDuplicate = CatalogDuplicateButton.IsEnabled;
+            clearButtonDelete = CatalogDeleteButton.IsEnabled;
+            cleared = viewModel.SelectedNode is null &&
+                      !clearButtonDuplicate && !clearButtonDelete &&
+                      !InspectorDuplicateButton.IsEnabled && !InspectorDeleteButton.IsEnabled;
+            graphActions = viewModel.CanAddModule && CatalogAddButton.IsEnabled && CanvasAddModuleButton.IsEnabled &&
+                           CanvasConnectButton.IsEnabled == viewModel.CanConnectNodes &&
+                           CanvasDisconnectButton.IsEnabled == viewModel.CanDisconnectNodes;
+            var probeNode = viewModel.CanvasNodes.FirstOrDefault();
+            selected = probeNode is not null && viewModel.SelectAt(probeNode.CanvasX + 10.0, probeNode.CanvasY + 10.0) &&
+                       viewModel.SelectedNode?.InstanceId == probeNode.InstanceId &&
+                       viewModel.CanDuplicateSelected && viewModel.CanDeleteSelected &&
+                       CatalogDuplicateButton.IsEnabled && CatalogDeleteButton.IsEnabled &&
+                       InspectorDuplicateButton.IsEnabled && InspectorDeleteButton.IsEnabled;
+            probePassed = cleared && graphActions && selected;
+        }
+        finally
+        {
+            if (originalPoint is { } point)
+            {
+                viewModel.SelectAt(point.X, point.Y);
+            }
+            else
+            {
+                viewModel.ClearSelection();
+            }
+        }
+
+        var restored = BuildVisualRegressionFingerprint() == originalFingerprint &&
+                       (viewModel.SelectedNode?.InstanceId ?? string.Empty) == (originalNode?.InstanceId ?? string.Empty);
+        if (!probePassed || !restored)
+        {
+            Console.Error.WriteLine($"[standalone-visual-probe] action gates detail: cleared={cleared}, graph={graphActions}, selected={selected}, restored={restored}");
+        }
+        return probePassed && restored;
     }
 
     private RenderedSurfaceFingerprint? CaptureRenderedSurface()
@@ -510,7 +586,9 @@ public sealed partial class RigEditorView : UserControl
         }
     }
 
-    public bool HandleShortcut(Key key, KeyModifiers modifiers)
+    public bool HandleShortcut(Key key, KeyModifiers modifiers) => HandleShortcut(key, modifiers, markDirty: true);
+
+    private bool HandleShortcut(Key key, KeyModifiers modifiers, bool markDirty)
     {
         if (viewModel is null)
         {
@@ -519,7 +597,7 @@ public sealed partial class RigEditorView : UserControl
         var hasModifier = (modifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt)) != KeyModifiers.None;
         if (!hasModifier && key == Key.T)
         {
-            viewModel.ToggleTheme();
+            viewModel.ToggleTheme(markDirty);
             return true;
         }
 
@@ -721,7 +799,10 @@ public sealed partial class RigEditorView : UserControl
             dragging = true;
             args.Pointer.Capture(EditorCanvas);
             args.Handled = true;
+            return;
         }
+        viewModel.ClearSelection();
+        args.Handled = true;
     }
 
     private void CanvasPointerMoved(object? sender, PointerEventArgs args)

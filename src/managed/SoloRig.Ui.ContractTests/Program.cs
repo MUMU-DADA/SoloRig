@@ -108,6 +108,12 @@ Require(viewModel.SetModuleCatalogFilter("外部") && viewModel.FilteredModuleCa
     "external catalog filter is empty before external import");
 Require(!viewModel.SetModuleCatalogFilter("invalid"), "unknown catalog filter is rejected");
 Require(viewModel.SetModuleCatalogFilter("全部"), "catalog can return to the all filter");
+Require(viewModel.CanAddModule && viewModel.CanConnectNodes && viewModel.CanDisconnectNodes,
+    "graph actions expose enabled gates when a valid catalog and connection exist");
+Require(!viewModel.CanDuplicateSelected && !viewModel.CanDeleteSelected,
+    "node copy/delete gates stay disabled without a selected node");
+Require(!viewModel.CanDeleteMidiBinding && !viewModel.CanClearMidiBindings,
+    "MIDI binding removal gates stay disabled without bindings");
 Require(viewModel.SelectInspectorTab("端口") && viewModel.IsPortInspectorVisible && !viewModel.IsParameterInspectorVisible,
     "inspector port tab is selectable");
 Require(viewModel.SelectInspectorTab("资源") && viewModel.IsResourceInspectorVisible,
@@ -186,6 +192,12 @@ Require(viewModel.SelectedPresetName == "SoloRig Default" && !viewModel.IsDirty,
 Require(!viewModel.SelectPreset("missing-preset"), "preset selector rejects an unavailable preset");
 Require(viewModel.SetParameter("drive-1.drive", 6.0F), "parameter edit after preset selection succeeds");
 Require(viewModel.SelectAt(74.0, 158.0), "C ABI selects a node using editor coordinates");
+Require(viewModel.CanDuplicateSelected && viewModel.CanDeleteSelected,
+    "node copy/delete gates enable after selecting a node");
+Require(viewModel.ClearSelection() && viewModel.SelectedNode is null &&
+        !viewModel.CanDuplicateSelected && !viewModel.CanDeleteSelected,
+    "clear selection resets node action gates");
+Require(viewModel.SelectAt(74.0, 158.0), "node selection can be restored after clearing");
 Require(viewModel.BeginDrag(74.0, 158.0), "C ABI begins a node drag");
 Require(viewModel.DragTo(210.0, 232.0, true), "C ABI drags and snaps a node");
 viewModel.EndDrag();

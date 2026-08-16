@@ -40,6 +40,8 @@ public sealed partial class MainWindow : Window
 
     public bool ProbeDocumentStatus() => EditorView.ProbeDocumentStatus();
 
+    public bool ProbeActionGates() => EditorView.ProbeActionGates();
+
     private void WindowKeyDown(object? sender, KeyEventArgs args) => EditorView.HandleWindowKeyDown(args);
 
     private async void WindowClosing(object? sender, WindowClosingEventArgs args)

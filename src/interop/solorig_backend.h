@@ -274,6 +274,12 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_parameter_utf8(
     const char* instance_id_utf8,
     const char* parameter_id_utf8,
     float value);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_parameter_utf8_with_dirty(
+    SoloRigBackend* backend,
+    const char* instance_id_utf8,
+    const char* parameter_id_utf8,
+    float value,
+    uint8_t mark_dirty);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_node_bypassed_utf8(
     SoloRigBackend* backend,
     const char* instance_id_utf8,
@@ -288,12 +294,25 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_node_performance_utf8(
     double peak_cpu_percent);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_clear_node_performance(
     SoloRigBackend* backend);
+// Control-thread transaction helper: rebuilds the current document snapshot
+// while preserving its preset, theme and source path, with an explicit dirty state.
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_restore_document_state(
+    SoloRigBackend* backend,
+    uint8_t dirty);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark(
     SoloRigBackend* backend,
     uint8_t dark);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark_with_dirty(
+    SoloRigBackend* backend,
+    uint8_t dark,
+    uint8_t mark_dirty);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_load_theme_utf8(
     SoloRigBackend* backend,
     const char* path_utf8);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_load_theme_utf8_with_dirty(
+    SoloRigBackend* backend,
+    const char* path_utf8,
+    uint8_t mark_dirty);
 // Theme metadata and color pointers are control-thread views. Returned
 // pointers remain valid until the next operation that mutates the editor;
 // callers must copy them before making another backend call.
@@ -312,6 +331,8 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_select_at(
     SoloRigBackend* backend,
     double x,
     double y);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_clear_selection(
+    SoloRigBackend* backend);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_begin_drag(
     SoloRigBackend* backend,
     double x,

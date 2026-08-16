@@ -45,6 +45,8 @@
 
 补充：M25-U 将模块库筛选和检查器页签的 selected 状态纳入共享 Avalonia 视觉样式与 Standalone visual probe；探针会切换“模拟/端口”并恢复原始筛选、页签和视觉 fingerprint。M25-V 将 `FileStatus` 纳入 Standalone 顶栏与视觉 fingerprint；探针会验证编辑后 `*` 出现，并恢复原始文档状态。
 
+补充：M25-W 增加显式 `clear_selection` C ABI、空白画布清除选中、节点/拓扑/MIDI 操作入口的可用态与探针状态隔离；无选中节点、无连接或无 MIDI 绑定时对应入口不再依赖点击后的错误提示。
+
 ## 白盒专用覆盖
 
 当前白盒主线可以拆成四层：

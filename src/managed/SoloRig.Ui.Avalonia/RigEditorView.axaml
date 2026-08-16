@@ -193,10 +193,13 @@
                 </ListBox.ItemTemplate>
               </ListBox>
               <StackPanel Spacing="6">
-                <Button Classes="srg-button primary" Content="＋ 添加所选模块" Command="{Binding AddModuleCommand}" />
+                <Button x:Name="CatalogAddButton" Classes="srg-button primary" Content="＋ 添加所选模块"
+                        Command="{Binding AddModuleCommand}" IsEnabled="{Binding CanAddModule}" />
                 <StackPanel Orientation="Horizontal" Spacing="6">
-                  <Button Classes="srg-button" Content="复制节点" Command="{Binding DuplicateSelectedCommand}" HorizontalAlignment="Stretch" />
-                  <Button Classes="srg-button" Content="删除节点" Command="{Binding DeleteSelectedCommand}" HorizontalAlignment="Stretch" />
+                  <Button x:Name="CatalogDuplicateButton" Classes="srg-button" Content="复制节点"
+                          Command="{Binding DuplicateSelectedCommand}" IsEnabled="{Binding CanDuplicateSelected}" HorizontalAlignment="Stretch" />
+                  <Button x:Name="CatalogDeleteButton" Classes="srg-button" Content="删除节点"
+                          Command="{Binding DeleteSelectedCommand}" IsEnabled="{Binding CanDeleteSelected}" HorizontalAlignment="Stretch" />
                 </StackPanel>
               </StackPanel>
               <Border BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="0,1,0,0" Padding="0,12,0,0">
@@ -220,8 +223,10 @@
                 <TextBlock Text="自由移动模块 · 点击两个端点建立方向连接" Classes="srg-muted" FontSize="10" />
               </StackPanel>
               <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                <Button Classes="srg-button ghost" Content="连接首尾" Command="{Binding ConnectSelectedCommand}" />
-                <Button Classes="srg-button ghost" Content="断开首条" Command="{Binding DisconnectSelectedCommand}" />
+                <Button x:Name="CanvasConnectButton" Classes="srg-button ghost" Content="连接首尾"
+                        Command="{Binding ConnectSelectedCommand}" IsEnabled="{Binding CanConnectNodes}" />
+                <Button x:Name="CanvasDisconnectButton" Classes="srg-button ghost" Content="断开首条"
+                        Command="{Binding DisconnectSelectedCommand}" IsEnabled="{Binding CanDisconnectNodes}" />
               </StackPanel>
             </Grid>
 
@@ -385,7 +390,8 @@
                            Classes="srg-muted" FontSize="10" />
                 <Border Canvas.Right="14" Canvas.Bottom="9" Background="{DynamicResource SrgOverlayBrush}" BorderBrush="{DynamicResource SrgToolBorderBrush}"
                         BorderThickness="1" CornerRadius="7" Padding="9,6">
-                  <Button Classes="srg-button ghost" Content="＋ 添加模块" Command="{Binding AddModuleCommand}" />
+                  <Button x:Name="CanvasAddModuleButton" Classes="srg-button ghost" Content="＋ 添加模块"
+                          Command="{Binding AddModuleCommand}" IsEnabled="{Binding CanAddModule}" />
                 </Border>
               </Canvas>
             </Border>
@@ -463,8 +469,10 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
               <StackPanel Orientation="Horizontal" Spacing="7">
-                <Button Classes="srg-button" Content="复制" Command="{Binding DuplicateSelectedCommand}" HorizontalAlignment="Stretch" />
-                <Button Classes="srg-button" Content="删除" Command="{Binding DeleteSelectedCommand}" HorizontalAlignment="Stretch" />
+                <Button x:Name="InspectorDuplicateButton" Classes="srg-button" Content="复制"
+                        Command="{Binding DuplicateSelectedCommand}" IsEnabled="{Binding CanDuplicateSelected}" HorizontalAlignment="Stretch" />
+                <Button x:Name="InspectorDeleteButton" Classes="srg-button" Content="删除"
+                        Command="{Binding DeleteSelectedCommand}" IsEnabled="{Binding CanDeleteSelected}" HorizontalAlignment="Stretch" />
               </StackPanel>
               <Border IsVisible="{Binding IsResourceInspectorVisible}" Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1" CornerRadius="7" Padding="9">
                 <StackPanel Spacing="5">
@@ -574,8 +582,10 @@
                     </ListBox.ItemTemplate>
                   </ListBox>
                   <StackPanel Orientation="Horizontal" Spacing="4">
-                    <Button Classes="srg-button" Content="删除绑定" Click="DeleteMidiBindingClick" />
-                    <Button Classes="srg-button" Content="清空绑定" Click="ClearMidiBindingsClick" />
+                    <Button x:Name="DeleteMidiBindingButton" Classes="srg-button" Content="删除绑定"
+                            IsEnabled="{Binding CanDeleteMidiBinding}" Click="DeleteMidiBindingClick" />
+                    <Button x:Name="ClearMidiBindingsButton" Classes="srg-button" Content="清空绑定"
+                            IsEnabled="{Binding CanClearMidiBindings}" Click="ClearMidiBindingsClick" />
                   </StackPanel>
                   <Button Classes="srg-button" Content="导入 MIDI Bank 目录" Click="ImportMidiBankClick" />
                 </StackPanel>

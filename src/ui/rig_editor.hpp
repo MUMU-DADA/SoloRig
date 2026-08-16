@@ -143,7 +143,8 @@ public:
     [[nodiscard]] EditorFileResult SaveCurrent();
     [[nodiscard]] bool SetNodeParameter(std::string_view instance_id,
                                          std::string_view parameter_id,
-                                         float value);
+                                         float value,
+                                         bool mark_dirty = true);
     [[nodiscard]] bool SetNodeBypassed(std::string_view instance_id, bool bypassed);
     // Control-thread host bridge for measurements captured by a stopped
     // RigRuntime. These diagnostics never become part of the saved preset.
@@ -161,7 +162,7 @@ public:
     // User initiated theme loads are dirty by default. Startup resource
     // loading may explicitly pass false so a new document remains clean.
     [[nodiscard]] bool LoadThemeFile(const std::filesystem::path& source, bool mark_dirty = true);
-    void SetThemeMode(bool dark);
+    void SetThemeMode(bool dark, bool mark_dirty = true);
     void SetTheme(ThemeDefinition theme, bool mark_dirty = true);
     [[nodiscard]] bool IsDarkTheme() const noexcept;
     [[nodiscard]] bool LoadSkinFile(const std::filesystem::path& source);
@@ -183,6 +184,7 @@ public:
     [[nodiscard]] const RigEditorScene& Scene() const noexcept;
     [[nodiscard]] std::optional<std::string> HitTest(EditorPoint point) const;
     [[nodiscard]] bool SelectAt(EditorPoint point);
+    void ClearSelection() noexcept;
     [[nodiscard]] bool BeginDrag(EditorPoint point);
     [[nodiscard]] bool DragTo(EditorPoint point, bool snap_to_grid = true);
     void EndDrag() noexcept;

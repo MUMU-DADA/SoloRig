@@ -326,7 +326,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         {
             if (Set(ref moduleSearchText, value))
             {
-                OnPropertiesChanged(nameof(FilteredModuleCatalog));
+                OnPropertiesChanged(nameof(FilteredModuleCatalog), nameof(CanAddModule));
             }
         }
     }
@@ -335,6 +335,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         get => selectedCatalogModule;
         set => Set(ref selectedCatalogModule, value);
     }
+    public bool CanAddModule => FilteredModuleCatalog.Count > 0;
     public bool SetModuleCatalogFilter(string filter)
     {
         if (filter is not ("全部" or "模拟" or "数字" or "外部"))
@@ -352,7 +353,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             selectedCatalogModule = null;
         }
         OnPropertiesChanged(nameof(ModuleCatalogFilter), nameof(ModuleCatalogSummaryText),
-            nameof(FilteredModuleCatalog), nameof(SelectedCatalogModule));
+            nameof(FilteredModuleCatalog), nameof(SelectedCatalogModule), nameof(CanAddModule));
         Status = $"模块库筛选: {filter}";
         return true;
     }
@@ -366,6 +367,10 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             : SelectedNode.Parameters.Select(parameter =>
                 new ParameterEditorSnapshot($"{SelectedNode.InstanceId}.{parameter.Id}", parameter.Id, parameter.Value,
                     parameter.Minimum, parameter.Maximum)).ToArray();
+    public bool CanDuplicateSelected => SelectedNode is not null;
+    public bool CanDeleteSelected => SelectedNode is not null;
+    public bool CanConnectNodes => snapshot.Nodes.Count >= 2;
+    public bool CanDisconnectNodes => snapshot.Connections.Count > 0;
     public bool IsDirty => snapshot.Dirty;
     public bool DarkTheme => snapshot.DarkTheme;
     public string WindowTitle => string.IsNullOrWhiteSpace(snapshot.PresetName)
@@ -497,7 +502,13 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public int SelectedMidiBindingIndex
     {
         get => selectedMidiBindingIndex;
-        set => Set(ref selectedMidiBindingIndex, value);
+        set
+        {
+            if (Set(ref selectedMidiBindingIndex, value))
+            {
+                OnPropertiesChanged(nameof(CanDeleteMidiBinding));
+            }
+        }
     }
     public MidiLearnTargetSnapshot? SelectedMidiLearnTarget =>
         selectedMidiTargetIndex >= 0 && selectedMidiTargetIndex < midiLearnTargets.Count
@@ -601,6 +612,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public string MidiLearnStatus => MidiLearnArmed
         ? "学习中：等待 CC"
         : "未进入学习";
+    public bool CanDeleteMidiBinding => selectedMidiBindingIndex >= 0 &&
+        selectedMidiBindingIndex < snapshot.Bindings.Count;
+    public bool CanClearMidiBindings => snapshot.Bindings.Count > 0;
     public IReadOnlyList<string> PresetNames =>
         string.IsNullOrWhiteSpace(snapshot.PresetName) ||
         string.Equals(snapshot.PresetName, "SoloRig Default", StringComparison.Ordinal)
@@ -684,6 +698,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             }
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
                 nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
+                nameof(CanDuplicateSelected), nameof(CanDeleteSelected), nameof(CanConnectNodes), nameof(CanDisconnectNodes),
                 nameof(Theme), nameof(ThemeDisplayName),
                 nameof(WindowTitle), nameof(AudioStatus), nameof(AudioOpen), nameof(AudioRunning),
                 nameof(AudioResetRequested), nameof(AudioDropoutReported), nameof(AudioSampleRateChangedTo),
@@ -693,7 +708,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 nameof(CanRecoverAsio), nameof(MidiStatus), nameof(MidiOpen), nameof(MidiLearnArmed),
                 nameof(MidiState), nameof(MidiSelectedDeviceIndex), nameof(MidiDroppedMessageCount),
                 nameof(MidiLifecycleText), nameof(CanOpenMidi), nameof(CanEditMidiDeviceSelection), nameof(CanRefreshMidi), nameof(CanCloseMidi), nameof(CanDrainMidi),
-                nameof(CanArmMidiLearn), nameof(CanCancelMidiLearn), nameof(FileStatus),
+                nameof(CanArmMidiLearn), nameof(CanCancelMidiLearn), nameof(CanDeleteMidiBinding), nameof(CanClearMidiBindings), nameof(FileStatus),
+                nameof(CanAddModule),
                 nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames), nameof(SelectedPresetName),
                 nameof(ModuleCatalog), nameof(ModuleCatalogSummaryText), nameof(FilteredModuleCatalog),
                 nameof(SelectedCatalogModule),
@@ -751,7 +767,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             RebuildCanvasProjections();
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
                 nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme), nameof(WindowTitle),
-                nameof(FileStatus));
+                nameof(FileStatus), nameof(CanDuplicateSelected), nameof(CanDeleteSelected), nameof(CanConnectNodes), nameof(CanDisconnectNodes));
         }
         catch (Exception exception)
         {
@@ -806,7 +822,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public bool SetParameter(string target, float value)
+    public bool SetParameter(string target, float value) => SetParameter(target, value, markDirty: true);
+
+    public bool SetParameter(string target, float value, bool markDirty)
     {
         if (backend is null)
         {
@@ -828,7 +846,26 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         try
         {
-            backend.SetParameter(target, value);
+            backend.SetParameter(target, value, markDirty);
+            Refresh();
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            return false;
+        }
+    }
+
+    public bool RestoreDocumentState(bool dirty)
+    {
+        if (backend is null)
+        {
+            return false;
+        }
+        try
+        {
+            backend.RestoreDocumentState(dirty);
             Refresh();
             return true;
         }
@@ -872,7 +909,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public bool ToggleTheme()
+    public bool ToggleTheme() => ToggleTheme(markDirty: true);
+
+    public bool ToggleTheme(bool markDirty)
     {
         if (backend is null)
         {
@@ -880,7 +919,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         try
         {
-            backend.SetTheme(!snapshot.DarkTheme);
+            backend.SetTheme(!snapshot.DarkTheme, markDirty);
             Refresh();
             return true;
         }
@@ -891,7 +930,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public bool LoadTheme(string path)
+    public bool LoadTheme(string path) => LoadTheme(path, markDirty: true);
+
+    public bool LoadTheme(string path, bool markDirty)
     {
         if (backend is null || string.IsNullOrWhiteSpace(path))
         {
@@ -899,7 +940,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         try
         {
-            backend.LoadTheme(path);
+            backend.LoadTheme(path, markDirty);
             Refresh();
             Status = $"主题已加载: {ThemeDisplayName}";
             return true;
@@ -923,7 +964,29 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode),
-                nameof(SelectedNodeDisplayName), nameof(SelectedParameters));
+                nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(CanDuplicateSelected), nameof(CanDeleteSelected));
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            return false;
+        }
+    }
+
+    public bool ClearSelection()
+    {
+        if (backend is null)
+        {
+            return false;
+        }
+        try
+        {
+            backend.ClearSelection();
+            snapshot = backend.ReadSnapshot();
+            RebuildCanvasProjections();
+            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode),
+                nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(CanDuplicateSelected), nameof(CanDeleteSelected));
             return true;
         }
         catch (Exception exception)
@@ -945,7 +1008,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode),
-                nameof(SelectedNodeDisplayName), nameof(SelectedParameters));
+                nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(CanDuplicateSelected), nameof(CanDeleteSelected));
             return true;
         }
         catch (Exception exception)
@@ -968,7 +1031,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             RebuildCanvasProjections();
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode),
                 nameof(SelectedNodeDisplayName), nameof(SelectedParameters),
-                nameof(IsDirty), nameof(WindowTitle), nameof(FileStatus));
+                nameof(IsDirty), nameof(WindowTitle), nameof(FileStatus), nameof(CanDuplicateSelected), nameof(CanDeleteSelected),
+                nameof(CanConnectNodes), nameof(CanDisconnectNodes));
             return true;
         }
         catch (Exception exception)

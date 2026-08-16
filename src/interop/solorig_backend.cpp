@@ -637,10 +637,20 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_parameter_utf8(
     const char* instance_id_utf8,
     const char* parameter_id_utf8,
     float value) {
-    if (!ValidBackend(backend) || !ValidText(instance_id_utf8) || !ValidText(parameter_id_utf8) || !std::isfinite(value)) {
+    return solorig_backend_set_parameter_utf8_with_dirty(backend, instance_id_utf8, parameter_id_utf8, value, 1U);
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_parameter_utf8_with_dirty(
+    SoloRigBackend* backend,
+    const char* instance_id_utf8,
+    const char* parameter_id_utf8,
+    float value,
+    uint8_t mark_dirty) {
+    if (!ValidBackend(backend) || !ValidText(instance_id_utf8) || !ValidText(parameter_id_utf8) ||
+        !std::isfinite(value) || mark_dirty > 1U) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "valid parameter identifiers and finite value are required");
     }
-    if (!backend->editor.SetNodeParameter(instance_id_utf8, parameter_id_utf8, value)) {
+    if (!backend->editor.SetNodeParameter(instance_id_utf8, parameter_id_utf8, value, mark_dirty != 0U)) {
         return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "parameter target was not found or value was rejected");
     }
     backend->last_error.clear();
@@ -704,13 +714,34 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_clear_node_performance(
     return SOLO_RIG_STATUS_OK;
 }
 
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_restore_document_state(
+    SoloRigBackend* backend,
+    uint8_t dirty) {
+    if (!ValidBackend(backend) || dirty > 1U) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "document dirty state must be 0 or 1");
+    }
+    const auto preset = backend->editor.ExportPreset();
+    const auto source = backend->editor.SourcePath();
+    const auto status = std::string(backend->editor.FileStatus());
+    backend->editor.RestoreDocument(preset, source, dirty != 0U, status);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark(
     SoloRigBackend* backend,
     uint8_t dark) {
-    if (!ValidBackend(backend) || dark > 1U) {
+    return solorig_backend_set_theme_dark_with_dirty(backend, dark, 1U);
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark_with_dirty(
+    SoloRigBackend* backend,
+    uint8_t dark,
+    uint8_t mark_dirty) {
+    if (!ValidBackend(backend) || dark > 1U || mark_dirty > 1U) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "theme mode must be 0 or 1");
     }
-    backend->editor.SetThemeMode(dark != 0U);
+    backend->editor.SetThemeMode(dark != 0U, mark_dirty != 0U);
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -718,10 +749,17 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark(
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_load_theme_utf8(
     SoloRigBackend* backend,
     const char* path_utf8) {
-    if (!ValidBackend(backend) || !ValidText(path_utf8)) {
+    return solorig_backend_load_theme_utf8_with_dirty(backend, path_utf8, 1U);
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_load_theme_utf8_with_dirty(
+    SoloRigBackend* backend,
+    const char* path_utf8,
+    uint8_t mark_dirty) {
+    if (!ValidBackend(backend) || !ValidText(path_utf8) || mark_dirty > 1U) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "a theme path is required");
     }
-    if (!backend->editor.LoadThemeFile(PathFromUtf8(path_utf8))) {
+    if (!backend->editor.LoadThemeFile(PathFromUtf8(path_utf8), mark_dirty != 0U)) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_THEME, "theme file could not be loaded");
     }
     backend->last_error.clear();
@@ -776,6 +814,16 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_select_at(
     if (!backend->editor.SelectAt({.x = x, .y = y})) {
         return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "no node was found at the editor coordinate");
     }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_clear_selection(
+    SoloRigBackend* backend) {
+    if (!ValidBackend(backend)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "a backend is required");
+    }
+    backend->editor.ClearSelection();
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }

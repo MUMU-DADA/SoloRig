@@ -161,6 +161,11 @@ TEST_CASE("C ABI backend exposes DPI-stable selection, drag snapping and connect
     REQUIRE(node.selected != 0U);
     REQUIRE(after_drag.dirty != 0U);
     solorig_snapshot_destroy(snapshot);
+    REQUIRE(solorig_backend_clear_selection(backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_snapshot_node(snapshot, 0U, &node) == SOLO_RIG_STATUS_OK);
+    REQUIRE(node.selected == 0U);
+    solorig_snapshot_destroy(snapshot);
     solorig_backend_destroy(backend);
 }
 
