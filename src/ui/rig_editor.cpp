@@ -942,8 +942,11 @@ void RigEditorViewModel::RebuildScene() {
     scene_.dirty = dirty_;
     scene_.nodes.clear();
     scene_.connections.clear();
+    // Keep the shared C# Avalonia card geometry and native hit-test/connection
+    // geometry in lockstep.  The first-design workbench uses taller cards so
+    // the compact control row and the endpoint sockets have clear separation.
     constexpr double kNodeWidth = 196.0;
-    constexpr double kNodeHeight = 126.0;
+    constexpr double kNodeHeight = 154.0;
     for (const auto& node : preset_.nodes) {
         const auto position = layout_.Find(node.instance_id).value_or(PedalPosition{});
         const auto* entry = FindCatalogEntry(node.module_id);

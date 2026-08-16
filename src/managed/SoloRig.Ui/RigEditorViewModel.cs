@@ -9,16 +9,30 @@ public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, dou
 {
     public string InstanceId => Source.InstanceId;
     public string ModuleId => Source.ModuleId;
+    public string DisplayName => FormatModuleName(Source.ModuleId, Source.InstanceId);
+    public string CategoryText => Source.ModuleId.Contains("delay", StringComparison.OrdinalIgnoreCase)
+        ? "Digital · Feedback"
+        : Source.ModuleId.Contains("drive", StringComparison.OrdinalIgnoreCase)
+            ? "Analog · Whitebox MNA"
+            : "Whitebox · Audio module";
     public bool Selected => Source.Selected;
     public bool Unresolved => Source.Unresolved;
     public string Diagnostic => Source.Diagnostic;
     public IReadOnlyList<ParameterSnapshot> Parameters => Source.Parameters;
     public string LayoutText => Source.LayoutText;
     public string PerformanceText => Source.PerformanceText;
+    public string LatencyText => $"{Source.DeclaredLatencySamples} samples · {Source.EstimatedCpuPercent:0.0}% CPU";
+    public string NodeStateText => Unresolved ? "资源缺失" : "已启用";
     public double Width => 196.0;
-    public double Height => 142.0;
-    public string CardBackground => Selected ? "#3D6682" : "#30343B";
-    public string CardBorder => Selected ? "#79C7FF" : "#777F8A";
+    public double Height => 154.0;
+    public string CardBackground => Selected ? "#29463F" : "#232D37";
+    public string CardBorder => Selected ? "#4DD6A4" : "#4B5B6A";
+
+    private static string FormatModuleName(string moduleId, string fallback)
+    {
+        var name = moduleId.Split('.', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+        return string.IsNullOrWhiteSpace(name) ? fallback : name.Replace('-', ' ');
+    }
 }
 
 public sealed record CanvasConnectionSnapshot(

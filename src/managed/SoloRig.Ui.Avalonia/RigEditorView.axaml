@@ -1,253 +1,526 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="SoloRig.Ui.Avalonia.RigEditorView">
-  <DockPanel Margin="16">
-    <Border DockPanel.Dock="Top" Padding="12" Background="#20242B" CornerRadius="8">
-      <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto">
-        <StackPanel Grid.Row="0" Grid.Column="0" Spacing="3">
-          <TextBlock FontSize="24" FontWeight="Bold" Text="{Binding WindowTitle}" />
-          <TextBlock Text="SoloRig C# Standalone · 共享 Avalonia 编辑器视图" Foreground="#AAB5C5" />
-        </StackPanel>
-        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="7">
-          <Button Content="新建" Command="{Binding NewPresetCommand}" />
-          <Button Content="快捷默认" Command="{Binding NewPresetCommand}" />
-          <Button Content="打开" Click="OpenClick" />
-          <Button Content="保存" Click="SaveClick" />
-          <Button Content="另存为" Click="SaveAsClick" />
-          <Button Content="切换主题" Command="{Binding ToggleThemeCommand}" />
-        </StackPanel>
-        <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="0,10,0,0" Text="{Binding Status}" />
-        <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="18" Margin="0,6,0,0">
-          <TextBlock Text="{Binding FileStatus}" />
-          <ComboBox x:Name="PresetSelector" Width="180" ItemsSource="{Binding PresetNames}"
-                    SelectedItem="{Binding SelectedPresetName, Mode=TwoWay}" />
-          <TextBlock Text="{Binding AudioStatus}" />
-          <TextBlock Text="{Binding MidiStatus}" />
-          <TextBlock x:Name="PerformanceText" Text="{Binding PerformanceStatus}" />
-          <TextBlock x:Name="RealtimeStatusText" Text="{Binding RealtimeStatus}" />
-          <TextBlock x:Name="WhiteboxStatusText" Text="{Binding WhiteboxStatusText}" />
-        </StackPanel>
-      </Grid>
-    </Border>
+  <UserControl.Styles>
+    <Style Selector="TextBlock.srg-text">
+      <Setter Property="Foreground" Value="#EEF3F8" />
+    </Style>
+    <Style Selector="TextBlock.srg-muted">
+      <Setter Property="Foreground" Value="#9AA8B8" />
+    </Style>
+    <Style Selector="TextBlock.srg-small">
+      <Setter Property="Foreground" Value="#9AA8B8" />
+      <Setter Property="FontSize" Value="10" />
+    </Style>
+    <Style Selector="TextBlock.srg-eyebrow">
+      <Setter Property="Foreground" Value="#9AA8B8" />
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.srg-button">
+      <Setter Property="Background" Value="#222A34" />
+      <Setter Property="BorderBrush" Value="#394655" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="#EEF3F8" />
+      <Setter Property="CornerRadius" Value="7" />
+      <Setter Property="Padding" Value="10,7" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="Button.srg-button:pointerover">
+      <Setter Property="Background" Value="#2A3440" />
+      <Setter Property="BorderBrush" Value="#66A7FF" />
+    </Style>
+    <Style Selector="Button.srg-button.primary">
+      <Setter Property="Background" Value="#4DD6A4" />
+      <Setter Property="BorderBrush" Value="#4DD6A4" />
+      <Setter Property="Foreground" Value="#10261F" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.srg-button.primary:pointerover">
+      <Setter Property="Background" Value="#69E2B5" />
+      <Setter Property="BorderBrush" Value="#69E2B5" />
+    </Style>
+    <Style Selector="Button.srg-button.ghost">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="TextBox.srg-input">
+      <Setter Property="Background" Value="#11151B" />
+      <Setter Property="BorderBrush" Value="#394655" />
+      <Setter Property="Foreground" Value="#EEF3F8" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="9,7" />
+    </Style>
+    <Style Selector="ComboBox.srg-input">
+      <Setter Property="Background" Value="#222A34" />
+      <Setter Property="BorderBrush" Value="#394655" />
+      <Setter Property="Foreground" Value="#EEF3F8" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ListBox.srg-list">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="ListBox.srg-list ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.srg-list ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Expander.srg-expander">
+      <Setter Property="Background" Value="#191F27" />
+      <Setter Property="BorderBrush" Value="#394655" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="10" />
+    </Style>
+  </UserControl.Styles>
 
-    <Border DockPanel.Dock="Right" Width="270" Margin="14,14,0,0" Padding="12"
-            Background="#242A32" BorderBrush="#58616C" BorderThickness="1" CornerRadius="8">
-      <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Spacing="10">
-          <TextBlock FontSize="18" FontWeight="Bold" Text="模块目录" />
-          <TextBox Watermark="搜索模块" Text="{Binding ModuleSearchText}" />
-          <ListBox x:Name="ModuleCatalogList" Height="118" ItemsSource="{Binding FilteredModuleCatalog}"
-                   SelectedItem="{Binding SelectedCatalogModule}">
-            <ListBox.ItemTemplate>
-              <DataTemplate>
-                <StackPanel Spacing="2">
-                  <TextBlock Text="{Binding DisplayText}" FontWeight="Bold" />
-                  <TextBlock Text="{Binding ModuleId}" FontSize="11" Foreground="#AAB5C5" />
-                </StackPanel>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-          <StackPanel Orientation="Horizontal" Spacing="5">
-            <Button Content="添加模块" Command="{Binding AddModuleCommand}" />
-            <Button Content="删除节点" Command="{Binding DeleteSelectedCommand}" />
-            <Button Content="复制节点" Command="{Binding DuplicateSelectedCommand}" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="5">
-            <Button Content="连接首尾" Command="{Binding ConnectSelectedCommand}" />
-            <Button Content="断开首条" Command="{Binding DisconnectSelectedCommand}" />
-          </StackPanel>
-          <TextBlock Text="{Binding ResourceStatus}" Foreground="#AAB5C5" TextWrapping="Wrap" />
-          <Button Content="导入 NAM / A2 / IR / circuit" Click="ImportResourceClick" />
-          <Border Padding="8" Background="#303740" CornerRadius="5">
-            <StackPanel Spacing="7">
-              <TextBlock FontSize="16" FontWeight="Bold" Text="音频设备 / 固定 I/O" />
-              <TextBlock Text="{Binding AsioRouteText}" Foreground="#C4CBD5" TextWrapping="Wrap" />
-              <Button Content="刷新 ASIO 设备" Click="RefreshAsioClick" />
-              <ComboBox ItemsSource="{Binding AsioDrivers}" SelectedIndex="{Binding SelectedAsioDriverIndex, Mode=TwoWay}"
-                        PlaceholderText="选择 ASIO 设备">
-                <ComboBox.ItemTemplate>
-                  <DataTemplate>
-                    <StackPanel Spacing="1">
-                      <TextBlock Text="{Binding DisplayText}" />
-                      <TextBlock Text="{Binding SampleRateText}" FontSize="11" Foreground="#AAB5C5" />
-                    </StackPanel>
-                  </DataTemplate>
-                </ComboBox.ItemTemplate>
-              </ComboBox>
-              <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="输入端口 1" />
-                <TextBlock Grid.Row="0" Grid.Column="1" Text="输入端口 2" />
-                <ComboBox Grid.Row="1" Grid.Column="0" Margin="0,3,3,0" ItemsSource="{Binding AsioInputPorts}"
-                          SelectedItem="{Binding SelectedInputChannel0, Mode=TwoWay}" />
-                <ComboBox Grid.Row="1" Grid.Column="1" Margin="3,3,0,0" ItemsSource="{Binding AsioInputPorts}"
-                          SelectedItem="{Binding SelectedInputChannel1, Mode=TwoWay}" />
-              </Grid>
-              <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="输出端口 1" />
-                <TextBlock Grid.Row="0" Grid.Column="1" Text="输出端口 2" />
-                <ComboBox Grid.Row="1" Grid.Column="0" Margin="0,3,3,0" ItemsSource="{Binding AsioOutputPorts}"
-                          SelectedItem="{Binding SelectedOutputChannel0, Mode=TwoWay}" />
-                <ComboBox Grid.Row="1" Grid.Column="1" Margin="3,3,0,0" ItemsSource="{Binding AsioOutputPorts}"
-                          SelectedItem="{Binding SelectedOutputChannel1, Mode=TwoWay}" />
-              </Grid>
-              <StackPanel Orientation="Horizontal" Spacing="5">
-                <Button Content="打开" Click="OpenAsioClick" />
-                <Button Content="启动" Click="StartAsioClick" />
-                <Button Content="停止" Click="StopAsioClick" />
-                <Button Content="关闭" Click="CloseAsioClick" />
-              </StackPanel>
-              <StackPanel Orientation="Horizontal" Spacing="5">
-                <Button Content="恢复音频" Click="RecoverAsioClick" />
-                <Button Content="{Binding TunerStatus}" Click="ToggleTunerClick" />
-              </StackPanel>
+  <Border Classes="srg-window" Background="#11151B" BorderBrush="#394655" BorderThickness="1"
+          CornerRadius="12" ClipToBounds="True">
+    <Grid RowDefinitions="Auto,*,Auto">
+      <Border Grid.Row="0" Background="#161B22" BorderBrush="#394655" BorderThickness="0,0,0,1"
+              Padding="18,12">
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+          <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+            <Border Width="30" Height="30" CornerRadius="9" Background="#4DD6A4">
+              <TextBlock Text="S" Foreground="#10261F" FontSize="17" FontWeight="Bold"
+                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <StackPanel Spacing="1" VerticalAlignment="Center">
+              <TextBlock Text="SOLORIG" Classes="srg-text" FontSize="12" FontWeight="Bold" />
+              <TextBlock Text="WHITEBOX AUDIO RIG" Classes="srg-muted" FontSize="10" />
             </StackPanel>
-          </Border>
-          <Border Padding="8" Background="#303740" CornerRadius="5">
-            <StackPanel Spacing="7">
-              <TextBlock FontSize="16" FontWeight="Bold" Text="MIDI 控制" />
-              <Button Content="刷新 MIDI 设备" Click="RefreshMidiClick" />
-              <ComboBox ItemsSource="{Binding MidiDevices}" SelectedIndex="{Binding SelectedMidiDeviceIndex, Mode=TwoWay}"
-                        PlaceholderText="选择 MIDI 输入">
-                <ComboBox.ItemTemplate>
-                  <DataTemplate>
-                    <TextBlock Text="{Binding DisplayText}" />
-                  </DataTemplate>
-                </ComboBox.ItemTemplate>
-              </ComboBox>
-              <StackPanel Orientation="Horizontal" Spacing="5">
-                <Button Content="打开 MIDI" Click="OpenMidiClick" />
-                <Button Content="关闭 MIDI" Click="CloseMidiClick" />
-                <Button Content="排空消息" Click="DrainMidiClick" />
-              </StackPanel>
-              <TextBlock Text="CC Learn 目标" Foreground="#C4CBD5" />
-              <ComboBox ItemsSource="{Binding MidiLearnTargets}"
-                        SelectedIndex="{Binding SelectedMidiTargetIndex, Mode=TwoWay}"
-                        PlaceholderText="选择要控制的参数">
-                <ComboBox.ItemTemplate>
-                  <DataTemplate>
-                    <TextBlock Text="{Binding DisplayText}" />
-                  </DataTemplate>
-                </ComboBox.ItemTemplate>
-              </ComboBox>
-              <StackPanel Orientation="Horizontal" Spacing="5">
-                <Button Content="学习 CC" Click="ArmMidiLearnClick" />
-                <Button Content="取消学习" Click="CancelMidiLearnClick" />
-              </StackPanel>
-              <TextBlock Text="{Binding MidiLearnStatus}" Foreground="#75F2E6" />
-              <TextBlock Text="MIDI 绑定" Foreground="#C4CBD5" />
-              <ListBox Height="92" ItemsSource="{Binding MidiBindings}"
-                       SelectedIndex="{Binding SelectedMidiBindingIndex, Mode=TwoWay}">
+          </StackPanel>
+
+          <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+            <TextBlock Text="当前工程" Classes="srg-eyebrow" />
+            <TextBlock Text="{Binding WindowTitle}" Classes="srg-text" FontSize="15" />
+            <TextBlock Text="{Binding Status}" Classes="srg-muted" FontSize="9" TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+
+          <ComboBox Grid.Column="2" x:Name="PresetSelector" Classes="srg-input" Width="178"
+                    ItemsSource="{Binding PresetNames}" SelectedItem="{Binding SelectedPresetName, Mode=TwoWay}"
+                    VerticalAlignment="Center" />
+
+          <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <Button Classes="srg-button ghost" Content="新建" Command="{Binding NewPresetCommand}" />
+            <Button Classes="srg-button ghost" Content="默认" Command="{Binding NewPresetCommand}" />
+            <Button Classes="srg-button ghost" Content="打开" Click="OpenClick" />
+            <Button Classes="srg-button ghost" Content="另存为" Click="SaveAsClick" />
+            <Button Classes="srg-button primary" Content="保存" Click="SaveClick" />
+            <Button Classes="srg-button" Content="◐" ToolTip.Tip="切换主题" Command="{Binding ToggleThemeCommand}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <Grid Grid.Row="1" ColumnDefinitions="226,*,286" MinHeight="500">
+        <Border Grid.Column="0" Background="#191F27" BorderBrush="#394655" BorderThickness="0,0,1,0"
+                Padding="15">
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="11">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="模块库" Classes="srg-text" FontSize="13" FontWeight="SemiBold" />
+                <TextBlock Grid.Column="1" Text="{Binding ModuleCatalog.Count, StringFormat={}{0} 个可用}" Classes="srg-small" />
+              </Grid>
+              <TextBox Classes="srg-input" Watermark="搜索模块" Text="{Binding ModuleSearchText}" />
+              <Grid ColumnDefinitions="*,*,*">
+                <Border Grid.Column="0" Background="#2A3440" CornerRadius="5" Padding="6,5">
+                  <TextBlock Text="模拟" Classes="srg-text" FontSize="11" HorizontalAlignment="Center" />
+                </Border>
+                <TextBlock Grid.Column="1" Text="数字" Classes="srg-muted" FontSize="11"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="外部" Classes="srg-muted" FontSize="11"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Grid>
+              <ListBox x:Name="ModuleCatalogList" Classes="srg-list" Height="205"
+                       ItemsSource="{Binding FilteredModuleCatalog}" SelectedItem="{Binding SelectedCatalogModule}">
                 <ListBox.ItemTemplate>
                   <DataTemplate>
-                    <TextBlock Text="{Binding DisplayText}" TextWrapping="Wrap" />
+                    <Border Padding="8" Background="#1B242D" BorderBrush="#2C3946" BorderThickness="1"
+                            CornerRadius="7">
+                      <Grid ColumnDefinitions="Auto,*">
+                        <Border Width="28" Height="28" CornerRadius="7" Background="#4DD6A4"
+                                VerticalAlignment="Center">
+                          <TextBlock Text="FX" Foreground="#10261F" FontSize="10" FontWeight="Bold"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Grid.Column="1" Spacing="2">
+                          <TextBlock Text="{Binding DisplayName}" Classes="srg-text" FontSize="12" FontWeight="SemiBold" />
+                          <TextBlock Text="{Binding Category}" Classes="srg-muted" FontSize="10" />
+                          <TextBlock Text="{Binding Description}" Classes="srg-muted" FontSize="10"
+                                     TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                      </Grid>
+                    </Border>
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
-              <StackPanel Orientation="Horizontal" Spacing="5">
-                <Button Content="删除绑定" Click="DeleteMidiBindingClick" />
-                <Button Content="清空绑定" Click="ClearMidiBindingsClick" />
+              <StackPanel Spacing="6">
+                <Button Classes="srg-button primary" Content="＋ 添加所选模块" Command="{Binding AddModuleCommand}" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <Button Classes="srg-button" Content="复制节点" Command="{Binding DuplicateSelectedCommand}" HorizontalAlignment="Stretch" />
+                  <Button Classes="srg-button" Content="删除节点" Command="{Binding DeleteSelectedCommand}" HorizontalAlignment="Stretch" />
+                </StackPanel>
               </StackPanel>
-              <Button Content="导入 MIDI Bank 目录" Click="ImportMidiBankClick" />
+              <Border BorderBrush="#394655" BorderThickness="0,1,0,0" Padding="0,12,0,0">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="资源" Classes="srg-eyebrow" />
+                  <TextBlock Text="{Binding ResourceStatus}" Classes="srg-muted" FontSize="11" TextWrapping="Wrap" />
+                  <Button Classes="srg-button" Content="导入 NAM / A2 / IR / Circuit" Click="ImportResourceClick" />
+                  <TextBlock Text="选择模块后点击添加，拖动卡片可改变拓扑位置。"
+                             Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
             </StackPanel>
-          </Border>
-          <TextBlock FontSize="18" FontWeight="Bold" Text="参数编辑" />
-          <TextBlock Text="{Binding SelectedNode.InstanceId, FallbackValue=未选择节点}" />
-          <TextBlock Text="点击节点选中；拖动时按网格吸附。" Foreground="#AAB5C5" TextWrapping="Wrap" />
-          <ItemsControl ItemsSource="{Binding SelectedParameters}">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate>
-                <Grid ColumnDefinitions="*,100" Margin="0,3">
-                  <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="{Binding Id}" />
-                  <TextBox Grid.Column="1" Tag="{Binding Target}" Text="{Binding ValueText}"
-                           LostFocus="ParameterLostFocus" HorizontalContentAlignment="Right" />
-                </Grid>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-          <Border Margin="0,12,0,0" Padding="8" Background="#303740" CornerRadius="5">
-            <TextBlock Text="C# 界面只负责交互与控制线程；ASIO/MIDI/实时白盒处理由原生后端执行。"
-                       Foreground="#C4CBD5" TextWrapping="Wrap" />
-          </Border>
-        </StackPanel>
-      </ScrollViewer>
-    </Border>
+          </ScrollViewer>
+        </Border>
 
-    <Border Margin="0,14,0,0" Padding="10" Background="#171A1F" BorderBrush="#58616C"
-            BorderThickness="1" CornerRadius="8">
-      <Canvas x:Name="EditorCanvas" ClipToBounds="True" Background="#1B2027"
-              PointerPressed="CanvasPointerPressed" PointerMoved="CanvasPointerMoved"
-              PointerReleased="CanvasPointerReleased" SizeChanged="CanvasSizeChanged">
-        <Border Canvas.Left="12" Canvas.Top="22" Width="178" Height="82" Padding="10"
-                Background="#243A45" BorderBrush="#51D0C4" BorderThickness="2" CornerRadius="8">
-          <Grid ColumnDefinitions="*,Auto">
-            <StackPanel Grid.Column="0" Spacing="3">
-              <TextBlock Text="INPUT" FontWeight="Bold" Foreground="#75F2E6" />
-              <TextBlock Text="{Binding FixedInputPortText}" FontSize="11"
-                         Foreground="#D7F9F5" TextWrapping="Wrap" />
-            </StackPanel>
-            <Ellipse Grid.Column="1" Width="18" Height="18" Margin="8,0,0,0"
-                     Fill="#51D0C4" Stroke="#E8FFFC" StrokeThickness="2"
-                     Tag="fixed-input" PointerPressed="FixedEndpointPressed" />
-          </Grid>
-        </Border>
-        <Border Canvas.Right="12" Canvas.Top="22" Width="178" Height="82" Padding="10"
-                Background="#3D3048" BorderBrush="#CE8BFF" BorderThickness="2" CornerRadius="8">
-          <Grid ColumnDefinitions="Auto,*">
-            <Ellipse Grid.Column="0" Width="18" Height="18" Margin="0,0,8,0"
-                     Fill="#CE8BFF" Stroke="#FFF4FF" StrokeThickness="2"
-                     Tag="fixed-output" PointerPressed="FixedEndpointPressed" />
-            <StackPanel Grid.Column="1" Spacing="3">
-              <TextBlock Text="OUTPUT" FontWeight="Bold" Foreground="#E8BDFF" />
-              <TextBlock Text="{Binding FixedOutputPortText}" FontSize="11"
-                         Foreground="#F5E8FF" TextWrapping="Wrap" />
-            </StackPanel>
-          </Grid>
-        </Border>
-        <ItemsControl ItemsSource="{Binding CanvasConnections}">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Line StartPoint="{Binding SourcePoint}" EndPoint="{Binding DestinationPoint}"
-                    Stroke="#7B8795" StrokeThickness="3" />
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-        <ItemsControl ItemsSource="{Binding CanvasNodes}">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemContainerTheme>
-            <ControlTheme TargetType="ContentPresenter">
-              <Setter Property="Canvas.Left" Value="{Binding CanvasX}" />
-              <Setter Property="Canvas.Top" Value="{Binding CanvasY}" />
-            </ControlTheme>
-          </ItemsControl.ItemContainerTheme>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Grid Width="{Binding Width}" Height="{Binding Height}">
-                <Border Padding="10" Background="{Binding CardBackground}" BorderBrush="{Binding CardBorder}"
-                        BorderThickness="2" CornerRadius="8">
-                  <StackPanel Spacing="4">
-                    <TextBlock FontSize="17" FontWeight="Bold" Text="{Binding InstanceId}" />
-                    <TextBlock Text="{Binding ModuleId}" TextWrapping="Wrap" Foreground="#D7DDE6" />
-                    <TextBlock Text="{Binding LayoutText}" Foreground="#B8C1CD" />
-                    <TextBlock Text="{Binding PerformanceText}" Foreground="#AAB5C5" TextWrapping="Wrap" />
-                    <TextBlock Text="缺失模块资源" IsVisible="{Binding Unresolved}" Foreground="#FFB454" />
-                  </StackPanel>
+        <Border Grid.Column="1" Background="#151C24">
+          <Grid RowDefinitions="Auto,*">
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="17,14,17,10">
+              <StackPanel Spacing="2">
+                <TextBlock Text="效果器链路" Classes="srg-text" FontSize="13" FontWeight="SemiBold" />
+                <TextBlock Text="自由移动模块 · 点击两个端点建立方向连接" Classes="srg-muted" FontSize="10" />
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                <Button Classes="srg-button ghost" Content="连接首尾" Command="{Binding ConnectSelectedCommand}" />
+                <Button Classes="srg-button ghost" Content="断开首条" Command="{Binding DisconnectSelectedCommand}" />
+              </StackPanel>
+            </Grid>
+
+            <Border Grid.Row="1" Margin="16,0,16,14" BorderBrush="#3A4753" BorderThickness="1"
+                    CornerRadius="8" ClipToBounds="True">
+              <Border.Background>
+                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                  <GradientStop Color="#26313C" Offset="0" />
+                  <GradientStop Color="#182029" Offset="0.55" />
+                  <GradientStop Color="#131820" Offset="1" />
+                </LinearGradientBrush>
+              </Border.Background>
+              <Canvas x:Name="EditorCanvas" ClipToBounds="True"
+                      PointerPressed="CanvasPointerPressed" PointerMoved="CanvasPointerMoved"
+                      PointerReleased="CanvasPointerReleased" SizeChanged="CanvasSizeChanged">
+                <Border Canvas.Left="18" Canvas.Top="174" Width="132" Height="124" Padding="10"
+                        Background="#1D2A38" BorderBrush="#66A7FF" BorderThickness="1" CornerRadius="9">
+                  <Grid RowDefinitions="Auto,*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="INPUT" Classes="srg-text" FontSize="12" FontWeight="Bold" />
+                      <TextBlock Text="物理设备输入" Classes="srg-muted" FontSize="10" />
+                    </StackPanel>
+                    <TextBlock Grid.Row="1" Text="{Binding FixedInputPortText}" Classes="srg-muted" FontSize="10"
+                               TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,9,0,0">
+                      <Border Height="5" Background="#10151A" CornerRadius="3" VerticalAlignment="Center">
+                        <Border Width="48" HorizontalAlignment="Left" Background="#66A7FF" CornerRadius="3" />
+                      </Border>
+                      <Ellipse Grid.Column="1" Width="11" Height="11" Margin="8,0,-16,0"
+                               Fill="#66A7FF" Stroke="#E8F2FF" StrokeThickness="2"
+                               Tag="fixed-input" PointerPressed="FixedEndpointPressed" />
+                    </Grid>
+                  </Grid>
                 </Border>
-                <Ellipse Width="16" Height="16" HorizontalAlignment="Left" VerticalAlignment="Center"
-                         Margin="-8,0,0,0" Fill="#51D0C4" Stroke="#E8FFFC" StrokeThickness="2"
-                         Tag="{Binding InstanceId}" PointerPressed="NodeInputEndpointPressed" />
-                <Ellipse Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center"
-                         Margin="0,0,-8,0" Fill="#CE8BFF" Stroke="#FFF4FF" StrokeThickness="2"
-                         Tag="{Binding InstanceId}" PointerPressed="NodeOutputEndpointPressed" />
+
+                <Border Canvas.Right="18" Canvas.Top="174" Width="132" Height="124" Padding="10"
+                        Background="#282038" BorderBrush="#B889F5" BorderThickness="1" CornerRadius="9">
+                  <Grid RowDefinitions="Auto,*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="OUTPUT" Classes="srg-text" FontSize="12" FontWeight="Bold" />
+                      <TextBlock Text="物理设备输出" Classes="srg-muted" FontSize="10" />
+                    </StackPanel>
+                    <TextBlock Grid.Row="1" Text="{Binding FixedOutputPortText}" Classes="srg-muted" FontSize="10"
+                               TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <Grid Grid.Row="2" ColumnDefinitions="Auto,*" Margin="0,9,0,0">
+                      <Ellipse Width="11" Height="11" Margin="-16,0,8,0"
+                               Fill="#B889F5" Stroke="#FFF4FF" StrokeThickness="2"
+                               Tag="fixed-output" PointerPressed="FixedEndpointPressed" />
+                      <Border Grid.Column="1" Height="5" Background="#10151A" CornerRadius="3" VerticalAlignment="Center">
+                        <Border Width="72" HorizontalAlignment="Left" Background="#B889F5" CornerRadius="3" />
+                      </Border>
+                    </Grid>
+                  </Grid>
+                </Border>
+
+                <Line StartPoint="150,236" EndPoint="1000,236"
+                      Stroke="#31414F" StrokeThickness="1" Opacity="0.6" />
+                <ItemsControl ItemsSource="{Binding CanvasConnections}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Line StartPoint="{Binding SourcePoint}" EndPoint="{Binding DestinationPoint}"
+                            Stroke="#4DD6A4" StrokeThickness="3" Opacity="0.82" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <ItemsControl ItemsSource="{Binding CanvasNodes}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemContainerTheme>
+                    <ControlTheme TargetType="ContentPresenter">
+                      <Setter Property="Canvas.Left" Value="{Binding CanvasX}" />
+                      <Setter Property="Canvas.Top" Value="{Binding CanvasY}" />
+                    </ControlTheme>
+                  </ItemsControl.ItemContainerTheme>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Width="{Binding Width}" Height="{Binding Height}">
+                        <Border Padding="11" Background="{Binding CardBackground}" BorderBrush="{Binding CardBorder}"
+                                BorderThickness="1" CornerRadius="10">
+                          <Grid RowDefinitions="Auto,*,Auto">
+                            <Grid ColumnDefinitions="*,Auto">
+                              <StackPanel Spacing="2">
+                                <TextBlock Text="{Binding DisplayName}" Classes="srg-text" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding CategoryText}" Classes="srg-muted" FontSize="10" />
+                              </StackPanel>
+                              <TextBlock Grid.Column="1" Text="•••" Classes="srg-muted" FontSize="12" />
+                            </Grid>
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12"
+                                        HorizontalAlignment="Center" VerticalAlignment="Center">
+                              <StackPanel Spacing="4" HorizontalAlignment="Center">
+                                <Ellipse Width="29" Height="29" Fill="#303C47" Stroke="#4DD6A4" StrokeThickness="3" />
+                                <TextBlock Text="参数" Classes="srg-muted" FontSize="9" HorizontalAlignment="Center" />
+                              </StackPanel>
+                              <StackPanel Spacing="4" HorizontalAlignment="Center">
+                                <Ellipse Width="29" Height="29" Fill="#303C47" Stroke="#4DD6A4" StrokeThickness="3" />
+                                <TextBlock Text="混合" Classes="srg-muted" FontSize="9" HorizontalAlignment="Center" />
+                              </StackPanel>
+                              <StackPanel Spacing="4" HorizontalAlignment="Center">
+                                <Ellipse Width="29" Height="29" Fill="#303C47" Stroke="#4DD6A4" StrokeThickness="3" />
+                                <TextBlock Text="输出" Classes="srg-muted" FontSize="9" HorizontalAlignment="Center" />
+                              </StackPanel>
+                            </StackPanel>
+                            <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,5,0,0">
+                              <TextBlock Text="{Binding NodeStateText}" Foreground="#4DD6A4" FontSize="10" />
+                              <TextBlock Grid.Column="1" Text="{Binding LatencyText}" Classes="srg-muted" FontSize="9" />
+                            </Grid>
+                          </Grid>
+                        </Border>
+                        <Ellipse Width="13" Height="13" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                 Margin="-7,0,0,0" Fill="#4DD6A4" Stroke="#D8FAED" StrokeThickness="2"
+                                 Tag="{Binding InstanceId}" PointerPressed="NodeInputEndpointPressed" />
+                        <Ellipse Width="13" Height="13" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                 Margin="0,0,-7,0" Fill="#B889F5" Stroke="#FFF4FF" StrokeThickness="2"
+                                 Tag="{Binding InstanceId}" PointerPressed="NodeOutputEndpointPressed" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Canvas.Left="16" Canvas.Bottom="12"
+                           Text="模块可拖动 · 连接操作：先点击源输出端点，再点击目标输入端点"
+                           Classes="srg-muted" FontSize="10" />
+                <Border Canvas.Right="14" Canvas.Bottom="9" Background="#182029" BorderBrush="#637384"
+                        BorderThickness="1" CornerRadius="7" Padding="9,6">
+                  <Button Classes="srg-button ghost" Content="＋ 添加模块" Command="{Binding AddModuleCommand}" />
+                </Border>
+              </Canvas>
+            </Border>
+          </Grid>
+        </Border>
+
+        <Border Grid.Column="2" Background="#191F27" BorderBrush="#394655" BorderThickness="1,0,0,0"
+                Padding="15">
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="12">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="模块检查器" Classes="srg-text" FontSize="13" FontWeight="SemiBold" />
+                <TextBlock Text="拓扑编辑" Classes="srg-muted" FontSize="10" />
               </Grid>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </Canvas>
-    </Border>
-  </DockPanel>
+              <Grid ColumnDefinitions="Auto,*">
+                <Border Width="34" Height="34" CornerRadius="8" Background="#4DD6A4">
+                  <TextBlock Text="FX" Foreground="#10261F" FontSize="10" FontWeight="Bold"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding SelectedNode.InstanceId, FallbackValue=未选择效果器}"
+                             Classes="srg-text" FontSize="17" />
+                  <TextBlock Text="选择节点后在此编辑参数" Classes="srg-muted" FontSize="10" />
+                </StackPanel>
+              </Grid>
+              <Grid ColumnDefinitions="Auto,Auto,Auto">
+                <Border Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="99" Padding="7,3">
+                  <TextBlock Text="Whitebox" Classes="srg-muted" FontSize="9" />
+                </Border>
+                <Border Grid.Column="1" Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="99" Padding="7,3">
+                  <TextBlock Text="Float32" Classes="srg-muted" FontSize="9" />
+                </Border>
+                <Border Grid.Column="2" Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="99" Padding="7,3">
+                  <TextBlock Text="实时" Foreground="#4DD6A4" FontSize="9" />
+                </Border>
+              </Grid>
+              <Grid ColumnDefinitions="*,*,*">
+                <Border Grid.Column="0" Background="#2A3440" CornerRadius="5" Padding="7,6">
+                  <TextBlock Text="参数" Classes="srg-text" FontSize="11" HorizontalAlignment="Center" />
+                </Border>
+                <TextBlock Grid.Column="1" Text="端口" Classes="srg-muted" FontSize="11"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="资源" Classes="srg-muted" FontSize="11"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Grid>
+              <Border Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="7" Padding="9">
+                <StackPanel Spacing="7">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="连接端口" Classes="srg-muted" FontSize="10" />
+                    <TextBlock Text="点击端点操作" Foreground="#4DD6A4" FontSize="10" />
+                  </Grid>
+                  <TextBlock Text="输入 · audio / 2ch" Classes="srg-text" FontSize="11" />
+                  <TextBlock Text="输出 · audio / 2ch" Classes="srg-text" FontSize="11" />
+                </StackPanel>
+              </Border>
+              <ItemsControl ItemsSource="{Binding SelectedParameters}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Grid ColumnDefinitions="*,90" Margin="0,2">
+                      <TextBlock Grid.Column="0" Text="{Binding Id}" Classes="srg-muted" FontSize="11"
+                                 VerticalAlignment="Center" />
+                      <TextBox Grid.Column="1" Classes="srg-input" Tag="{Binding Target}" Text="{Binding ValueText}"
+                               LostFocus="ParameterLostFocus" HorizontalContentAlignment="Right" FontSize="11" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <StackPanel Orientation="Horizontal" Spacing="7">
+                <Button Classes="srg-button" Content="复制" Command="{Binding DuplicateSelectedCommand}" HorizontalAlignment="Stretch" />
+                <Button Classes="srg-button" Content="删除" Command="{Binding DeleteSelectedCommand}" HorizontalAlignment="Stretch" />
+              </StackPanel>
+              <Border Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="7" Padding="9">
+                <StackPanel Spacing="5">
+                  <TextBlock Text="{Binding ResourceStatus}" Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
+                  <Button Classes="srg-button" Content="导入模块资源" Click="ImportResourceClick" />
+                </StackPanel>
+              </Border>
+
+              <Expander Classes="srg-expander" Header="音频设备 / 固定 I/O" IsExpanded="False">
+                <StackPanel Spacing="7" Margin="0,8,0,0">
+                  <TextBlock Text="{Binding AsioRouteText}" Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
+                  <Button Classes="srg-button" Content="刷新 ASIO 设备" Click="RefreshAsioClick" />
+                  <ComboBox x:Name="AsioDeviceSelector" Classes="srg-input" ItemsSource="{Binding AsioDrivers}"
+                            SelectedIndex="{Binding SelectedAsioDriverIndex, Mode=TwoWay}" PlaceholderText="选择 ASIO 设备">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate>
+                        <StackPanel Spacing="1">
+                          <TextBlock Text="{Binding DisplayText}" Classes="srg-text" FontSize="10" />
+                          <TextBlock Text="{Binding SampleRateText}" Classes="srg-muted" FontSize="9" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+                    <TextBlock Text="输入 1" Classes="srg-muted" FontSize="9" />
+                    <TextBlock Grid.Column="1" Text="输入 2" Classes="srg-muted" FontSize="9" />
+                    <ComboBox Grid.Row="1" Classes="srg-input" ItemsSource="{Binding AsioInputPorts}"
+                              SelectedItem="{Binding SelectedInputChannel0, Mode=TwoWay}" FontSize="10" />
+                    <ComboBox Grid.Row="1" Grid.Column="1" Classes="srg-input" ItemsSource="{Binding AsioInputPorts}"
+                              SelectedItem="{Binding SelectedInputChannel1, Mode=TwoWay}" FontSize="10" />
+                  </Grid>
+                  <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+                    <TextBlock Text="输出 1" Classes="srg-muted" FontSize="9" />
+                    <TextBlock Grid.Column="1" Text="输出 2" Classes="srg-muted" FontSize="9" />
+                    <ComboBox Grid.Row="1" Classes="srg-input" ItemsSource="{Binding AsioOutputPorts}"
+                              SelectedItem="{Binding SelectedOutputChannel0, Mode=TwoWay}" FontSize="10" />
+                    <ComboBox Grid.Row="1" Grid.Column="1" Classes="srg-input" ItemsSource="{Binding AsioOutputPorts}"
+                              SelectedItem="{Binding SelectedOutputChannel1, Mode=TwoWay}" FontSize="10" />
+                  </Grid>
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Button Classes="srg-button" Content="打开" Click="OpenAsioClick" />
+                    <Button Classes="srg-button" Content="启动" Click="StartAsioClick" />
+                    <Button Classes="srg-button" Content="停止" Click="StopAsioClick" />
+                    <Button Classes="srg-button" Content="关闭" Click="CloseAsioClick" />
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Button Classes="srg-button" Content="恢复" Click="RecoverAsioClick" />
+                    <Button Classes="srg-button" Content="{Binding TunerStatus}" Click="ToggleTunerClick" />
+                  </StackPanel>
+                </StackPanel>
+              </Expander>
+
+              <Expander Classes="srg-expander" Header="MIDI 控制" IsExpanded="False">
+                <StackPanel Spacing="7" Margin="0,8,0,0">
+                  <Button Classes="srg-button" Content="刷新 MIDI 设备" Click="RefreshMidiClick" />
+                  <ComboBox x:Name="MidiDeviceSelector" Classes="srg-input" ItemsSource="{Binding MidiDevices}"
+                            SelectedIndex="{Binding SelectedMidiDeviceIndex, Mode=TwoWay}" PlaceholderText="选择 MIDI 输入">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate><TextBlock Text="{Binding DisplayText}" Classes="srg-text" FontSize="10" /></DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Button Classes="srg-button" Content="打开" Click="OpenMidiClick" />
+                    <Button Classes="srg-button" Content="关闭" Click="CloseMidiClick" />
+                    <Button Classes="srg-button" Content="排空" Click="DrainMidiClick" />
+                  </StackPanel>
+                  <TextBlock Text="CC Learn 目标" Classes="srg-muted" FontSize="10" />
+                  <ComboBox x:Name="MidiTargetSelector" Classes="srg-input" ItemsSource="{Binding MidiLearnTargets}"
+                            SelectedIndex="{Binding SelectedMidiTargetIndex, Mode=TwoWay}" PlaceholderText="选择要控制的参数">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate><TextBlock Text="{Binding DisplayText}" Classes="srg-text" FontSize="10" /></DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Button Classes="srg-button" Content="学习 CC" Click="ArmMidiLearnClick" />
+                    <Button Classes="srg-button" Content="取消学习" Click="CancelMidiLearnClick" />
+                  </StackPanel>
+                  <TextBlock Text="{Binding MidiLearnStatus}" Foreground="#4DD6A4" FontSize="10" />
+                  <ListBox x:Name="MidiBindingList" Classes="srg-list" Height="82" ItemsSource="{Binding MidiBindings}"
+                           SelectedIndex="{Binding SelectedMidiBindingIndex, Mode=TwoWay}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate><TextBlock Text="{Binding DisplayText}" Classes="srg-muted" FontSize="10" TextWrapping="Wrap" /></DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Button Classes="srg-button" Content="删除绑定" Click="DeleteMidiBindingClick" />
+                    <Button Classes="srg-button" Content="清空绑定" Click="ClearMidiBindingsClick" />
+                  </StackPanel>
+                  <Button Classes="srg-button" Content="导入 MIDI Bank 目录" Click="ImportMidiBankClick" />
+                </StackPanel>
+              </Expander>
+
+              <Border Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="7" Padding="9">
+                <TextBlock Text="C# 界面只负责交互与控制线程；ASIO、MIDI、实时白盒处理由原生后端执行。"
+                           Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+        </Border>
+      </Grid>
+
+      <Border Grid.Row="2" Background="#161B22" BorderBrush="#394655" BorderThickness="0,1,0,0"
+              Padding="18,10">
+        <Grid ColumnDefinitions="1.15*,1.2*,1.05*,1.1*,1.15*">
+          <StackPanel Grid.Column="0" Spacing="2">
+            <TextBlock Text="音频引擎" Classes="srg-eyebrow" />
+            <TextBlock x:Name="AudioStatusText" Text="{Binding AudioStatus}" Classes="srg-text" FontSize="11"
+                       TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+          <StackPanel Grid.Column="1" Spacing="2">
+            <TextBlock Text="固定路由" Classes="srg-eyebrow" />
+            <TextBlock Text="{Binding AsioRouteText}" Classes="srg-muted" FontSize="10"
+                       TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Spacing="2">
+            <TextBlock Text="性能 / 延迟" Classes="srg-eyebrow" />
+            <TextBlock x:Name="PerformanceText" Text="{Binding PerformanceStatus}" Classes="srg-muted" FontSize="10"
+                       TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+          <StackPanel Grid.Column="3" Spacing="2">
+            <TextBlock Text="MIDI" Classes="srg-eyebrow" />
+            <TextBlock Text="{Binding MidiStatus}" Classes="srg-muted" FontSize="10"
+                       TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+          <StackPanel Grid.Column="4" Spacing="2">
+            <TextBlock Text="实时白盒" Classes="srg-eyebrow" />
+            <TextBlock x:Name="RealtimeStatusText" Text="{Binding RealtimeStatus}" Foreground="#4DD6A4" FontSize="10"
+                       TextTrimming="CharacterEllipsis" />
+            <TextBlock x:Name="WhiteboxStatusText" Text="{Binding WhiteboxStatusText}" Classes="srg-muted" FontSize="9"
+                       TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+  </Border>
 </UserControl>
