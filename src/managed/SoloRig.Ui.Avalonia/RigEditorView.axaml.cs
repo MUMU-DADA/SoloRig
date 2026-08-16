@@ -118,6 +118,7 @@ public sealed partial class RigEditorView : UserControl
 
     public bool HasStandaloneVisualContent => HasEditorControlsVisualContent &&
         DocumentStatusText is not null && RealtimeStatusText is not null && WhiteboxStatusText is not null &&
+        EffectChainStripPanel is not null && EffectChainStripPanel.Children.Count >= 2 &&
         HasThemePalette &&
         !string.IsNullOrWhiteSpace(DocumentStatusText.Text) &&
         !string.IsNullOrWhiteSpace(RealtimeStatusText.Text) &&
@@ -382,6 +383,42 @@ public sealed partial class RigEditorView : UserControl
         return probePassed && BuildVisualRegressionFingerprint() == originalFingerprint && filterRestored && tabRestored;
     }
 
+    public bool ProbeEffectChainSelection()
+    {
+        if (viewModel is null || EffectChainStripPanel is null || EffectChainStripPanel.Children.Count == 0)
+        {
+            return false;
+        }
+
+        var originalSelected = viewModel.SelectedNode?.InstanceId;
+        var target = viewModel.EffectChainNodes.LastOrDefault();
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        if (target is null)
+        {
+            return false;
+        }
+
+        var button = EffectChainStripPanel.Children
+            .OfType<Button>()
+            .FirstOrDefault(candidate => candidate.DataContext is CanvasNodeSnapshot node &&
+                                         node.InstanceId == target.InstanceId);
+        if (button is null)
+        {
+            return false;
+        }
+
+        button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var selected = viewModel.SelectedNode?.InstanceId == target.InstanceId;
+        var inspectorUpdated = viewModel.SelectedNodeDisplayName == target.DisplayName;
+
+        var restored = originalSelected is null
+            ? viewModel.ClearSelection()
+            : viewModel.SelectNode(originalSelected);
+        return selected && inspectorUpdated && restored &&
+               (viewModel.SelectedNode?.InstanceId ?? string.Empty) == (originalSelected ?? string.Empty) &&
+               BuildVisualRegressionFingerprint() == originalFingerprint;
+    }
+
     public bool ProbeDocumentStatus()
     {
         if (viewModel is null || DocumentStatusText is null)
@@ -543,8 +580,13 @@ public sealed partial class RigEditorView : UserControl
             var linkedToChain = viewModel.CanvasConnections.Any(connection =>
                 connection.DestinationInstanceId == addedNode.InstanceId);
             var projectedIntoChain = viewModel.EffectChainNodes.Any(node => node.InstanceId == addedNode.InstanceId);
+            var projectedChainButton = EffectChainStripPanel?.Children
+                .OfType<Button>()
+                .Any(button => button.DataContext is CanvasNodeSnapshot node &&
+                              node.InstanceId == addedNode.InstanceId) == true;
             var afterSurface = CaptureRenderedSurface();
             return projectedInsideCanvas && linkedToChain && projectedIntoChain &&
+                   projectedChainButton &&
                    afterSurface is not null && afterSurface != originalSurface;
         }
         finally
@@ -746,7 +788,9 @@ public sealed partial class RigEditorView : UserControl
                 $"{control.Id}:{control.Value:0.######}:{control.KnobAngle:0.###}:{control.IsToggle}"))));
         var library = string.Join("|", viewModel.PresetLibraryEntries.Select(entry =>
             $"{entry.DisplayName}:{entry.IsValid}:{entry.SourcePath}"));
-        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};file={viewModel.FileStatus};filter={viewModel.ModuleCatalogFilter};inspector={viewModel.InspectorTab};library={viewModel.PresetLibraryDirectory}:{viewModel.SelectedPresetLibraryIndex}:{library};resources={resources};nodes={nodes};connections={viewModel.CanvasConnections.Count}";
+        var chain = string.Join("|", viewModel.EffectChainNodes.Select(node =>
+            $"{node.InstanceId}:{node.Selected}:{node.Bypassed}"));
+        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};file={viewModel.FileStatus};filter={viewModel.ModuleCatalogFilter};inspector={viewModel.InspectorTab};library={viewModel.PresetLibraryDirectory}:{viewModel.SelectedPresetLibraryIndex}:{library};resources={resources};nodes={nodes};chain={chain};connections={viewModel.CanvasConnections.Count}";
     }
 
     private void NodeFootswitchClick(object? sender, RoutedEventArgs args)
@@ -776,6 +820,7 @@ public sealed partial class RigEditorView : UserControl
         DataContext = editor;
         editor.PropertyChanged += ViewModelPropertyChanged;
         ApplyTheme(editor.Theme, editor.DarkTheme);
+        RenderEffectChainStrip();
         UpdateSelectionStyles();
         StartRuntimeRefreshTimer();
     }
@@ -866,7 +911,57 @@ public sealed partial class RigEditorView : UserControl
         {
             UpdateSelectionStyles();
         }
+        if (viewModel is not null &&
+            (args.PropertyName == nameof(RigEditorViewModel.CanvasNodes) ||
+             args.PropertyName == nameof(RigEditorViewModel.EffectChainNodes) ||
+             args.PropertyName == nameof(RigEditorViewModel.DarkTheme) ||
+             args.PropertyName == nameof(RigEditorViewModel.Theme)))
+        {
+            RenderEffectChainStrip();
+        }
     }
+
+    private void RenderEffectChainStrip()
+    {
+        if (EffectChainStripPanel is null)
+        {
+            return;
+        }
+
+        EffectChainStripPanel.Children.Clear();
+        if (viewModel is null)
+        {
+            return;
+        }
+
+        var accentBrush = ResourceBrush("SrgAccentBrush", "#4DD6A4");
+        var textBrush = ResourceBrush("SrgTextBrush", "#E7EEF4");
+        foreach (var node in viewModel.EffectChainNodes)
+        {
+            var button = new Button
+            {
+                DataContext = node,
+                Background = new SolidColorBrush(Color.Parse(node.CardBackground)),
+                BorderBrush = new SolidColorBrush(Color.Parse(node.CardBorder)),
+                Content = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 4,
+                    Children =
+                    {
+                        new TextBlock { Text = "FX", Foreground = accentBrush, FontSize = 8, FontWeight = FontWeight.Bold },
+                        new TextBlock { Text = node.DisplayName, Foreground = textBrush, FontSize = 9 }
+                    }
+                }
+            };
+            button.Classes.Add("srg-chain-item");
+            button.Click += EffectChainNodeClick;
+            EffectChainStripPanel.Children.Add(button);
+        }
+    }
+
+    private IBrush ResourceBrush(string key, string fallback) =>
+        Resources[key] as IBrush ?? new SolidColorBrush(Color.Parse(fallback));
 
     private void UpdateSelectionStyles()
     {

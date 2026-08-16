@@ -40,13 +40,14 @@ public sealed class App : Application
                     var renderedSurface = dpiScaling && RunVisualProbe("rendered surface", mainWindow.ProbeRenderedSurface);
                     var keyboardShortcuts = renderedSurface && RunVisualProbe("keyboard shortcuts", mainWindow.ProbeKeyboardShortcuts);
                     var selectionState = keyboardShortcuts && RunVisualProbe("selection state", mainWindow.ProbeSelectionState);
-                    var documentStatus = selectionState && RunVisualProbe("document status", mainWindow.ProbeDocumentStatus);
+                    var chainSelection = selectionState && RunVisualProbe("effect chain selection", mainWindow.ProbeEffectChainSelection);
+                    var documentStatus = chainSelection && RunVisualProbe("document status", mainWindow.ProbeDocumentStatus);
                     var actionGates = documentStatus && RunVisualProbe("action gates", mainWindow.ProbeActionGates);
                     var moduleInsertion = actionGates && RunVisualProbe("module insertion", mainWindow.ProbeModuleInsertion);
                     var presetLibrary = moduleInsertion && RunVisualProbe("preset library", mainWindow.ProbePresetLibrary);
                     var undoRedo = presetLibrary && RunVisualProbe("undo/redo", mainWindow.ProbeUndoRedo);
                     if (visualContent && externalTheme && themeSwitch && parameterBinding && dpiScaling && renderedSurface &&
-                        keyboardShortcuts && selectionState && documentStatus && actionGates && moduleInsertion && presetLibrary && undoRedo)
+                        keyboardShortcuts && selectionState && chainSelection && documentStatus && actionGates && moduleInsertion && presetLibrary && undoRedo)
                     {
                         probe.Stop();
                         desktop.Shutdown(0);
