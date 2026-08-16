@@ -236,6 +236,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private ThemeSnapshot theme = ThemeSnapshot.Empty;
     private IReadOnlyList<CanvasNodeSnapshot> canvasNodes = [];
     private IReadOnlyList<CanvasConnectionSnapshot> canvasConnections = [];
+    private IReadOnlyList<CanvasNodeSnapshot> effectChainNodes = [];
     private IReadOnlyList<ModuleCatalogSnapshot> moduleCatalog = [];
     private string moduleSearchText = string.Empty;
     private string moduleCatalogFilter = "全部";
@@ -319,6 +320,11 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public IReadOnlyList<NodeSnapshot> Nodes => snapshot.Nodes;
     public IReadOnlyList<CanvasNodeSnapshot> CanvasNodes => canvasNodes;
     public IReadOnlyList<CanvasConnectionSnapshot> CanvasConnections => canvasConnections;
+    // The chain projection is ordered from the first node through each serial
+    // connection, then appends any disconnected nodes deterministically.  The
+    // canvas remains the editing surface; this projection makes successful
+    // insertion immediately visible as a member of the effect chain.
+    public IReadOnlyList<CanvasNodeSnapshot> EffectChainNodes => effectChainNodes;
     public IReadOnlyList<ModuleCatalogSnapshot> ModuleCatalog => moduleCatalog;
     public IReadOnlyList<ModuleCatalogSnapshot> FilteredModuleCatalog => moduleCatalog
         .Where(module => string.IsNullOrWhiteSpace(ModuleSearchText) ||
@@ -730,7 +736,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             {
                 Status = $"Backend probe OK | schema {snapshot.SchemaVersion} | theme {(snapshot.DarkTheme ? "dark" : "light")}";
             }
-            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
+            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections), nameof(EffectChainNodes),
                 nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
                 nameof(CanDuplicateSelected), nameof(CanDeleteSelected), nameof(CanConnectNodes), nameof(CanDisconnectNodes),
                 nameof(CanUndo), nameof(CanRedo),
@@ -803,7 +809,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             backend.SetViewport(width, height, dpiScale);
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
-            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
+            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections), nameof(EffectChainNodes),
                 nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme), nameof(WindowTitle),
                 nameof(FileStatus), nameof(CanDuplicateSelected), nameof(CanDeleteSelected), nameof(CanConnectNodes), nameof(CanDisconnectNodes));
         }
@@ -1154,6 +1160,14 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         {
             backend.AddNodeToChain(moduleId, instanceId, x, y);
             Refresh();
+            var addedNode = snapshot.Nodes.Any(node => string.Equals(node.InstanceId, instanceId, StringComparison.Ordinal));
+            var linkedToChain = string.IsNullOrWhiteSpace(terminalNode) || snapshot.Connections.Any(connection =>
+                string.Equals(connection.SourceInstanceId, terminalNode, StringComparison.Ordinal) &&
+                string.Equals(connection.DestinationInstanceId, instanceId, StringComparison.Ordinal));
+            if (!addedNode || !linkedToChain)
+            {
+                throw new InvalidOperationException("效果器已写入但未进入可见效果器链");
+            }
             Status = string.IsNullOrWhiteSpace(terminalNode)
                 ? $"已添加效果器: {instanceId}"
                 : $"已添加效果器并接入链路: {instanceId}";
@@ -1902,12 +1916,39 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private void RebuildCanvasProjections()
     {
         var scale = Math.Max(snapshot.DpiScale, 1.0);
-        canvasNodes = snapshot.Nodes.Select(node =>
+        var projectedNodes = snapshot.Nodes.Select(node =>
             new CanvasNodeSnapshot(node, node.LayoutX / scale, node.LayoutY / scale, snapshot.DarkTheme)).ToArray();
+        canvasNodes = projectedNodes;
         canvasConnections = snapshot.Connections.Select(connection => new CanvasConnectionSnapshot(
             connection.SourceInstanceId, connection.DestinationInstanceId,
             connection.SourceX / scale, connection.SourceY / scale,
             connection.DestinationX / scale, connection.DestinationY / scale)).ToArray();
+
+        var nodesById = projectedNodes.ToDictionary(node => node.InstanceId, StringComparer.Ordinal);
+        var successors = snapshot.Connections
+            .GroupBy(connection => connection.SourceInstanceId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key,
+                group => group.Select(connection => connection.DestinationInstanceId).ToArray(),
+                StringComparer.Ordinal);
+        var incoming = snapshot.Connections.Select(connection => connection.DestinationInstanceId)
+            .ToHashSet(StringComparer.Ordinal);
+        var ordered = new List<CanvasNodeSnapshot>(projectedNodes.Length);
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var start in projectedNodes.Where(node => !incoming.Contains(node.InstanceId)))
+        {
+            var current = start.InstanceId;
+            while (nodesById.TryGetValue(current, out var node) && visited.Add(current))
+            {
+                ordered.Add(node);
+                if (!successors.TryGetValue(current, out var next) || next.Length == 0)
+                {
+                    break;
+                }
+                current = next[0];
+            }
+        }
+        ordered.AddRange(projectedNodes.Where(node => !visited.Contains(node.InstanceId)));
+        effectChainNodes = ordered;
     }
 
     private int FindPresetLibraryIndex(string sourcePath)

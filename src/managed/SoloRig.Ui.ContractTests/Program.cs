@@ -16,6 +16,10 @@ Require(viewModel.Nodes.All(node => node.EstimatedCpuPercent > 0), "per-node est
 Require(viewModel.Nodes.All(node => !node.MeasurementAvailable), "startup keeps measured performance explicitly unavailable");
 Require(viewModel.PerformanceStatus.Contains("实测未连接", StringComparison.Ordinal), "performance status distinguishes estimate from measurement");
 Require(viewModel.Snapshot.Connections.Count == 1, "default snapshot exposes the Drive-to-Delay connection");
+Require(viewModel.EffectChainNodes.Count == 2 &&
+        viewModel.EffectChainNodes[0].InstanceId == "drive-1" &&
+        viewModel.EffectChainNodes[1].InstanceId == "delay-1",
+    "default snapshot exposes an ordered visible effect-chain projection");
 Require(!viewModel.CanUndo && !viewModel.CanRedo, "startup document history is empty");
 Require(viewModel.ProbeDpiScaling(), "shared geometry and hit testing remain aligned at 1x/1.25x/2x DPI");
 Require(viewModel.MidiStatus.Contains("closed", StringComparison.OrdinalIgnoreCase), "startup MIDI remains closed");
@@ -182,6 +186,9 @@ Require(viewModel.Snapshot.Nodes.Any(node => node.InstanceId == "drive-extra" &&
     "added module receives validated defaults");
 Require(viewModel.Snapshot.Connections.Any(connection => connection.DestinationInstanceId == "drive-extra"),
     "added module is appended to the visible effect chain");
+Require(viewModel.EffectChainNodes.Any(node => node.InstanceId == "drive-extra") &&
+        viewModel.EffectChainNodes[^1].InstanceId == "drive-extra",
+    "button-added module is present in the ordered effect-chain projection");
 Require(viewModel.AddModuleAtCanvasPoint("org.mumu-dada.solorig.digital-delay", 420, 420),
     "canvas drop creates a module at the requested editor point");
 var droppedNode = viewModel.CanvasNodes.FirstOrDefault(node => node.InstanceId.StartsWith("digital-delay", StringComparison.Ordinal));

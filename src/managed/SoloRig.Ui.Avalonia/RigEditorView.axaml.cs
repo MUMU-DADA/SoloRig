@@ -542,8 +542,10 @@ public sealed partial class RigEditorView : UserControl
                                          addedNode.CanvasY + addedNode.Height <= visibleHeight + 0.001;
             var linkedToChain = viewModel.CanvasConnections.Any(connection =>
                 connection.DestinationInstanceId == addedNode.InstanceId);
+            var projectedIntoChain = viewModel.EffectChainNodes.Any(node => node.InstanceId == addedNode.InstanceId);
             var afterSurface = CaptureRenderedSurface();
-            return projectedInsideCanvas && linkedToChain && afterSurface is not null && afterSurface != originalSurface;
+            return projectedInsideCanvas && linkedToChain && projectedIntoChain &&
+                   afterSurface is not null && afterSurface != originalSurface;
         }
         finally
         {

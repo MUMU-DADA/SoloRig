@@ -226,6 +226,24 @@
               <StackPanel Spacing="2">
                 <TextBlock Text="效果器链路" Classes="srg-text" FontSize="13" FontWeight="SemiBold" />
                 <TextBlock Text="自由移动模块 · 点击两个端点建立方向连接" Classes="srg-muted" FontSize="10" />
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Hidden" Margin="0,6,0,0">
+                  <ItemsControl ItemsSource="{Binding EffectChainNodes}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="5" /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgAccentBrush}"
+                                BorderThickness="1" CornerRadius="5" Padding="7,3">
+                          <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="FX" Foreground="{DynamicResource SrgAccentBrush}" FontSize="8" FontWeight="Bold" />
+                            <TextBlock Text="{Binding DisplayName}" Classes="srg-text" FontSize="9" />
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
               </StackPanel>
               <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
                 <Button x:Name="CanvasConnectButton" Classes="srg-button ghost" Content="连接首尾"
