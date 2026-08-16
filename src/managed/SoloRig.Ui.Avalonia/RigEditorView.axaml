@@ -122,7 +122,8 @@
           </StackPanel>
 
           <ComboBox Grid.Column="2" x:Name="PresetSelector" Classes="srg-input" Width="178"
-                    ItemsSource="{Binding PresetNames}" SelectedItem="{Binding SelectedPresetName, Mode=TwoWay}"
+                    ItemsSource="{Binding PresetNames}" SelectedItem="{Binding SelectedPresetName, Mode=OneWay}"
+                    SelectionChanged="PresetSelectionChanged"
                     VerticalAlignment="Center" />
 
           <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">

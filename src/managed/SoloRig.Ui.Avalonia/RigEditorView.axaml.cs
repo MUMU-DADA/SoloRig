@@ -669,6 +669,15 @@ public sealed partial class RigEditorView : UserControl
     private void SaveAsClick(object? sender, RoutedEventArgs args) => _ = SaveAsAsync();
     private void NewPresetClick(object? sender, RoutedEventArgs args) => _ = SelectDefaultPresetAsync();
     private void DefaultPresetClick(object? sender, RoutedEventArgs args) => _ = SelectDefaultPresetAsync();
+    private void PresetSelectionChanged(object? sender, SelectionChangedEventArgs args)
+    {
+        if (viewModel is null || args.AddedItems.Count == 0 || args.AddedItems[0] is not string presetName ||
+            string.Equals(presetName, viewModel.SelectedPresetName, StringComparison.Ordinal))
+        {
+            return;
+        }
+        _ = SelectPresetAsync(presetName);
+    }
     private void LoadThemeClick(object? sender, RoutedEventArgs args) => _ = LoadThemeAsync();
     private void ImportResourceClick(object? sender, RoutedEventArgs args) => _ = ImportResourceAsync();
 
@@ -873,6 +882,18 @@ public sealed partial class RigEditorView : UserControl
         if (viewModel is not null && await ConfirmPendingChangesAsync())
         {
             viewModel.SelectPreset("SoloRig Default");
+        }
+    }
+
+    private async Task SelectPresetAsync(string presetName)
+    {
+        if (viewModel is null)
+        {
+            return;
+        }
+        if (!await ConfirmPendingChangesAsync() || !viewModel.SelectPreset(presetName))
+        {
+            PresetSelector.SelectedItem = viewModel.SelectedPresetName;
         }
     }
 
