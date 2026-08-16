@@ -80,6 +80,15 @@ typedef struct SoloRigNodeView {
     double measured_cpu_percent;
     double peak_cpu_percent;
     uint8_t measurement_available;
+    const char* skin_id_utf8;
+    const char* knob_skin_id_utf8;
+    const char* toggle_skin_id_utf8;
+    const char* button_skin_id_utf8;
+    const char* footswitch_skin_id_utf8;
+    const char* knob_image_path_utf8;
+    const char* toggle_image_path_utf8;
+    const char* button_image_path_utf8;
+    const char* footswitch_image_path_utf8;
 } SoloRigNodeView;
 
 typedef struct SoloRigParameterView {

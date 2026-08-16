@@ -1,6 +1,10 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:SoloRig.Ui.Avalonia"
              x:Class="SoloRig.Ui.Avalonia.RigEditorView">
+  <UserControl.Resources>
+    <local:SkinImageConverter x:Key="SkinImageConverter" />
+  </UserControl.Resources>
   <UserControl.Styles>
     <Style Selector="TextBlock.srg-text">
       <Setter Property="Foreground" Value="{DynamicResource SrgTextBrush}" />
@@ -309,6 +313,9 @@
                                         <Ellipse Width="11" Height="11" Fill="{DynamicResource SrgAccentBrush}"
                                                  HorizontalAlignment="Right" Margin="0,0,3,0" />
                                       </Border>
+                                      <Image IsVisible="{Binding HasImage}" Width="29" Height="29"
+                                             Source="{Binding ImagePath, Converter={StaticResource SkinImageConverter}}"
+                                             Stretch="Uniform" />
                                     </Grid>
                                     <TextBlock Text="{Binding Label}" Classes="srg-muted" FontSize="9"
                                                HorizontalAlignment="Center" />
@@ -326,6 +333,9 @@
                                   <Ellipse Width="7" Height="7" Fill="{DynamicResource SrgAccentBrush}"
                                            HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
+                                <Image IsVisible="{Binding HasFootswitchImage}" Width="22" Height="14"
+                                       Source="{Binding FootswitchImagePath, Converter={StaticResource SkinImageConverter}}"
+                                       Stretch="Uniform" Opacity="{Binding FootswitchOpacity}" />
                                 <TextBlock Text="{Binding NodeStateText}" Foreground="{DynamicResource SrgAccentBrush}" FontSize="10" />
                               </StackPanel>
                               <TextBlock Grid.Column="1" Text="{Binding LatencyText}" Classes="srg-muted" FontSize="9" />

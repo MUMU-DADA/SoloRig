@@ -5,6 +5,9 @@ Require(viewModel.Nodes.Count >= 2, "default snapshot exposes Drive and Delay no
 Require(viewModel.CanvasNodes.All(node => node.Controls.Count > 0 &&
     node.Controls.All(control => control.IsKnob && control.Maximum > control.Minimum)),
     "node cards expose parameter-backed knob controls with valid ranges");
+Require(viewModel.CanvasNodes.All(node => node.Skin.Id == "solorig.default-pedal" &&
+    node.Skin.KnobId == "standard-knob" && node.Skin.FootswitchId == "standard-footswitch"),
+    "node snapshots expose the default shared pedal skin metadata");
 var driveRange = viewModel.Nodes.Single(node => node.InstanceId == "drive-1").Parameters.Single(parameter => parameter.Id == "drive");
 Require(driveRange.Minimum == 0.0F && driveRange.Maximum == 16.0F,
     "parameter snapshot exposes the validated Drive control range");
@@ -118,6 +121,7 @@ var corruptPath = Path.Combine(Path.GetTempPath(), "solorig-m2-corrupt.srig");
 var themePath = Path.Combine(Path.GetTempPath(), "solorig-m25-contract-theme.json");
 var resourcePath = Path.Combine(Path.GetTempPath(), "solorig-m5-resource.nam");
 var midiBankDirectory = Path.Combine(Path.GetTempPath(), "solorig-m2-midi-bank");
+var skinPackageDirectory = Path.Combine(Path.GetTempPath(), "solorig-m25-skin-package");
 try
 {
     File.Delete(path);
@@ -126,6 +130,10 @@ try
     if (Directory.Exists(midiBankDirectory))
     {
         Directory.Delete(midiBankDirectory, true);
+    }
+    if (Directory.Exists(skinPackageDirectory))
+    {
+        Directory.Delete(skinPackageDirectory, true);
     }
     File.WriteAllText(corruptPath, "{not-json");
     File.WriteAllText(themePath, """
@@ -169,6 +177,48 @@ try
     Require(viewModel.SetModuleCatalogFilter("外部") && viewModel.FilteredModuleCatalog.Count > 0,
         "external catalog filter exposes the imported resource");
     Require(viewModel.SetModuleCatalogFilter("全部"), "catalog filter resets after external import");
+    Directory.CreateDirectory(Path.Combine(skinPackageDirectory, "logic"));
+    Directory.CreateDirectory(Path.Combine(skinPackageDirectory, "ui", "images"));
+    File.WriteAllText(Path.Combine(skinPackageDirectory, "manifest.json"), """
+{
+  "schemaVersion": 1,
+  "moduleId": "org.mumu-dada.solorig.contract-skin",
+  "displayName": "Contract Skin",
+  "category": "digital-algorithm",
+  "logicFile": "logic/main.json",
+  "skinFile": "ui/pedal.json",
+  "ports": [
+    {"id":"input","direction":"input","maxChannels":1},
+    {"id":"output","direction":"output","maxChannels":1}
+  ],
+  "parameters": [{"id":"gain","minimum":0,"maximum":2,"default":0.5}]
+}
+""");
+    File.WriteAllText(Path.Combine(skinPackageDirectory, "logic", "main.json"),
+        "{\"schemaVersion\":1,\"kind\":\"digital-algorithm\",\"algorithm\":\"linear-gain\",\"operations\":[{\"type\":\"gain\",\"parameter\":\"gain\"}]}" );
+    File.WriteAllText(Path.Combine(skinPackageDirectory, "ui", "pedal.json"), """
+{
+  "schemaVersion": 1,
+  "id": "contract.image-skin",
+  "controls": {
+    "knob": {"id":"contract-knob","image":"images/knob.bmp"},
+    "toggle": {"id":"contract-toggle","image":"images/toggle.bmp"},
+    "button": "contract-button",
+    "footswitch": {"id":"contract-footswitch","image":"images/footswitch.bmp"}
+  }
+}
+""");
+    File.WriteAllBytes(Path.Combine(skinPackageDirectory, "ui", "images", "knob.bmp"), OneByOneBmp());
+    File.WriteAllBytes(Path.Combine(skinPackageDirectory, "ui", "images", "toggle.bmp"), OneByOneBmp());
+    File.WriteAllBytes(Path.Combine(skinPackageDirectory, "ui", "images", "footswitch.bmp"), OneByOneBmp());
+    const string skinPackageModuleId = "org.mumu-dada.solorig.contract-skin";
+    Require(viewModel.ImportResource(skinPackageDirectory), "external package with a custom skin imports");
+    Require(viewModel.AddModule(skinPackageModuleId, "contract-skin-1", 900, 160),
+        "custom-skin module can be added to the shared graph");
+    var skinNode = viewModel.CanvasNodes.Single(node => node.InstanceId == "contract-skin-1");
+    Require(skinNode.Skin.Id == "contract.image-skin" && skinNode.Skin.KnobId == "contract-knob" &&
+            skinNode.Controls.All(control => control.HasImage) && skinNode.HasFootswitchImage,
+        "custom skin metadata and image paths reach shared node cards");
     Require(viewModel.SaveToPath(path), "explicit Save writes a validated preset");
     Require(!viewModel.IsDirty, "successful Save clears dirty state");
     Directory.CreateDirectory(midiBankDirectory);
@@ -208,6 +258,10 @@ finally
     {
         Directory.Delete(midiBankDirectory, true);
     }
+    if (Directory.Exists(skinPackageDirectory))
+    {
+        Directory.Delete(skinPackageDirectory, true);
+    }
 }
 
 Console.WriteLine("[PASS] Shared C# ViewModel performs catalog, graph editing, performance, resource and preset workflow");
@@ -219,3 +273,11 @@ static void Require(bool condition, string description)
         throw new InvalidOperationException(description);
     }
 }
+
+static byte[] OneByOneBmp() =>
+[
+    0x42, 0x4D, 0x3A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x36, 0x00, 0x00, 0x00,
+    0x28, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00,
+    0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xA5, 0xD6, 0x4D, 0x00
+];

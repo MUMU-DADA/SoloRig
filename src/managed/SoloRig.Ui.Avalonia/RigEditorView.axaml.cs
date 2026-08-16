@@ -263,7 +263,8 @@ public sealed partial class RigEditorView : UserControl
         var resources = string.Join(",", resourceKeys.Select(key =>
             $"{key}={(Resources[key] as SolidColorBrush)?.Color.ToString() ?? "missing"}"));
         var nodes = string.Join("|", viewModel.CanvasNodes.Select(node =>
-            $"{node.InstanceId}:{node.Selected}:{node.Unresolved}:{node.FootswitchText}:" +
+            $"{node.InstanceId}:{node.Selected}:{node.Unresolved}:{node.FootswitchText}:skin={node.Skin.Id}:" +
+            $"images={node.Skin.HasKnobImage},{node.Skin.HasToggleImage},{node.Skin.HasFootswitchImage}:" +
             string.Join(",", node.Controls.Select(control =>
                 $"{control.Id}:{control.Value:0.######}:{control.KnobAngle:0.###}:{control.IsToggle}"))));
         return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};resources={resources};nodes={nodes};connections={viewModel.CanvasConnections.Count}";

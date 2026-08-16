@@ -10,6 +10,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <iterator>
@@ -33,6 +34,7 @@ struct SoloRigSnapshot {
     solo_rig::RigEditorScene scene;
     std::string midi_status;
     std::vector<std::vector<std::pair<float, float>>> parameter_ranges;
+    std::vector<std::array<std::string, 4>> node_skin_images_utf8;
 };
 
 namespace {
@@ -108,6 +110,14 @@ std::filesystem::path PathFromUtf8(const char* text) {
         utf8.push_back(static_cast<char8_t>(text[index]));
     }
     return std::filesystem::path(std::move(utf8));
+}
+
+std::string PathToUtf8(const std::optional<std::filesystem::path>& path) {
+    if (!path.has_value()) {
+        return {};
+    }
+    const auto text = path->u8string();
+    return {reinterpret_cast<const char*>(text.data()), text.size()};
 }
 
 SoloRigStatus MapFileResult(SoloRigBackend* backend, const EditorFileResult& result) noexcept {
@@ -240,6 +250,13 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_snapshot_create(
         auto snapshot = std::make_unique<SoloRigSnapshot>();
         snapshot->preset = backend->editor.ExportPreset();
         snapshot->scene = backend->editor.Scene();
+        snapshot->node_skin_images_utf8.reserve(snapshot->scene.nodes.size());
+        for (const auto& node : snapshot->scene.nodes) {
+            snapshot->node_skin_images_utf8.push_back({PathToUtf8(node.skin.knob_image),
+                                                       PathToUtf8(node.skin.toggle_image),
+                                                       PathToUtf8(node.skin.button_image),
+                                                       PathToUtf8(node.skin.footswitch_image)});
+        }
         snapshot->parameter_ranges.reserve(snapshot->preset.nodes.size());
         const auto& catalog = backend->editor.Catalog();
         for (const auto& node : snapshot->preset.nodes) {
@@ -287,7 +304,7 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_info(
     if (snapshot == nullptr || out_info == nullptr) {
         return SOLO_RIG_STATUS_INVALID_ARGUMENT;
     }
-    out_info->schema_version = 3U;
+    out_info->schema_version = 4U;
     out_info->dark_theme = snapshot->scene.theme.id.find("dark") != std::string::npos ? 1U : 0U;
     out_info->preset_id_utf8 = snapshot->preset.preset_id.c_str();
     out_info->preset_name_utf8 = snapshot->preset.name.c_str();
@@ -335,6 +352,16 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node(
     out_node->measured_cpu_percent = node->measured_cpu_percent;
     out_node->peak_cpu_percent = node->peak_cpu_percent;
     out_node->measurement_available = node->measurement_available ? 1U : 0U;
+    out_node->skin_id_utf8 = node->skin.id.c_str();
+    out_node->knob_skin_id_utf8 = node->skin.knob.c_str();
+    out_node->toggle_skin_id_utf8 = node->skin.toggle.c_str();
+    out_node->button_skin_id_utf8 = node->skin.button.c_str();
+    out_node->footswitch_skin_id_utf8 = node->skin.footswitch.c_str();
+    const auto& images = snapshot->node_skin_images_utf8[index];
+    out_node->knob_image_path_utf8 = images[0].c_str();
+    out_node->toggle_image_path_utf8 = images[1].c_str();
+    out_node->button_image_path_utf8 = images[2].c_str();
+    out_node->footswitch_image_path_utf8 = images[3].c_str();
     return SOLO_RIG_STATUS_OK;
 }
 

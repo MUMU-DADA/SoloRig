@@ -5,9 +5,11 @@ using System.Windows.Input;
 
 namespace SoloRig.Ui;
 
-public sealed record NodeControlSnapshot(string Id, string Label, float Value, float Minimum, float Maximum, bool IsToggle)
+public sealed record NodeControlSnapshot(string Id, string Label, float Value, float Minimum, float Maximum, bool IsToggle,
+                                         string ImagePath = "")
 {
     public bool IsKnob => !IsToggle;
+    public bool HasImage => !string.IsNullOrWhiteSpace(ImagePath);
     public string ValueText => Value.ToString("0.##", CultureInfo.InvariantCulture);
     public string RangeText => $"{Minimum.ToString("0.##", CultureInfo.InvariantCulture)}..{Maximum.ToString("0.##", CultureInfo.InvariantCulture)}";
     public double KnobAngle
@@ -36,6 +38,7 @@ public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, dou
             : "Whitebox · Audio module";
     public bool Selected => Source.Selected;
     public bool Unresolved => Source.Unresolved;
+    public NodeSkinSnapshot Skin => Source.Skin;
     public string Diagnostic => Source.Diagnostic;
     public IReadOnlyList<ParameterSnapshot> Parameters => Source.Parameters;
     public string LayoutText => Source.LayoutText;
@@ -46,9 +49,16 @@ public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, dou
     public double FootswitchOpacity => Unresolved ? 0.45 : 1.0;
     public IReadOnlyList<NodeControlSnapshot> Controls => Parameters
         .Take(3)
-        .Select(parameter => new NodeControlSnapshot(parameter.Id, FormatParameterName(parameter.Id), parameter.Value,
-            parameter.Minimum, parameter.Maximum, IsToggleParameter(parameter.Id)))
+        .Select(parameter =>
+        {
+            var isToggle = IsToggleParameter(parameter.Id);
+            var imagePath = isToggle ? Skin.ToggleImagePath : Skin.KnobImagePath;
+            return new NodeControlSnapshot(parameter.Id, FormatParameterName(parameter.Id), parameter.Value,
+                parameter.Minimum, parameter.Maximum, isToggle, imagePath);
+        })
         .ToArray();
+    public string FootswitchImagePath => Skin.FootswitchImagePath;
+    public bool HasFootswitchImage => Skin.HasFootswitchImage;
     public double Width => 196.0;
     public double Height => 154.0;
     public string CardBackground => Selected

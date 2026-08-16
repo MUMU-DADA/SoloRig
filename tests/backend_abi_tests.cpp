@@ -42,6 +42,10 @@ TEST_CASE("C ABI backend creates a side-effect-free default snapshot") {
     REQUIRE(solorig_snapshot_node(snapshot, 0U, &node) == SOLO_RIG_STATUS_OK);
     REQUIRE(std::string(node.instance_id_utf8) == "drive-1");
     REQUIRE(node.parameter_count >= 1U);
+    REQUIRE(std::string(node.skin_id_utf8) == "solorig.default-pedal");
+    REQUIRE(std::string(node.knob_skin_id_utf8) == "standard-knob");
+    REQUIRE(std::string(node.footswitch_skin_id_utf8) == "standard-footswitch");
+    REQUIRE(std::string(node.knob_image_path_utf8).empty());
     solorig_snapshot_destroy(snapshot);
     solorig_backend_destroy(backend);
 }
@@ -171,7 +175,7 @@ TEST_CASE("C ABI exposes catalog, transactional editing and performance snapshot
     REQUIRE(info.node_count == 4U);
     REQUIRE(info.total_latency_samples > 0U);
     REQUIRE(info.estimated_cpu_percent > 0.0);
-    REQUIRE(info.schema_version == 3U);
+    REQUIRE(info.schema_version == 4U);
     REQUIRE(info.measured_node_count == 0U);
     REQUIRE(info.measurement_available == 0U);
     SoloRigNodeView node{};

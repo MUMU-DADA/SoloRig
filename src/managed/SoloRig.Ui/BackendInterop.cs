@@ -60,6 +60,15 @@ internal struct NativeNodeView
     public double MeasuredCpuPercent;
     public double PeakCpuPercent;
     public byte MeasurementAvailable;
+    public IntPtr SkinId;
+    public IntPtr KnobSkinId;
+    public IntPtr ToggleSkinId;
+    public IntPtr ButtonSkinId;
+    public IntPtr FootswitchSkinId;
+    public IntPtr KnobImagePath;
+    public IntPtr ToggleImagePath;
+    public IntPtr ButtonImagePath;
+    public IntPtr FootswitchImagePath;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -396,6 +405,23 @@ public sealed record ParameterSnapshot(string Id, float Value, float Minimum = 0
     public bool IsValidRange => float.IsFinite(Minimum) && float.IsFinite(Maximum) && Maximum > Minimum;
 }
 
+public sealed record NodeSkinSnapshot(
+    string Id,
+    string KnobId,
+    string ToggleId,
+    string ButtonId,
+    string FootswitchId,
+    string KnobImagePath,
+    string ToggleImagePath,
+    string ButtonImagePath,
+    string FootswitchImagePath)
+{
+    public bool HasKnobImage => !string.IsNullOrWhiteSpace(KnobImagePath);
+    public bool HasToggleImage => !string.IsNullOrWhiteSpace(ToggleImagePath);
+    public bool HasButtonImage => !string.IsNullOrWhiteSpace(ButtonImagePath);
+    public bool HasFootswitchImage => !string.IsNullOrWhiteSpace(FootswitchImagePath);
+}
+
 public sealed record ThemeSnapshot(string Id, string DisplayName, IReadOnlyDictionary<string, string> Colors)
 {
     public static ThemeSnapshot Empty { get; } = new("", "", new Dictionary<string, string>());
@@ -411,6 +437,7 @@ public sealed record NodeSnapshot(
     bool Unresolved,
     string Diagnostic,
     IReadOnlyList<ParameterSnapshot> Parameters,
+    NodeSkinSnapshot Skin,
     uint DeclaredLatencySamples,
     double EstimatedCpuPercent,
     double MeasuredCpuPercent,
@@ -607,6 +634,12 @@ public sealed class BackendSession : IDisposable
                 nodes.Add(new NodeSnapshot(
                     NativeMethods.Utf8(node.InstanceId), NativeMethods.Utf8(node.ModuleId), node.LayoutX, node.LayoutY,
                     node.Selected != 0, node.Unresolved != 0, NativeMethods.Utf8(node.Diagnostic), parameters,
+                    new NodeSkinSnapshot(
+                        NativeMethods.Utf8(node.SkinId), NativeMethods.Utf8(node.KnobSkinId),
+                        NativeMethods.Utf8(node.ToggleSkinId), NativeMethods.Utf8(node.ButtonSkinId),
+                        NativeMethods.Utf8(node.FootswitchSkinId), NativeMethods.Utf8(node.KnobImagePath),
+                        NativeMethods.Utf8(node.ToggleImagePath), NativeMethods.Utf8(node.ButtonImagePath),
+                        NativeMethods.Utf8(node.FootswitchImagePath)),
                     node.DeclaredLatencySamples, node.EstimatedCpuPercent, node.MeasuredCpuPercent,
                     node.PeakCpuPercent, node.MeasurementAvailable != 0));
             }
