@@ -53,10 +53,13 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private WhiteboxStatusSnapshot whiteboxStatus = EmptyWhiteboxStatus;
     private IReadOnlyList<AsioDriverSnapshot> asioDrivers = [];
     private IReadOnlyList<MidiDeviceSnapshot> midiDevices = [];
+    private IReadOnlyList<MidiLearnTargetSnapshot> midiLearnTargets = [];
     private IReadOnlyList<uint> asioInputPorts = [];
     private IReadOnlyList<uint> asioOutputPorts = [];
     private int selectedAsioDriverIndex = -1;
     private int selectedMidiDeviceIndex = -1;
+    private int selectedMidiTargetIndex = -1;
+    private int selectedMidiBindingIndex = -1;
     private uint selectedInputChannel0;
     private uint selectedInputChannel1 = 1;
     private uint selectedOutputChannel0;
@@ -96,6 +99,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+    public bool IsBackendAvailable => backend is not null && backend.IsAvailable;
     public BackendSnapshot Snapshot => snapshot;
     public IReadOnlyList<NodeSnapshot> Nodes => snapshot.Nodes;
     public IReadOnlyList<CanvasNodeSnapshot> CanvasNodes => canvasNodes;
@@ -153,6 +157,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         : $"白盒: {whiteboxStatus.RuntimeStatus} · 证据: {whiteboxStatus.EvidenceStatus}";
     public IReadOnlyList<AsioDriverSnapshot> AsioDrivers => asioDrivers;
     public IReadOnlyList<MidiDeviceSnapshot> MidiDevices => midiDevices;
+    public IReadOnlyList<MidiLearnTargetSnapshot> MidiLearnTargets => midiLearnTargets;
+    public IReadOnlyList<BindingSnapshot> MidiBindings => snapshot.Bindings;
     public IReadOnlyList<uint> AsioInputPorts => asioInputPorts;
     public IReadOnlyList<uint> AsioOutputPorts => asioOutputPorts;
     public int SelectedAsioDriverIndex
@@ -173,6 +179,20 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         get => selectedMidiDeviceIndex;
         set => Set(ref selectedMidiDeviceIndex, value);
     }
+    public int SelectedMidiTargetIndex
+    {
+        get => selectedMidiTargetIndex;
+        set => Set(ref selectedMidiTargetIndex, value);
+    }
+    public int SelectedMidiBindingIndex
+    {
+        get => selectedMidiBindingIndex;
+        set => Set(ref selectedMidiBindingIndex, value);
+    }
+    public MidiLearnTargetSnapshot? SelectedMidiLearnTarget =>
+        selectedMidiTargetIndex >= 0 && selectedMidiTargetIndex < midiLearnTargets.Count
+            ? midiLearnTargets[selectedMidiTargetIndex]
+            : null;
     public AsioDriverSnapshot? SelectedAsioDriver =>
         selectedAsioDriverIndex >= 0 && selectedAsioDriverIndex < asioDrivers.Count
             ? asioDrivers[selectedAsioDriverIndex]
@@ -240,6 +260,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         ? "固定输出 · 未选 ASIO 设备"
         : $"固定输出 · {SelectedAsioDriver.DisplayName} · 物理通道 {SelectedOutputChannel0}/{SelectedOutputChannel1}";
     public string TunerStatus => $"调音器: {(TunerEnabled ? "开启" : "关闭")}";
+    public string MidiLearnStatus => snapshot.MidiStatus.Contains("learn armed", StringComparison.OrdinalIgnoreCase)
+        ? "学习中：等待 CC"
+        : "未进入学习";
     public IReadOnlyList<string> PresetNames =>
         string.IsNullOrWhiteSpace(snapshot.PresetName) ||
         string.Equals(snapshot.PresetName, "SoloRig Default", StringComparison.Ordinal)
@@ -285,6 +308,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             var nextSnapshot = backend.ReadSnapshot();
             var nextRealtimeContract = backend.ReadRealtimeContract();
             var nextWhiteboxStatus = backend.ReadWhiteboxStatus();
+            var nextMidiLearnTargets = backend.ReadMidiLearnTargets();
             snapshot = nextSnapshot;
             selectedPresetName = string.IsNullOrWhiteSpace(snapshot.SourcePath) ||
                                  string.IsNullOrWhiteSpace(snapshot.PresetName)
@@ -292,12 +316,25 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 : snapshot.PresetName;
             realtimeContract = nextRealtimeContract;
             whiteboxStatus = nextWhiteboxStatus;
+            midiLearnTargets = nextMidiLearnTargets;
+            selectedMidiTargetIndex = midiLearnTargets.Count == 0
+                ? -1
+                : selectedMidiTargetIndex < 0 || selectedMidiTargetIndex >= midiLearnTargets.Count
+                    ? 0
+                    : selectedMidiTargetIndex;
+            selectedMidiBindingIndex = snapshot.Bindings.Count == 0
+                ? -1
+                : selectedMidiBindingIndex < 0 || selectedMidiBindingIndex >= snapshot.Bindings.Count
+                    ? 0
+                    : selectedMidiBindingIndex;
             RebuildCanvasProjections();
             Status = $"Backend probe OK | schema {snapshot.SchemaVersion} | theme {(snapshot.DarkTheme ? "dark" : "light")}";
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
                 nameof(SelectedNode), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
                 nameof(WindowTitle), nameof(AudioStatus), nameof(MidiStatus), nameof(FileStatus),
                 nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames), nameof(SelectedPresetName),
+                nameof(MidiLearnTargets), nameof(MidiBindings), nameof(SelectedMidiLearnTarget),
+                nameof(SelectedMidiTargetIndex), nameof(SelectedMidiBindingIndex), nameof(MidiLearnStatus),
                 nameof(RealtimeContract),
                 nameof(RealtimeStatus), nameof(WhiteboxStatus), nameof(WhiteboxStatusText),
                 nameof(AsioRouteText), nameof(TunerStatus));
@@ -662,6 +699,112 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public bool ArmSelectedMidiLearn()
+    {
+        if (backend is null || SelectedMidiLearnTarget is null)
+        {
+            Status = "请先选择 MIDI Learn 目标";
+            return false;
+        }
+        try
+        {
+            backend.ArmMidiLearn(SelectedMidiLearnTarget.TargetId);
+            Refresh();
+            Status = $"MIDI Learn 已开始: {SelectedMidiLearnTarget.DisplayName}";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            Refresh();
+            return false;
+        }
+    }
+
+    public bool CancelMidiLearn()
+    {
+        if (backend is null)
+        {
+            return false;
+        }
+        try
+        {
+            backend.CancelMidiLearn();
+            Refresh();
+            Status = "MIDI Learn 已取消";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            return false;
+        }
+    }
+
+    public bool DeleteSelectedMidiBinding()
+    {
+        if (backend is null || selectedMidiBindingIndex < 0 || selectedMidiBindingIndex >= snapshot.Bindings.Count)
+        {
+            Status = "请先选择 MIDI 绑定";
+            return false;
+        }
+        try
+        {
+            backend.DeleteMidiBinding((uint)selectedMidiBindingIndex);
+            Refresh();
+            Status = "MIDI 绑定已删除";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            Refresh();
+            return false;
+        }
+    }
+
+    public bool ClearMidiBindings()
+    {
+        if (backend is null)
+        {
+            return false;
+        }
+        try
+        {
+            backend.ClearMidiBindings();
+            Refresh();
+            Status = "MIDI 绑定已清空";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            Refresh();
+            return false;
+        }
+    }
+
+    public bool ImportMidiBank(string directoryPath)
+    {
+        if (backend is null || string.IsNullOrWhiteSpace(directoryPath))
+        {
+            return false;
+        }
+        try
+        {
+            backend.ImportMidiBank(directoryPath);
+            Refresh();
+            Status = "MIDI Bank 已导入，Program Change 已按文件名建立映射";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            Refresh();
+            return false;
+        }
+    }
+
     public bool SaveToPath(string path)
     {
         if (backend is null)
@@ -773,7 +916,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     {
         var module = SelectedCatalogModule ?? FilteredModuleCatalog.FirstOrDefault();
         if (module is null) return;
-        var id = $"{module.DisplayName.ToLowerInvariant()}-{snapshot.Nodes.Count + 1}";
+        var baseId = module.ModuleId.Split('.').LastOrDefault() ?? "module";
+        var id = CreateUniqueNodeId(baseId);
         AddModule(module.ModuleId, id, 64 + snapshot.Nodes.Count * 32, 300);
     }
 
@@ -784,7 +928,10 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     private void DuplicateSelectedNode()
     {
-        if (SelectedNode is not null) DuplicateNode(SelectedNode.InstanceId, $"{SelectedNode.InstanceId}-copy");
+        if (SelectedNode is not null)
+        {
+            DuplicateNode(SelectedNode.InstanceId, CreateUniqueNodeId($"{SelectedNode.InstanceId}-copy"));
+        }
     }
 
     private void ConnectSelectedNodes()
@@ -796,6 +943,25 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     {
         var connection = snapshot.Connections.FirstOrDefault();
         if (connection is not null) DisconnectNodes(connection.SourceInstanceId, connection.DestinationInstanceId);
+    }
+
+    private string CreateUniqueNodeId(string proposed)
+    {
+        var sanitized = new string(proposed
+            .Select(character => char.IsLetterOrDigit(character) || character is '-' or '_' ? character : '-')
+            .ToArray())
+            .Trim('-');
+        if (string.IsNullOrWhiteSpace(sanitized))
+        {
+            sanitized = "module";
+        }
+        var candidate = sanitized;
+        var suffix = 2;
+        while (snapshot.Nodes.Any(node => string.Equals(node.InstanceId, candidate, StringComparison.Ordinal)))
+        {
+            candidate = $"{sanitized}-{suffix++}";
+        }
+        return candidate;
     }
 
     private bool RunAudioAction(Action? action, string successStatus)

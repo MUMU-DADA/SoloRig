@@ -24,6 +24,7 @@ struct SoloRigBackend {
     std::unique_ptr<solo_rig::standalone::StandaloneAudioEngine> audio_engine;
     std::unique_ptr<solo_rig::standalone::StandaloneMidiControlSession> midi_session;
     std::vector<std::string> midi_device_names_utf8;
+    std::vector<solo_rig::standalone::MidiLearnTarget> midi_learn_targets;
     std::string last_error;
 };
 
@@ -82,6 +83,14 @@ void SyncMidiStatus(SoloRigBackend& backend) {
         for (const auto& device : backend.midi_session->Devices()) {
             backend.midi_device_names_utf8.push_back(WideToUtf8(device.display_name));
         }
+    }
+}
+
+void SyncMidiLearnTargets(SoloRigBackend& backend) {
+    if (backend.midi_session != nullptr) {
+        backend.midi_learn_targets = backend.midi_session->ParameterTargets();
+    } else {
+        backend.midi_learn_targets.clear();
     }
 }
 
@@ -492,7 +501,15 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_open_utf8(
     if (!ValidBackend(backend) || !ValidText(path_utf8)) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "a UTF-8 .srig path is required");
     }
-    return MapFileResult(backend, backend->editor.LoadFrom(PathFromUtf8(path_utf8)));
+    const auto result = backend->editor.LoadFrom(PathFromUtf8(path_utf8));
+    const auto mapped = MapFileResult(backend, result);
+    if (mapped != SOLO_RIG_STATUS_OK) {
+        return mapped;
+    }
+    if (backend->midi_session != nullptr && !backend->midi_session->SyncFromEditor()) {
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, "MIDI bindings could not be synchronized");
+    }
+    return SOLO_RIG_STATUS_OK;
 }
 
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_new_preset(SoloRigBackend* backend) {
@@ -500,6 +517,9 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_new_preset(SoloRigBackend* ba
         return SOLO_RIG_STATUS_INVALID_ARGUMENT;
     }
     backend->editor.NewPreset();
+    if (backend->midi_session != nullptr && !backend->midi_session->SyncFromEditor()) {
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, "MIDI bindings could not be synchronized");
+    }
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -836,6 +856,97 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_drain(
                         "MIDI session and processed message count are required");
     }
     *out_processed_messages = static_cast<uint32_t>(backend->midi_session->Drain());
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_target_count(
+    SoloRigBackend* backend, uint32_t* out_count) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr || out_count == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "MIDI session and target count are required");
+    }
+    SyncMidiLearnTargets(*backend);
+    *out_count = static_cast<uint32_t>(backend->midi_learn_targets.size());
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_target_entry(
+    SoloRigBackend* backend, uint32_t index, SoloRigMidiLearnTargetView* out_target) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr || out_target == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "MIDI session and target entry are required");
+    }
+    SyncMidiLearnTargets(*backend);
+    if (index >= backend->midi_learn_targets.size()) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "MIDI learn target was not found");
+    }
+    const auto& target = backend->midi_learn_targets[index];
+    out_target->target_id_utf8 = target.target_id.c_str();
+    out_target->display_name_utf8 = target.display_name.c_str();
+    out_target->minimum = target.minimum;
+    out_target->maximum = target.maximum;
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_learn_arm(
+    SoloRigBackend* backend, const char* target_id_utf8) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr || !ValidText(target_id_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "MIDI session and a learn target are required");
+    }
+    if (!backend->midi_session->SyncFromEditor() ||
+        !backend->midi_session->ArmLearn(target_id_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, backend->midi_session->StatusText());
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_learn_cancel(SoloRigBackend* backend) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "MIDI session is unavailable");
+    }
+    backend->midi_session->CancelLearn();
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_delete_binding(
+    SoloRigBackend* backend, uint32_t index) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "MIDI session is unavailable");
+    }
+    if (!backend->midi_session->SyncFromEditor() || !backend->midi_session->RemoveBinding(index)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, backend->midi_session->StatusText());
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_clear_bindings(SoloRigBackend* backend) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "MIDI session is unavailable");
+    }
+    if (!backend->midi_session->SyncFromEditor() || !backend->midi_session->ClearBindings()) {
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, backend->midi_session->StatusText());
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_import_bank_utf8(
+    SoloRigBackend* backend, const char* directory_path_utf8) {
+    if (!ValidBackend(backend) || backend->midi_session == nullptr || !ValidText(directory_path_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "MIDI session and a preset bank directory are required");
+    }
+    if (!backend->midi_session->SyncFromEditor() ||
+        !backend->midi_session->LoadPresetBankDirectory(PathFromUtf8(directory_path_utf8))) {
+        return SetError(backend, SOLO_RIG_STATUS_FILE_ERROR, backend->midi_session->StatusText());
+    }
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }

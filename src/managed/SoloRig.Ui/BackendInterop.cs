@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
 
+[assembly: DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32)]
+
 namespace SoloRig.Ui;
 
 public enum NativeStatus : uint
@@ -145,6 +147,15 @@ internal struct NativeMidiDeviceView
 {
     public uint DeviceIndex;
     public IntPtr DisplayName;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeMidiLearnTargetView
+{
+    public IntPtr TargetId;
+    public IntPtr DisplayName;
+    public float Minimum;
+    public float Maximum;
 }
 
 internal static class NativeMethods
@@ -318,6 +329,30 @@ internal static class NativeMethods
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_midi_drain(IntPtr backend, out uint processedMessages);
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_target_count(IntPtr backend, out uint count);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_target_entry(
+        IntPtr backend, uint index, out NativeMidiLearnTargetView target);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_learn_arm(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string targetId);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_learn_cancel(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_delete_binding(IntPtr backend, uint index);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_clear_bindings(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_midi_import_bank_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string directoryPath);
+
     internal static string Utf8(IntPtr pointer) => pointer == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(pointer) ?? string.Empty;
 }
 
@@ -370,7 +405,13 @@ public sealed record BindingSnapshot(
     uint TargetKind,
     string TargetId,
     float Minimum,
-    float Maximum);
+    float Maximum)
+{
+    public string MessageTypeText => MessageType == 0U ? "CC" : "PC";
+    public string TargetKindText => TargetKind == 0U ? "参数" : "预设";
+    public string DisplayText =>
+        $"{MessageTypeText} ch{Channel + 1} #{Number} → {TargetId} [{Minimum:0.###}..{Maximum:0.###}]";
+}
 public sealed record ModuleCatalogSnapshot(
     string ModuleId,
     string DisplayName,
@@ -397,6 +438,11 @@ public sealed record AsioDriverSnapshot(
 public sealed record MidiDeviceSnapshot(uint DeviceIndex, string DisplayName)
 {
     public string DisplayText => $"{DisplayName} · device {DeviceIndex}";
+}
+
+public sealed record MidiLearnTargetSnapshot(string TargetId, string DisplayName, float Minimum, float Maximum)
+{
+    public string DisplayText => $"{DisplayName} [{Minimum:0.###}..{Maximum:0.###}]";
 }
 
 public sealed record RealtimeContractSnapshot(
@@ -454,6 +500,8 @@ public sealed record BackendSnapshot(
 public sealed class BackendSession : IDisposable
 {
     private IntPtr handle;
+
+    public bool IsAvailable => handle != IntPtr.Zero;
 
     public BackendSession()
     {
@@ -665,6 +713,37 @@ public sealed class BackendSession : IDisposable
         Ensure(NativeMethods.solorig_backend_midi_drain(handle, out var processedMessages), "drain MIDI");
         return processedMessages;
     }
+
+    public IReadOnlyList<MidiLearnTargetSnapshot> ReadMidiLearnTargets()
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_midi_target_count(handle, out var count), "MIDI target count");
+        var entries = new List<MidiLearnTargetSnapshot>((int)count);
+        for (uint index = 0; index < count; index++)
+        {
+            Ensure(NativeMethods.solorig_backend_midi_target_entry(handle, index, out var target),
+                "MIDI target entry");
+            entries.Add(new MidiLearnTargetSnapshot(NativeMethods.Utf8(target.TargetId),
+                NativeMethods.Utf8(target.DisplayName), target.Minimum, target.Maximum));
+        }
+        return entries;
+    }
+
+    public void ArmMidiLearn(string targetId) =>
+        Ensure(NativeMethods.solorig_backend_midi_learn_arm(handle, targetId), "arm MIDI learn");
+
+    public void CancelMidiLearn() =>
+        Ensure(NativeMethods.solorig_backend_midi_learn_cancel(handle), "cancel MIDI learn");
+
+    public void DeleteMidiBinding(uint index) =>
+        Ensure(NativeMethods.solorig_backend_midi_delete_binding(handle, index), "delete MIDI binding");
+
+    public void ClearMidiBindings() =>
+        Ensure(NativeMethods.solorig_backend_midi_clear_bindings(handle), "clear MIDI bindings");
+
+    public void ImportMidiBank(string directoryPath) =>
+        Ensure(NativeMethods.solorig_backend_midi_import_bank_utf8(handle, directoryPath),
+            "import MIDI preset bank");
 
     public void Dispose()
     {

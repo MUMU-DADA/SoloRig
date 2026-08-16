@@ -443,6 +443,7 @@ try {
     Invoke-Tool -Layer ".NET VST3 C# UI bridge Release build" -Executable $dotnet -Arguments @(
         "publish", $vst3UiProject, "-c", "Release", "--no-restore", "-o", $managedVst3UiOutput
     )
+    Copy-Item -LiteralPath $backendDll.FullName -Destination (Join-Path $managedVst3UiOutput "SoloRigBackend.dll") -Force
     $runtimeConfig = Join-Path $managedStandaloneOutput "SoloRig.Standalone.runtimeconfig.json"
     if (-not (Test-Path -LiteralPath $runtimeConfig)) {
         Fail-Layer -Layer ".NET VST3 C# UI bridge artifacts" -Message "Standalone runtimeconfig.json 不存在，无法初始化 hostfxr。"

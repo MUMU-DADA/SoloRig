@@ -144,6 +144,11 @@ public static class Vst3UiBridge
         {
             BuildAvaloniaApp().SetupWithoutStarting();
             var viewModel = new RigEditorViewModel();
+            if (!viewModel.IsBackendAvailable)
+            {
+                viewModel.Dispose();
+                throw new InvalidOperationException("SoloRigBackend.dll could not be loaded beside the shared C# UI assembly");
+            }
             var view = new RigEditorView(viewModel);
             var window = new Window
             {

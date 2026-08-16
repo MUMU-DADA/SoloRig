@@ -1,6 +1,6 @@
 # SoloRig 一键构建
 
-构建同时发布 C# Standalone、C# contract 和 VST3 UI bridge；VST3 bundle 的 Contents/Resources/managed 目录包含 hostfxr 所需的 C# UI 程序集、runtimeconfig 和 nethost.dll，VST3 lifecycle 测试会真实挂载同一 Avalonia 视图。
+构建同时发布 C# Standalone、C# contract 和 VST3 UI bridge；VST3 bundle 的 Contents/Resources/managed 目录包含 hostfxr 所需的 C# UI 程序集、runtimeconfig、nethost.dll 和共享的 SoloRigBackend.dll，VST3 lifecycle 测试会真实挂载同一 Avalonia 视图并要求 backend 可加载。
 
 根目录 `build.ps1` 在 Windows PowerShell 中完成 Release 构建。默认不猜测远程仓库，而是使用当前源码目录：
 

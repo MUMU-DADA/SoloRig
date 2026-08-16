@@ -204,6 +204,11 @@ public sealed partial class RigEditorView : UserControl
     private void OpenMidiClick(object? sender, RoutedEventArgs args) => viewModel?.OpenSelectedMidi();
     private void CloseMidiClick(object? sender, RoutedEventArgs args) => viewModel?.CloseMidi();
     private void DrainMidiClick(object? sender, RoutedEventArgs args) => viewModel?.DrainMidi();
+    private void ArmMidiLearnClick(object? sender, RoutedEventArgs args) => viewModel?.ArmSelectedMidiLearn();
+    private void CancelMidiLearnClick(object? sender, RoutedEventArgs args) => viewModel?.CancelMidiLearn();
+    private void DeleteMidiBindingClick(object? sender, RoutedEventArgs args) => viewModel?.DeleteSelectedMidiBinding();
+    private void ClearMidiBindingsClick(object? sender, RoutedEventArgs args) => viewModel?.ClearMidiBindings();
+    private void ImportMidiBankClick(object? sender, RoutedEventArgs args) => _ = ImportMidiBankAsync();
 
     private void NodeOutputEndpointPressed(object? sender, PointerPressedEventArgs args)
     {
@@ -273,6 +278,32 @@ public sealed partial class RigEditorView : UserControl
             return;
         }
         viewModel.ImportResource(path);
+    }
+
+    private async Task ImportMidiBankAsync()
+    {
+        if (viewModel is null)
+        {
+            return;
+        }
+        var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
+        if (storage is null)
+        {
+            viewModel.ReportFileDialogCancelled("MIDI Bank import");
+            return;
+        }
+        var folders = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "选择 MIDI Bank 目录",
+            AllowMultiple = false
+        });
+        var path = folders.FirstOrDefault()?.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            viewModel.ReportFileDialogCancelled("MIDI Bank import");
+            return;
+        }
+        viewModel.ImportMidiBank(path);
     }
 
     private async Task OpenAsync()

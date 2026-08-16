@@ -143,6 +143,13 @@ typedef struct SoloRigMidiDeviceView {
     const char* display_name_utf8;
 } SoloRigMidiDeviceView;
 
+typedef struct SoloRigMidiLearnTargetView {
+    const char* target_id_utf8;
+    const char* display_name_utf8;
+    float minimum;
+    float maximum;
+} SoloRigMidiLearnTargetView;
+
 // ABI contract:
 // - All strings are UTF-8 and NUL-terminated. Pointers returned through a
 //   snapshot remain valid until solorig_snapshot_destroy(snapshot).
@@ -302,6 +309,18 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_open(
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_close(SoloRigBackend* backend);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_drain(
     SoloRigBackend* backend, uint32_t* out_processed_messages);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_target_count(
+    SoloRigBackend* backend, uint32_t* out_count);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_target_entry(
+    SoloRigBackend* backend, uint32_t index, SoloRigMidiLearnTargetView* out_target);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_learn_arm(
+    SoloRigBackend* backend, const char* target_id_utf8);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_learn_cancel(SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_delete_binding(
+    SoloRigBackend* backend, uint32_t index);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_clear_bindings(SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_import_bank_utf8(
+    SoloRigBackend* backend, const char* directory_path_utf8);
 
 #ifdef __cplusplus
 }

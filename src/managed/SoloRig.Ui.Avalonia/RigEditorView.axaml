@@ -119,6 +119,35 @@
                 <Button Content="关闭 MIDI" Click="CloseMidiClick" />
                 <Button Content="排空消息" Click="DrainMidiClick" />
               </StackPanel>
+              <TextBlock Text="CC Learn 目标" Foreground="#C4CBD5" />
+              <ComboBox ItemsSource="{Binding MidiLearnTargets}"
+                        SelectedIndex="{Binding SelectedMidiTargetIndex, Mode=TwoWay}"
+                        PlaceholderText="选择要控制的参数">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding DisplayText}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <StackPanel Orientation="Horizontal" Spacing="5">
+                <Button Content="学习 CC" Click="ArmMidiLearnClick" />
+                <Button Content="取消学习" Click="CancelMidiLearnClick" />
+              </StackPanel>
+              <TextBlock Text="{Binding MidiLearnStatus}" Foreground="#75F2E6" />
+              <TextBlock Text="MIDI 绑定" Foreground="#C4CBD5" />
+              <ListBox Height="92" ItemsSource="{Binding MidiBindings}"
+                       SelectedIndex="{Binding SelectedMidiBindingIndex, Mode=TwoWay}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding DisplayText}" TextWrapping="Wrap" />
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <StackPanel Orientation="Horizontal" Spacing="5">
+                <Button Content="删除绑定" Click="DeleteMidiBindingClick" />
+                <Button Content="清空绑定" Click="ClearMidiBindingsClick" />
+              </StackPanel>
+              <Button Content="导入 MIDI Bank 目录" Click="ImportMidiBankClick" />
             </StackPanel>
           </Border>
           <TextBlock FontSize="18" FontWeight="Bold" Text="参数编辑" />

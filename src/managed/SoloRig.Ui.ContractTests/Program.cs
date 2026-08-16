@@ -10,6 +10,8 @@ Require(viewModel.MidiStatus.Contains("closed", StringComparison.OrdinalIgnoreCa
 Require(viewModel.AsioDrivers.Count == 0 && viewModel.MidiDevices.Count == 0,
     "startup keeps ASIO and MIDI enumeration explicit and side-effect free");
 Require(!viewModel.TunerEnabled, "startup keeps the tuner disabled");
+Require(viewModel.MidiLearnTargets.Count >= 2, "MIDI learn exposes current parameter targets without opening hardware");
+Require(!viewModel.ArmSelectedMidiLearn(), "MIDI learn rejects an unopened MIDI input");
 Require(!viewModel.StartAsio(), "ASIO start is rejected before an explicit device open");
 Require(viewModel.ModuleCatalog.Count >= 2, "module catalog exposes built-in modules");
 Require(viewModel.ModuleCatalog.Any(module => module.ModuleId == "org.mumu-dada.solorig.drive"), "catalog exposes Drive metadata");
@@ -87,10 +89,15 @@ Require(!viewModel.Snapshot.DarkTheme, "theme change is visible in the snapshot"
 var path = Path.Combine(Path.GetTempPath(), "solorig-m2-contract.srig");
 var corruptPath = Path.Combine(Path.GetTempPath(), "solorig-m2-corrupt.srig");
 var resourcePath = Path.Combine(Path.GetTempPath(), "solorig-m5-resource.nam");
+var midiBankDirectory = Path.Combine(Path.GetTempPath(), "solorig-m2-midi-bank");
 try
 {
     File.Delete(path);
     File.Delete(resourcePath);
+    if (Directory.Exists(midiBankDirectory))
+    {
+        Directory.Delete(midiBankDirectory, true);
+    }
     File.WriteAllText(corruptPath, "{not-json");
     var modelCandidates = new[]
     {
@@ -106,6 +113,14 @@ try
     Require(viewModel.Snapshot.ResourceStatus.Contains("NAM", StringComparison.Ordinal), "resource status identifies NAM");
     Require(viewModel.SaveToPath(path), "explicit Save writes a validated preset");
     Require(!viewModel.IsDirty, "successful Save clears dirty state");
+    Directory.CreateDirectory(midiBankDirectory);
+    File.Copy(path, Path.Combine(midiBankDirectory, "01-default.srig"), true);
+    Require(viewModel.ImportMidiBank(midiBankDirectory), "MIDI Bank directory import uses the C ABI");
+    Require(viewModel.Snapshot.Bindings.Any(binding => binding.MessageType == 1U && binding.TargetKind == 1U),
+        "MIDI Bank import creates a Program Change preset binding");
+    Require(viewModel.DeleteSelectedMidiBinding(), "selected MIDI binding can be deleted from C# UI state");
+    Require(viewModel.ClearMidiBindings(), "MIDI bindings can be cleared from C# UI state");
+    Require(viewModel.Snapshot.Bindings.Count == 0, "clearing MIDI bindings updates the shared snapshot");
     var savedLayout = viewModel.Nodes.Single(node => node.InstanceId == "drive-1").LayoutX;
     Require(viewModel.SetParameter("drive-1.drive", 5.0F), "post-save edit succeeds");
     var beforeFailure = viewModel.Snapshot;
@@ -130,6 +145,10 @@ finally
     File.Delete(path);
     File.Delete(corruptPath);
     File.Delete(resourcePath);
+    if (Directory.Exists(midiBankDirectory))
+    {
+        Directory.Delete(midiBankDirectory, true);
+    }
 }
 
 Console.WriteLine("[PASS] Shared C# ViewModel performs catalog, graph editing, performance, resource and preset workflow");
