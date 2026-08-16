@@ -112,6 +112,109 @@ public sealed record ParameterEditorSnapshot(string Target, string Id, float Val
     public bool IsValidRange => float.IsFinite(Minimum) && float.IsFinite(Maximum) && Maximum > Minimum;
 }
 
+public sealed class AsioRouteSelection : INotifyPropertyChanged
+{
+    private IReadOnlyList<AsioDriverSnapshot> driverOptions = [];
+    private IReadOnlyList<uint> deviceChannels = [];
+    private int selectedDriverIndex = -1;
+    private uint selectedDeviceChannel;
+
+    public AsioRouteSelection(string directionLabel, uint processingChannel)
+    {
+        DirectionLabel = directionLabel;
+        ProcessingChannel = processingChannel;
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    public string DirectionLabel { get; }
+    public uint ProcessingChannel { get; }
+    public IReadOnlyList<AsioDriverSnapshot> DriverOptions => driverOptions;
+    public IReadOnlyList<uint> DeviceChannels => deviceChannels;
+    public int SelectedDriverIndex
+    {
+        get => selectedDriverIndex;
+        set
+        {
+            if (selectedDriverIndex == value)
+            {
+                return;
+            }
+            selectedDriverIndex = value;
+            UpdateDeviceChannels();
+            OnPropertiesChanged(nameof(SelectedDriver), nameof(HasSelectedDriver), nameof(DeviceChannels), nameof(SelectedDeviceChannel),
+                nameof(IsConfigured), nameof(RouteText));
+        }
+    }
+    public uint SelectedDeviceChannel
+    {
+        get => selectedDeviceChannel;
+        set
+        {
+            if (selectedDeviceChannel == value)
+            {
+                return;
+            }
+            selectedDeviceChannel = value;
+            OnPropertiesChanged(nameof(IsConfigured), nameof(RouteText));
+        }
+    }
+    public AsioDriverSnapshot? SelectedDriver => selectedDriverIndex >= 0 && selectedDriverIndex < driverOptions.Count
+        ? driverOptions[selectedDriverIndex]
+        : null;
+    public bool HasSelectedDriver => SelectedDriver is not null;
+    public bool IsConfigured => SelectedDriver is not null && deviceChannels.Contains(selectedDeviceChannel);
+    public string RouteText => SelectedDriver is null
+        ? $"{DirectionLabel} → 未选择设备"
+        : $"{DirectionLabel} · {SelectedDriver.DisplayName} 通道 {SelectedDeviceChannel} → 内部 {ProcessingChannel + 1}";
+
+    public void SetDrivers(IReadOnlyList<AsioDriverSnapshot> drivers)
+    {
+        var previousDriverId = SelectedDriver?.DriverId;
+        driverOptions = drivers;
+        selectedDriverIndex = previousDriverId is null
+            ? (drivers.Count > 0 ? 0 : -1)
+            : drivers.Select((driver, index) => (driver, index))
+                .FirstOrDefault(item => string.Equals(item.driver.DriverId, previousDriverId, StringComparison.Ordinal)).index;
+        if (previousDriverId is not null &&
+            (selectedDriverIndex < 0 || selectedDriverIndex >= drivers.Count ||
+             !string.Equals(drivers[selectedDriverIndex].DriverId, previousDriverId, StringComparison.Ordinal)))
+        {
+            selectedDriverIndex = drivers.Count > 0 ? 0 : -1;
+        }
+        UpdateDeviceChannels();
+        OnPropertiesChanged(nameof(DriverOptions), nameof(SelectedDriverIndex), nameof(SelectedDriver), nameof(HasSelectedDriver),
+            nameof(DeviceChannels), nameof(SelectedDeviceChannel), nameof(IsConfigured), nameof(RouteText));
+    }
+
+    public AsioChannelRouteSnapshot ToSnapshot() => new(
+        (uint)selectedDriverIndex, selectedDeviceChannel, ProcessingChannel);
+
+    private void UpdateDeviceChannels()
+    {
+        var driver = SelectedDriver;
+        var count = driver is null ? 0U : (DirectionLabel.StartsWith("输入", StringComparison.Ordinal)
+            ? driver.InputChannelCount
+            : driver.OutputChannelCount);
+        deviceChannels = count == 0U ? [] : Enumerable.Range(0, checked((int)count)).Select(static value => (uint)value).ToArray();
+        if (deviceChannels.Count == 0)
+        {
+            selectedDeviceChannel = 0U;
+        }
+        else if (!deviceChannels.Contains(selectedDeviceChannel))
+        {
+            selectedDeviceChannel = deviceChannels.Contains(ProcessingChannel) ? ProcessingChannel : deviceChannels[0];
+        }
+    }
+
+    private void OnPropertiesChanged(params string[] names)
+    {
+        foreach (var name in names)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        }
+    }
+}
+
 public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly BackendSession? backend;
@@ -129,6 +232,16 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private RealtimeContractSnapshot realtimeContract = EmptyRealtimeContract;
     private WhiteboxStatusSnapshot whiteboxStatus = EmptyWhiteboxStatus;
     private IReadOnlyList<AsioDriverSnapshot> asioDrivers = [];
+    private readonly IReadOnlyList<AsioRouteSelection> asioInputRoutes =
+    [
+        new AsioRouteSelection("输入 1", 0U),
+        new AsioRouteSelection("输入 2", 1U),
+    ];
+    private readonly IReadOnlyList<AsioRouteSelection> asioOutputRoutes =
+    [
+        new AsioRouteSelection("输出 1", 0U),
+        new AsioRouteSelection("输出 2", 1U),
+    ];
     private IReadOnlyList<MidiDeviceSnapshot> midiDevices = [];
     private IReadOnlyList<MidiLearnTargetSnapshot> midiLearnTargets = [];
     private IReadOnlyList<uint> asioInputPorts = [];
@@ -155,6 +268,10 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     public RigEditorViewModel()
     {
+        foreach (var route in asioInputRoutes.Concat(asioOutputRoutes))
+        {
+            route.PropertyChanged += AsioRouteChanged;
+        }
         try
         {
             backend = new BackendSession();
@@ -269,10 +386,31 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         ? "白盒状态: unavailable"
         : $"白盒: {whiteboxStatus.RuntimeStatus} · 证据: {whiteboxStatus.EvidenceStatus}";
     public IReadOnlyList<AsioDriverSnapshot> AsioDrivers => asioDrivers;
+    public IReadOnlyList<AsioRouteSelection> AsioInputRoutes => asioInputRoutes;
+    public IReadOnlyList<AsioRouteSelection> AsioOutputRoutes => asioOutputRoutes;
     public bool HasAsioDrivers => asioDrivers.Count > 0;
-    public bool HasSelectedAsio => SelectedAsioDriver is not null;
-    public bool CanOpenAsio => SelectedAsioDriver is not null &&
-        SelectedAsioDriver.InputChannelCount >= 2 && SelectedAsioDriver.OutputChannelCount >= 2 && !AudioOpen;
+    public bool HasSelectedAsio => asioInputRoutes.Any(route => route.SelectedDriver is not null) ||
+        asioOutputRoutes.Any(route => route.SelectedDriver is not null);
+    public bool AsioRouteMapValid
+    {
+        get
+        {
+            if (!asioInputRoutes.All(route => route.IsConfigured) || !asioOutputRoutes.All(route => route.IsConfigured))
+            {
+                return false;
+            }
+            var inputs = asioInputRoutes.Select(route => route.ToSnapshot()).ToArray();
+            var outputs = asioOutputRoutes.Select(route => route.ToSnapshot()).ToArray();
+            return inputs.GroupBy(route => (route.DriverIndex, route.DeviceChannel)).All(group => group.Count() == 1) &&
+                inputs.GroupBy(route => route.ProcessingChannel).All(group => group.Count() == 1) &&
+                outputs.GroupBy(route => (route.DriverIndex, route.DeviceChannel)).All(group => group.Count() == 1);
+        }
+    }
+    public string AsioRouteValidationText => !asioInputRoutes.All(route => route.IsConfigured) ||
+        !asioOutputRoutes.All(route => route.IsConfigured)
+        ? "路由待配置"
+        : AsioRouteMapValid ? "路由有效 · 可使用多个 ASIO 设备" : "路由无效 · 输入处理通道或物理端口重复";
+    public bool CanOpenAsio => HasAsioDrivers && !AudioOpen && AsioRouteMapValid;
     public bool CanStartAsio => AudioOpen && !AudioRunning;
     public bool CanStopAsio => AudioRunning;
     public bool CanCloseAsio => AudioOpen;
@@ -393,15 +531,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         Status = $"检查器页签: {tab}";
         return true;
     }
-    public string AsioRouteText => SelectedAsioDriver is null
-        ? "ASIO: 未选择设备；输入/输出端口固定为选定设备的物理通道"
-        : $"ASIO: {SelectedAsioDriver.DisplayName} · 输入 {SelectedInputChannel0}/{SelectedInputChannel1} → 输出 {SelectedOutputChannel0}/{SelectedOutputChannel1}";
-    public string FixedInputPortText => SelectedAsioDriver is null
-        ? "固定输入 · 未选 ASIO 设备"
-        : $"固定输入 · {SelectedAsioDriver.DisplayName} · 物理通道 {SelectedInputChannel0}/{SelectedInputChannel1}";
-    public string FixedOutputPortText => SelectedAsioDriver is null
-        ? "固定输出 · 未选 ASIO 设备"
-        : $"固定输出 · {SelectedAsioDriver.DisplayName} · 物理通道 {SelectedOutputChannel0}/{SelectedOutputChannel1}";
+    public string AsioRouteText => "ASIO: " + string.Join(" | ", asioInputRoutes.Concat(asioOutputRoutes).Select(route => route.RouteText));
+    public string FixedInputPortText => "输入路由 · " + string.Join(" | ", asioInputRoutes.Select(route => route.RouteText));
+    public string FixedOutputPortText => "输出路由 · " + string.Join(" | ", asioOutputRoutes.Select(route => route.RouteText));
     public string TunerStatus => $"调音器: {(TunerEnabled ? "开启" : "关闭")}";
     public string MidiLearnStatus => snapshot.MidiStatus.Contains("learn armed", StringComparison.OrdinalIgnoreCase)
         ? "学习中：等待 CC"
@@ -494,7 +626,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 nameof(SelectedMidiTargetIndex), nameof(SelectedMidiBindingIndex), nameof(MidiLearnStatus),
                 nameof(RealtimeContract),
                 nameof(RealtimeStatus), nameof(WhiteboxStatus), nameof(WhiteboxStatusText),
-                nameof(HasAsioDrivers), nameof(HasSelectedAsio), nameof(AsioRouteText), nameof(TunerStatus));
+                nameof(AsioInputRoutes), nameof(AsioOutputRoutes), nameof(HasAsioDrivers), nameof(HasSelectedAsio),
+                nameof(AsioRouteMapValid), nameof(AsioRouteValidationText), nameof(AsioRouteText), nameof(TunerStatus));
         }
         catch (Exception exception)
         {
@@ -796,6 +929,10 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         {
             backend.RefreshAsioDrivers();
             asioDrivers = backend.ReadAsioDrivers();
+            foreach (var route in asioInputRoutes.Concat(asioOutputRoutes))
+            {
+                route.SetDrivers(asioDrivers);
+            }
             OnPropertiesChanged(nameof(AsioDrivers));
             SelectedAsioDriverIndex = asioDrivers.Count == 0 ? -1 : 0;
             Refresh();
@@ -813,22 +950,17 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     public bool OpenSelectedAsio(IntPtr nativeWindow)
     {
-        if (backend is null || SelectedAsioDriver is null)
+        if (backend is null || !CanOpenAsio)
         {
-            Status = "请先刷新并选择 ASIO 设备";
-            return false;
-        }
-        if (SelectedAsioDriver.InputChannelCount < 2 || SelectedAsioDriver.OutputChannelCount < 2)
-        {
-            Status = "所选 ASIO 设备至少需要 2 个输入和 2 个输出通道";
+            Status = "请先为全部输入/输出路由选择有效的 ASIO 设备和物理通道";
             return false;
         }
         try
         {
-            backend.OpenAsio((uint)selectedAsioDriverIndex, nativeWindow,
-                SelectedInputChannel0, SelectedInputChannel1, SelectedOutputChannel0, SelectedOutputChannel1);
+            backend.OpenAsioRouted(asioInputRoutes.Select(route => route.ToSnapshot()).ToArray(),
+                asioOutputRoutes.Select(route => route.ToSnapshot()).ToArray(), nativeWindow);
             Refresh();
-            Status = $"ASIO 已打开；固定输入 {SelectedInputChannel0}/{SelectedInputChannel1}，固定输出 {SelectedOutputChannel0}/{SelectedOutputChannel1}";
+            Status = $"ASIO 已打开；{asioInputRoutes.Count} 路输入 / {asioOutputRoutes.Count} 路输出，支持跨设备路由";
             return true;
         }
         catch (Exception exception)
@@ -1160,6 +1292,10 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     public void Dispose()
     {
+        foreach (var route in asioInputRoutes.Concat(asioOutputRoutes))
+        {
+            route.PropertyChanged -= AsioRouteChanged;
+        }
         backend?.EndDrag();
         backend?.Dispose();
     }
@@ -1293,6 +1429,12 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             SelectedOutputChannel1 = 1;
         }
         OnPropertiesChanged(nameof(AsioInputPorts), nameof(AsioOutputPorts), nameof(AsioRouteText));
+    }
+
+    private void AsioRouteChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        OnPropertiesChanged(nameof(AsioRouteMapValid), nameof(AsioRouteValidationText), nameof(CanOpenAsio), nameof(HasSelectedAsio), nameof(AsioRouteText),
+            nameof(FixedInputPortText), nameof(FixedOutputPortText));
     }
 
     private double ToBackendX(double x) => x * Math.Max(snapshot.DpiScale, 1.0);

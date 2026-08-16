@@ -173,6 +173,14 @@ internal struct NativeAsioDriverView
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct NativeAsioChannelRoute
+{
+    public uint DriverIndex;
+    public uint DeviceChannel;
+    public uint ProcessingChannel;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal struct NativeMidiDeviceView
 {
     public uint DeviceIndex;
@@ -345,6 +353,12 @@ internal static class NativeMethods
         uint inputChannel0, uint inputChannel1, uint outputChannel0, uint outputChannel1);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_asio_open_routed(
+        IntPtr backend, IntPtr nativeWindow,
+        [In] NativeAsioChannelRoute[] inputRoutes, uint inputRouteCount,
+        [In] NativeAsioChannelRoute[] outputRoutes, uint outputRouteCount);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_asio_start(IntPtr backend);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -511,6 +525,11 @@ public sealed record AsioDriverSnapshot(
     public string DisplayText => $"{DisplayName} · {InputChannelCount} in / {OutputChannelCount} out";
     public string SampleRateText => NativeSampleRateHz > 0.0 ? $"{NativeSampleRateHz:0} Hz" : "probe unavailable";
 }
+
+public sealed record AsioChannelRouteSnapshot(
+    uint DriverIndex,
+    uint DeviceChannel,
+    uint ProcessingChannel);
 
 public sealed record MidiDeviceSnapshot(uint DeviceIndex, string DisplayName)
 {
@@ -800,6 +819,31 @@ public sealed class BackendSession : IDisposable
         uint inputChannel0, uint inputChannel1, uint outputChannel0, uint outputChannel1) =>
         Ensure(NativeMethods.solorig_backend_asio_open(handle, driverIndex, nativeWindow,
             inputChannel0, inputChannel1, outputChannel0, outputChannel1), "open ASIO");
+
+    public void OpenAsioRouted(IReadOnlyList<AsioChannelRouteSnapshot> inputRoutes,
+        IReadOnlyList<AsioChannelRouteSnapshot> outputRoutes, IntPtr nativeWindow)
+    {
+        ThrowIfDisposed();
+        if (inputRoutes.Count == 0 || outputRoutes.Count == 0)
+        {
+            throw new BackendException("open routed ASIO", NativeStatus.InvalidArgument,
+                "ASIO input/output routes are required");
+        }
+        var nativeInputs = inputRoutes.Select(route => new NativeAsioChannelRoute
+        {
+            DriverIndex = route.DriverIndex,
+            DeviceChannel = route.DeviceChannel,
+            ProcessingChannel = route.ProcessingChannel,
+        }).ToArray();
+        var nativeOutputs = outputRoutes.Select(route => new NativeAsioChannelRoute
+        {
+            DriverIndex = route.DriverIndex,
+            DeviceChannel = route.DeviceChannel,
+            ProcessingChannel = route.ProcessingChannel,
+        }).ToArray();
+        Ensure(NativeMethods.solorig_backend_asio_open_routed(handle, nativeWindow,
+            nativeInputs, (uint)nativeInputs.Length, nativeOutputs, (uint)nativeOutputs.Length), "open routed ASIO");
+    }
 
     public void StartAsio() => Ensure(NativeMethods.solorig_backend_asio_start(handle), "start ASIO");
     public void StopAsio() => Ensure(NativeMethods.solorig_backend_asio_stop(handle), "stop ASIO");

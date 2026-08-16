@@ -51,6 +51,17 @@ TEST_CASE("C ABI backend creates a side-effect-free default snapshot") {
     solorig_backend_destroy(backend);
 }
 
+TEST_CASE("C ABI routed ASIO entry point validates route arrays without opening hardware") {
+    SoloRigBackend* backend = nullptr;
+    REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);
+    SoloRigAsioChannelRoute route{.driver_index = 0U, .device_channel = 0U, .processing_channel = 0U};
+    REQUIRE(solorig_backend_asio_open_routed(backend, nullptr, nullptr, 1U, &route, 1U) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    REQUIRE(solorig_backend_asio_open_routed(backend, nullptr, &route, 1U, &route, 1U) ==
+            SOLO_RIG_STATUS_NOT_FOUND);
+    solorig_backend_destroy(backend);
+}
+
 TEST_CASE("C ABI backend toggles node bypass state through the editor transaction") {
     SoloRigBackend* backend = nullptr;
     REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);

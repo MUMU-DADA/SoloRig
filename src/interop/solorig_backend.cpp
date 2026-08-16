@@ -16,6 +16,7 @@
 #include <iterator>
 #include <memory>
 #include <new>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -159,6 +160,126 @@ const solo_rig::RigEditorNode* FindSceneNode(const SoloRigSnapshot* snapshot, ui
         return nullptr;
     }
     return &snapshot->scene.nodes[index];
+}
+
+constexpr uint32_t kMaximumAsioRouteCount = 64U;
+constexpr uint32_t kMaximumAsioProcessingChannels = 32U;
+
+SoloRigStatus OpenAsioRouteMap(
+    SoloRigBackend* backend,
+    void* native_window,
+    const SoloRigAsioChannelRoute* input_routes,
+    uint32_t input_route_count,
+    const SoloRigAsioChannelRoute* output_routes,
+    uint32_t output_route_count) {
+    if (!ValidBackend(backend) || backend->audio_engine == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "audio backend is unavailable");
+    }
+    if (input_routes == nullptr || output_routes == nullptr || input_route_count == 0U ||
+        output_route_count == 0U || input_route_count > kMaximumAsioRouteCount ||
+        output_route_count > kMaximumAsioRouteCount) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "at least one input/output route and bounded route arrays are required");
+    }
+
+    const auto& drivers = backend->audio_engine->Drivers();
+    solo_rig::StandaloneAudioRouting routing{
+        .processing_format = {.sample_rate_hz = 192000.0,
+                              .max_block_size = 1U,
+                              .channel_count = 0U,
+                              .sample_representation = solo_rig::SampleRepresentation::Float32},
+    };
+    routing.inputs.reserve(input_route_count);
+    routing.outputs.reserve(output_route_count);
+    std::vector<std::optional<solo_rig::standalone::AsioProbeResult>> probes(drivers.size());
+    const auto append_routes = [&](const SoloRigAsioChannelRoute* routes,
+                                   uint32_t route_count,
+                                   bool input) -> SoloRigStatus {
+        for (uint32_t index = 0U; index < route_count; ++index) {
+            const auto& route = routes[index];
+            if (route.driver_index >= drivers.size()) {
+                return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND,
+                                "ASIO route references an unknown driver index");
+            }
+            if (route.processing_channel >= kMaximumAsioProcessingChannels) {
+                return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                                "ASIO route processing channel is out of the supported range");
+            }
+            auto& cached_probe = probes[route.driver_index];
+            if (!cached_probe.has_value()) {
+                cached_probe.emplace(solo_rig::standalone::AsioHost::ProbeDriver(
+                    drivers[route.driver_index], static_cast<HWND>(native_window)));
+            }
+            const auto& probe = *cached_probe;
+            if (!probe.succeeded) {
+                return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND,
+                                "ASIO probe failed: " + probe.driver_error);
+            }
+            const auto channel_count = input ? probe.device.input_channel_count
+                                             : probe.device.output_channel_count;
+            if (route.device_channel >= channel_count) {
+                return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                                input ? "ASIO input route channel is out of range"
+                                      : "ASIO output route channel is out of range");
+            }
+            const solo_rig::PhysicalChannelRoute physical_route{
+                .device_id = probe.device.device_id,
+                .device_channel = route.device_channel,
+                .processing_channel = route.processing_channel,
+            };
+            if (input) {
+                routing.inputs.push_back(physical_route);
+            } else {
+                routing.outputs.push_back(physical_route);
+            }
+            routing.processing_format.channel_count = std::max(
+                routing.processing_format.channel_count, route.processing_channel + 1U);
+        }
+        return SOLO_RIG_STATUS_OK;
+    };
+
+    auto status = append_routes(input_routes, input_route_count, true);
+    if (status != SOLO_RIG_STATUS_OK) {
+        return status;
+    }
+    status = append_routes(output_routes, output_route_count, false);
+    if (status != SOLO_RIG_STATUS_OK) {
+        return status;
+    }
+    for (std::size_t left = 0U; left < routing.inputs.size(); ++left) {
+        for (std::size_t right = left + 1U; right < routing.inputs.size(); ++right) {
+            const auto& first = routing.inputs[left];
+            const auto& second = routing.inputs[right];
+            if ((first.device_id == second.device_id && first.device_channel == second.device_channel) ||
+                first.processing_channel == second.processing_channel) {
+                return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                                "ASIO input routes reuse a physical or processing channel");
+            }
+        }
+    }
+    for (std::size_t left = 0U; left < routing.outputs.size(); ++left) {
+        for (std::size_t right = left + 1U; right < routing.outputs.size(); ++right) {
+            const auto& first = routing.outputs[left];
+            const auto& second = routing.outputs[right];
+            if (first.device_id == second.device_id && first.device_channel == second.device_channel) {
+                return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                                "ASIO output routes reuse a physical channel");
+            }
+        }
+    }
+    if (routing.processing_format.channel_count == 0U) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "ASIO routes do not expose a processing channel");
+    }
+
+    if (!backend->audio_engine->OpenWithDevices(
+            drivers, static_cast<HWND>(native_window), backend->editor.ExportPreset(), std::move(routing))) {
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR,
+                        backend->audio_engine->ErrorText());
+    }
+    SyncAudioStatus(*backend);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
 }
 
 } // namespace
@@ -833,55 +954,30 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_open(
     uint32_t input_channel_1,
     uint32_t output_channel_0,
     uint32_t output_channel_1) {
-    if (!ValidBackend(backend) || backend->audio_engine == nullptr) {
-        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "audio backend is unavailable");
-    }
-    const auto& drivers = backend->audio_engine->Drivers();
-    if (driver_index >= drivers.size()) {
-        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "ASIO driver entry was not found");
-    }
-    const auto probe = solo_rig::standalone::AsioHost::ProbeDriver(
-        drivers[driver_index], static_cast<HWND>(native_window));
-    if (!probe.succeeded) {
-        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND,
-                        "ASIO probe failed: " + probe.driver_error);
-    }
-    if (input_channel_0 >= probe.device.input_channel_count ||
-        input_channel_1 >= probe.device.input_channel_count ||
-        output_channel_0 >= probe.device.output_channel_count ||
-        output_channel_1 >= probe.device.output_channel_count ||
-        input_channel_0 == input_channel_1 || output_channel_0 == output_channel_1) {
+    if (input_channel_0 == input_channel_1 || output_channel_0 == output_channel_1) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
                         "selected ASIO input/output ports are invalid or duplicated");
     }
+    const SoloRigAsioChannelRoute input_routes[] = {
+        {.driver_index = driver_index, .device_channel = input_channel_0, .processing_channel = 0U},
+        {.driver_index = driver_index, .device_channel = input_channel_1, .processing_channel = 1U},
+    };
+    const SoloRigAsioChannelRoute output_routes[] = {
+        {.driver_index = driver_index, .device_channel = output_channel_0, .processing_channel = 0U},
+        {.driver_index = driver_index, .device_channel = output_channel_1, .processing_channel = 1U},
+    };
+    return OpenAsioRouteMap(backend, native_window, input_routes, 2U, output_routes, 2U);
+}
 
-    solo_rig::StandaloneAudioRouting routing{
-        .processing_format = {.sample_rate_hz = 192000.0,
-                              .max_block_size = 1U,
-                              .channel_count = 2U,
-                              .sample_representation = solo_rig::SampleRepresentation::Float32},
-        .device_buffer_size = probe.preferred_buffer_size,
-        .inputs = {{.device_id = probe.device.device_id,
-                    .device_channel = input_channel_0,
-                    .processing_channel = 0U},
-                   {.device_id = probe.device.device_id,
-                    .device_channel = input_channel_1,
-                    .processing_channel = 1U}},
-        .outputs = {{.device_id = probe.device.device_id,
-                     .device_channel = output_channel_0,
-                     .processing_channel = 0U},
-                    {.device_id = probe.device.device_id,
-                     .device_channel = output_channel_1,
-                     .processing_channel = 1U}}};
-    if (!backend->audio_engine->OpenWithRouting(
-            drivers[driver_index], static_cast<HWND>(native_window), backend->editor.ExportPreset(),
-            std::move(routing))) {
-        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR,
-                        backend->audio_engine->ErrorText());
-    }
-    SyncAudioStatus(*backend);
-    backend->last_error.clear();
-    return SOLO_RIG_STATUS_OK;
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_open_routed(
+    SoloRigBackend* backend,
+    void* native_window,
+    const SoloRigAsioChannelRoute* input_routes,
+    uint32_t input_route_count,
+    const SoloRigAsioChannelRoute* output_routes,
+    uint32_t output_route_count) {
+    return OpenAsioRouteMap(backend, native_window, input_routes, input_route_count,
+                            output_routes, output_route_count);
 }
 
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_start(SoloRigBackend* backend) {

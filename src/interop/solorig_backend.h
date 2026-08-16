@@ -166,6 +166,15 @@ typedef struct SoloRigAsioDriverView {
     double native_sample_rate_hz;
 } SoloRigAsioDriverView;
 
+// One physical ASIO channel mapped into the fixed internal processing graph.
+// The additive routed-open entry point accepts independent input/output maps,
+// so different physical devices can be active at the same time.
+typedef struct SoloRigAsioChannelRoute {
+    uint32_t driver_index;
+    uint32_t device_channel;
+    uint32_t processing_channel;
+} SoloRigAsioChannelRoute;
+
 typedef struct SoloRigMidiDeviceView {
     uint32_t device_index;
     const char* display_name_utf8;
@@ -339,6 +348,13 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_open(
     uint32_t input_channel_1,
     uint32_t output_channel_0,
     uint32_t output_channel_1);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_open_routed(
+    SoloRigBackend* backend,
+    void* native_window,
+    const SoloRigAsioChannelRoute* input_routes,
+    uint32_t input_route_count,
+    const SoloRigAsioChannelRoute* output_routes,
+    uint32_t output_route_count);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_start(SoloRigBackend* backend);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_stop(SoloRigBackend* backend);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_asio_close(SoloRigBackend* backend);

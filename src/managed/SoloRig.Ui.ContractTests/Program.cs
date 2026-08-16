@@ -25,6 +25,45 @@ Require(!viewModel.AudioOpen && !viewModel.AudioRunning && !viewModel.HasAsioDri
 Require(!viewModel.CanOpenAsio && !viewModel.CanStartAsio && !viewModel.CanStopAsio &&
         !viewModel.CanCloseAsio && !viewModel.CanRecoverAsio,
     "startup disables ASIO actions that have no valid device or lifecycle state");
+var routedDriverFixtures = new[]
+{
+    new AsioDriverSnapshot("fixture-input", "Fixture Input", 4U, 2U, 44100.0),
+    new AsioDriverSnapshot("fixture-output", "Fixture Output", 2U, 6U, 48000.0),
+};
+foreach (var route in viewModel.AsioInputRoutes.Concat(viewModel.AsioOutputRoutes))
+{
+    route.SetDrivers(routedDriverFixtures);
+}
+viewModel.AsioInputRoutes[0].SelectedDriverIndex = 0;
+viewModel.AsioInputRoutes[0].SelectedDeviceChannel = 3U;
+viewModel.AsioInputRoutes[1].SelectedDriverIndex = 1;
+viewModel.AsioInputRoutes[1].SelectedDeviceChannel = 1U;
+viewModel.AsioOutputRoutes[0].SelectedDriverIndex = 1;
+viewModel.AsioOutputRoutes[0].SelectedDeviceChannel = 4U;
+viewModel.AsioOutputRoutes[1].SelectedDriverIndex = 0;
+viewModel.AsioOutputRoutes[1].SelectedDeviceChannel = 1U;
+Require(viewModel.AsioInputRoutes.All(route => route.IsConfigured) &&
+        viewModel.AsioOutputRoutes.All(route => route.IsConfigured),
+    "ASIO route editor accepts independent physical channels for each input/output row");
+Require(viewModel.AsioInputRoutes[0].ToSnapshot() == new AsioChannelRouteSnapshot(0U, 3U, 0U) &&
+        viewModel.AsioInputRoutes[1].ToSnapshot() == new AsioChannelRouteSnapshot(1U, 1U, 1U) &&
+        viewModel.AsioOutputRoutes[0].ToSnapshot() == new AsioChannelRouteSnapshot(1U, 4U, 0U) &&
+        viewModel.AsioOutputRoutes[1].ToSnapshot() == new AsioChannelRouteSnapshot(0U, 1U, 1U),
+    "ASIO route editor preserves cross-device driver indexes and processing-channel mappings");
+Require(viewModel.AsioRouteText.Contains("Fixture Input", StringComparison.Ordinal) &&
+        viewModel.AsioRouteText.Contains("Fixture Output", StringComparison.Ordinal),
+    "ASIO route summary exposes both independently selected devices");
+viewModel.AsioOutputRoutes[1].SelectedDriverIndex = 1;
+viewModel.AsioOutputRoutes[1].SelectedDeviceChannel = 4U;
+Require(!viewModel.AsioRouteMapValid && viewModel.AsioRouteValidationText.Contains("重复", StringComparison.Ordinal),
+    "ASIO route editor rejects duplicate physical output routes before opening hardware");
+viewModel.AsioOutputRoutes[1].SelectedDriverIndex = 0;
+viewModel.AsioOutputRoutes[1].SelectedDeviceChannel = 1U;
+Require(viewModel.AsioRouteMapValid, "ASIO route editor restores a valid cross-device route map");
+foreach (var route in viewModel.AsioInputRoutes.Concat(viewModel.AsioOutputRoutes))
+{
+    route.SetDrivers([]);
+}
 Require(!viewModel.TunerEnabled, "startup keeps the tuner disabled");
 Require(viewModel.MidiLearnTargets.Count >= 2, "MIDI learn exposes current parameter targets without opening hardware");
 Require(!viewModel.ArmSelectedMidiLearn(), "MIDI learn rejects an unopened MIDI input");
