@@ -7,6 +7,9 @@ namespace SoloRig.Standalone;
 
 public sealed partial class MainWindow : Window
 {
+    private bool allowClose;
+    private bool closePromptOpen;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -34,4 +37,33 @@ public sealed partial class MainWindow : Window
     public bool ProbeKeyboardShortcuts() => EditorView.ProbeKeyboardShortcuts();
 
     private void WindowKeyDown(object? sender, KeyEventArgs args) => EditorView.HandleWindowKeyDown(args);
+
+    private async void WindowClosing(object? sender, WindowClosingEventArgs args)
+    {
+        if (allowClose || DataContext is not RigEditorViewModel editor || !editor.IsDirty)
+        {
+            return;
+        }
+
+        args.Cancel = true;
+        if (closePromptOpen)
+        {
+            return;
+        }
+
+        closePromptOpen = true;
+        try
+        {
+            if (!await EditorView.ConfirmPendingChangesAsync())
+            {
+                return;
+            }
+            allowClose = true;
+            Close();
+        }
+        finally
+        {
+            closePromptOpen = false;
+        }
+    }
 }

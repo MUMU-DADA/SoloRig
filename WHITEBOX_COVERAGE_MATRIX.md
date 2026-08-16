@@ -27,7 +27,7 @@
 | 8 | NAM 与 NAM A2 | 部分完成 | `third_party/NeuralAmpModelerCore`、NAM/NAM A2 runtime 和外部包测试 | 产品端到端导入、错误恢复、真实模型回归及明确的黑盒精度口径；不计入白盒元件证据 |
 | 9 | 拖动效果器改变位置 | 已验证（编辑器层） | C ABI/Windows UI/C# contract 覆盖选择、拖动、网格吸附和脏状态 | 与任意拓扑图编辑、撤销/重做和保存恢复联合验收 |
 | 10 | 每个效果器预期延迟与性能占用 | 部分完成 | 静态估算、声明延迟、`RealtimeLoadMeter`、`PerformanceSnapshot` 和 C#/C ABI 面板；Win32 ASIO 状态持续显示回调计数、最近 block 大小和 reset/dropout 恢复提示 | 真实宿主回灌、过载状态和可复验基准；“实测未连接”不得升级为实测 |
-| 11 | 保存/读取当前链路配置 | 已验证（核心文件层） | `src/content/preset.*`、schema v1/v2、主题/MIDI 扩展和 Save/Open 测试；Standalone 打开/导入在 runtime 准备失败时会恢复原文档路径、脏状态和外部包上下文 | 完整任意拓扑、模块包引用失效、版本迁移和独立程序端到端回归 |
+| 11 | 保存/读取当前链路配置 | 已验证（核心文件层） | `src/content/preset.*`、schema v1/v2、主题/MIDI 扩展和 Save/Open 测试；M25-R 为 Standalone 关闭、打开、新建、默认和 `Ctrl+1` 替换增加保存/放弃/取消保护，保存取消/失败保留当前文档；打开/导入在 runtime 准备失败时仍恢复原文档路径、脏状态和外部包上下文 | 完整任意拓扑、模块包引用失效、版本迁移和独立程序端到端回归 |
 | 12 | 快捷键和界面切换配置 | 部分完成 | `shortcut_registry`、`preset_controller`、托管 UI contract；M25-Q 将无修饰 `T` 主题切换、`Ctrl+S`/`Ctrl+Shift+S`/`Ctrl+O`/`Ctrl+1` 统一到共享 Standalone/VST3 `RigEditorView`，visual probe 覆盖修饰键不误触发 | 真实输入设备/窗口生命周期、快捷键冲突和多预设 bank 的音频图原子替换 |
 | 13 | MIDI 控制 | 部分完成 | WinMM 输入、无锁队列、CC/Program Change 映射与测试；C# 共享 UI 已通过 C ABI 支持 MIDI 目标枚举、CC Learn/取消、绑定删除/清空和 MIDI Bank 目录导入，按排序后的 `.srig` 文件自动建立 Program Change `0..N-1` 绑定并在共享映射列表显示；M25-O 新增独立 MIDI 生命周期 view，Standalone/VST3 共享按钮按 open/learn 状态门禁；C ABI/C# startup contract 已覆盖闭合状态 | 独立程序真实设备断连/溢出硬件演练、更多 MIDI 通道策略和图参数实时发布 |
 | 14 | 外部标准化主题 | 已验证（解析与默认主题） | `src/content/theme.*`、外部主题 parser 和测试；主题文件在读取前限制为 4 MiB，并限制颜色/指标集合与字符串长度，超限时保持当前主题 | 独立程序全控件渲染、版本迁移和更完整恶意输入审计 |
@@ -41,7 +41,7 @@
 | 22 | 逻辑、元属性、外观三层模块包 | 部分完成 | `ModulePackage` manifest、logic、descriptor/metadata、外部 Circuit/NAM/IR 入口；编辑器动态目录、manifest 包与直接 Circuit/NAM/IR preset 引用、Standalone 注册/处理自测、VST3 state v3 重建和 C ABI 重开回归已接通；模块级 skin JSON 可声明相对图像资源，非法/缺失时回退默认控件 | 真实 VST3 宿主、多模块皮肤视觉产品绑定、矢量/动画资源生命周期/版本迁移和更复杂模拟逻辑与数字逻辑统一运行契约 |
 | 23 | 多 ASIO 设备与任意 I/O 通道 | 部分完成 | `AsioDeviceCoordinator` 已支持最多四个 ASIO host、固定容量跨设备 ring、任意物理输入/输出路由文本、每设备 buffer 配置、异步时钟离线契约和 Recover 入口；M25-N 新增 additive `solorig_backend_asio_open_routed` 与共享 UI 的每行设备/通道选择，单设备 `Midiplus USB Audio` 真实回调通过 | 至少两个可用 ASIO 设备的真实同步/异步回归、真实断连/重置恢复和更多硬件 |
 
-补充：M24-C 已将 C# 共享视图的 ASIO/MIDI/调音器控制桥接到原生控制线程，并在画布显示固定 INPUT/OUTPUT 与效果器端点点击连接；M24-D 已通过 hostfxr 将同一 C# `RigEditorView` 挂载到 Windows VST3 `IPlugView`，并覆盖真实 Win32 父窗口的创建、缩放和移除；M24-E 已将 C# Standalone 设为唯一独立程序交付入口，旧 Win32 窗口仅保留为回归夹具；M24-F 已将 MIDI Learn/Bank 操作补齐到共享 C# UI，并把 `SoloRigBackend.dll` 随 VST3 bundle 发布且加入不可用即拒绝挂载的门禁；M24-G 已将本机 .NET runtime 随 Standalone 发布并在禁用全局 runtime 探索下启动成功；M24-H 已将同一 runtime 以标准 hostfxr 目录随 VST3 bundle 发布，并在禁用全局 runtime 探索下通过 lifecycle。真实 DAW 项目回灌、安装器签名/升级策略、硬件成功打开、双设备故障恢复和授权/实测白盒参考仍未完成。
+补充：M25-R 新增 Standalone/VST3 共享视图的 dirty 文档替换保护；关闭、新建、默认、打开和 `Ctrl+1` 都先提供保存/放弃/取消，保存取消或失败不改变当前文档。证据为 `RigEditorView.SaveForCloseAsync`、`ConfirmPendingChangesAsync`、Standalone `WindowClosing` 和完整 Release/visual probe；真实窗口人工点击三种按钮仍属于最终产品验收。M24-C 已将 C# 共享视图的 ASIO/MIDI/调音器控制桥接到原生控制线程，并在画布显示固定 INPUT/OUTPUT 与效果器端点点击连接；M24-D 已通过 hostfxr 将同一 C# `RigEditorView` 挂载到 Windows VST3 `IPlugView`，并覆盖真实 Win32 父窗口的创建、缩放和移除；M24-E 已将 C# Standalone 设为唯一独立程序交付入口，旧 Win32 窗口仅保留为回归夹具；M24-F 已将 MIDI Learn/Bank 操作补齐到共享 C# UI，并把 `SoloRigBackend.dll` 随 VST3 bundle 发布且加入不可用即拒绝挂载的门禁；M24-G 已将本机 .NET runtime 随 Standalone 发布并在禁用全局 runtime 探索下启动成功；M24-H 已将同一 runtime 以标准 hostfxr 目录随 VST3 bundle 发布，并在禁用全局 runtime 探索下通过 lifecycle。真实 DAW 项目回灌、安装器签名/升级策略、硬件成功打开、双设备故障恢复和授权/实测白盒参考仍未完成。
 
 ## 白盒专用覆盖
 

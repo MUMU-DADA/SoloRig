@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
+using Avalonia.Layout;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using SoloRig.Ui;
@@ -16,6 +17,13 @@ namespace SoloRig.Ui.Avalonia;
 
 public sealed partial class RigEditorView : UserControl
 {
+    private enum PendingChangesChoice
+    {
+        Cancel,
+        Save,
+        Discard,
+    }
+
     private sealed record RenderedSurfaceFingerprint(int Width, int Height, string Sha256, int PngBytes);
 
     private sealed record ThemePalette(
@@ -442,7 +450,7 @@ public sealed partial class RigEditorView : UserControl
         }
         if ((modifiers & KeyModifiers.Control) != 0 && key == Key.D1)
         {
-            viewModel.SelectPreset("SoloRig Default");
+            _ = SelectDefaultPresetAsync();
             return true;
         }
         return false;
@@ -659,6 +667,8 @@ public sealed partial class RigEditorView : UserControl
     private void OpenClick(object? sender, RoutedEventArgs args) => _ = OpenAsync();
     private void SaveClick(object? sender, RoutedEventArgs args) => _ = SaveAsync();
     private void SaveAsClick(object? sender, RoutedEventArgs args) => _ = SaveAsAsync();
+    private void NewPresetClick(object? sender, RoutedEventArgs args) => _ = SelectDefaultPresetAsync();
+    private void DefaultPresetClick(object? sender, RoutedEventArgs args) => _ = SelectDefaultPresetAsync();
     private void LoadThemeClick(object? sender, RoutedEventArgs args) => _ = LoadThemeAsync();
     private void ImportResourceClick(object? sender, RoutedEventArgs args) => _ = ImportResourceAsync();
 
@@ -851,34 +861,104 @@ public sealed partial class RigEditorView : UserControl
             viewModel.ReportFileDialogCancelled("Open");
             return;
         }
+        if (!await ConfirmPendingChangesAsync())
+        {
+            return;
+        }
         viewModel.OpenFromPath(path);
     }
 
-    private async Task SaveAsync()
+    private async Task SelectDefaultPresetAsync()
+    {
+        if (viewModel is not null && await ConfirmPendingChangesAsync())
+        {
+            viewModel.SelectPreset("SoloRig Default");
+        }
+    }
+
+    public async Task<bool> ConfirmPendingChangesAsync()
+    {
+        if (viewModel is null || !viewModel.IsDirty)
+        {
+            return true;
+        }
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        if (owner is null)
+        {
+            return false;
+        }
+        var dialog = new Window
+        {
+            Title = "未保存的更改",
+            Width = 440,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+        var cancel = new Button { Content = "取消", MinWidth = 88 };
+        var discard = new Button { Content = "不保存", MinWidth = 96 };
+        var save = new Button { Content = "保存", MinWidth = 88 };
+        cancel.Click += (_, _) => dialog.Close(PendingChangesChoice.Cancel);
+        discard.Click += (_, _) => dialog.Close(PendingChangesChoice.Discard);
+        save.Click += (_, _) => dialog.Close(PendingChangesChoice.Save);
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 8,
+        };
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(discard);
+        buttons.Children.Add(save);
+        dialog.Content = new StackPanel
+        {
+            Margin = new global::Avalonia.Thickness(24),
+            Spacing = 16,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = "当前预设有未保存的更改。保存后继续，或放弃更改继续操作。",
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                buttons,
+            },
+        };
+        var choice = await dialog.ShowDialog<PendingChangesChoice>(owner);
+        return choice switch
+        {
+            PendingChangesChoice.Save => await SaveForCloseAsync(),
+            PendingChangesChoice.Discard => true,
+            _ => false,
+        };
+    }
+
+    public Task<bool> SaveForCloseAsync() => SaveAsync();
+
+    private async Task<bool> SaveAsync()
     {
         if (viewModel is null)
         {
-            return;
+            return false;
         }
         if (!string.IsNullOrWhiteSpace(viewModel.Snapshot.SourcePath))
         {
-            viewModel.SaveToPath(viewModel.Snapshot.SourcePath);
-            return;
+            return viewModel.SaveToPath(viewModel.Snapshot.SourcePath);
         }
-        await SaveAsAsync();
+        return await SaveAsAsync();
     }
 
-    private async Task SaveAsAsync()
+    private async Task<bool> SaveAsAsync()
     {
         if (viewModel is null)
         {
-            return;
+            return false;
         }
         var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
         if (storage is null)
         {
             viewModel.ReportFileDialogCancelled("Save As");
-            return;
+            return false;
         }
         var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
         {
@@ -891,9 +971,9 @@ public sealed partial class RigEditorView : UserControl
         if (string.IsNullOrWhiteSpace(path))
         {
             viewModel.ReportFileDialogCancelled("Save As");
-            return;
+            return false;
         }
-        viewModel.SaveToPath(path);
+        return viewModel.SaveToPath(path);
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)

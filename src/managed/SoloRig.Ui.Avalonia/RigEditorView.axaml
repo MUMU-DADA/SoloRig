@@ -126,8 +126,8 @@
                     VerticalAlignment="Center" />
 
           <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-            <Button Classes="srg-button ghost" Content="新建" Command="{Binding NewPresetCommand}" />
-            <Button Classes="srg-button ghost" Content="默认" Command="{Binding NewPresetCommand}" />
+            <Button Classes="srg-button ghost" Content="新建" Click="NewPresetClick" />
+            <Button Classes="srg-button ghost" Content="默认" Click="DefaultPresetClick" />
             <Button Classes="srg-button ghost" Content="打开" Click="OpenClick" />
             <Button Classes="srg-button ghost" Content="另存为" Click="SaveAsClick" />
             <Button Classes="srg-button primary" Content="保存" Click="SaveClick" />
