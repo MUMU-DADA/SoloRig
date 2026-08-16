@@ -1,0 +1,128 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="SoloRig.Ui.Avalonia.RigEditorView">
+  <DockPanel Margin="16">
+    <Border DockPanel.Dock="Top" Padding="12" Background="#20242B" CornerRadius="8">
+      <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto">
+        <StackPanel Grid.Row="0" Grid.Column="0" Spacing="3">
+          <TextBlock FontSize="24" FontWeight="Bold" Text="{Binding WindowTitle}" />
+          <TextBlock Text="SoloRig C# Standalone · 共享 Avalonia 编辑器视图" Foreground="#AAB5C5" />
+        </StackPanel>
+        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="7">
+          <Button Content="新建" Command="{Binding NewPresetCommand}" />
+          <Button Content="快捷默认" Command="{Binding NewPresetCommand}" />
+          <Button Content="打开" Click="OpenClick" />
+          <Button Content="保存" Click="SaveClick" />
+          <Button Content="另存为" Click="SaveAsClick" />
+          <Button Content="切换主题" Command="{Binding ToggleThemeCommand}" />
+        </StackPanel>
+        <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="0,10,0,0" Text="{Binding Status}" />
+        <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="18" Margin="0,6,0,0">
+          <TextBlock Text="{Binding FileStatus}" />
+          <ComboBox x:Name="PresetSelector" Width="180" ItemsSource="{Binding PresetNames}"
+                    SelectedItem="{Binding SelectedPresetName, Mode=TwoWay}" />
+          <TextBlock Text="{Binding AudioStatus}" />
+          <TextBlock Text="{Binding MidiStatus}" />
+          <TextBlock x:Name="PerformanceText" Text="{Binding PerformanceStatus}" />
+          <TextBlock x:Name="RealtimeStatusText" Text="{Binding RealtimeStatus}" />
+          <TextBlock x:Name="WhiteboxStatusText" Text="{Binding WhiteboxStatusText}" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Border DockPanel.Dock="Right" Width="270" Margin="14,14,0,0" Padding="12"
+            Background="#242A32" BorderBrush="#58616C" BorderThickness="1" CornerRadius="8">
+      <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="10">
+          <TextBlock FontSize="18" FontWeight="Bold" Text="模块目录" />
+          <TextBox Watermark="搜索模块" Text="{Binding ModuleSearchText}" />
+          <ListBox x:Name="ModuleCatalogList" Height="118" ItemsSource="{Binding FilteredModuleCatalog}"
+                   SelectedItem="{Binding SelectedCatalogModule}">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Spacing="2">
+                  <TextBlock Text="{Binding DisplayText}" FontWeight="Bold" />
+                  <TextBlock Text="{Binding ModuleId}" FontSize="11" Foreground="#AAB5C5" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <StackPanel Orientation="Horizontal" Spacing="5">
+            <Button Content="添加模块" Command="{Binding AddModuleCommand}" />
+            <Button Content="删除节点" Command="{Binding DeleteSelectedCommand}" />
+            <Button Content="复制节点" Command="{Binding DuplicateSelectedCommand}" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="5">
+            <Button Content="连接首尾" Command="{Binding ConnectSelectedCommand}" />
+            <Button Content="断开首条" Command="{Binding DisconnectSelectedCommand}" />
+          </StackPanel>
+          <TextBlock Text="{Binding ResourceStatus}" Foreground="#AAB5C5" TextWrapping="Wrap" />
+          <Button Content="导入 NAM / A2 / IR / circuit" Click="ImportResourceClick" />
+          <TextBlock FontSize="18" FontWeight="Bold" Text="参数编辑" />
+          <TextBlock Text="{Binding SelectedNode.InstanceId, FallbackValue=未选择节点}" />
+          <TextBlock Text="点击节点选中；拖动时按网格吸附。" Foreground="#AAB5C5" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding SelectedParameters}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Grid ColumnDefinitions="*,100" Margin="0,3">
+                  <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="{Binding Id}" />
+                  <TextBox Grid.Column="1" Tag="{Binding Target}" Text="{Binding ValueText}"
+                           LostFocus="ParameterLostFocus" HorizontalContentAlignment="Right" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border Margin="0,12,0,0" Padding="8" Background="#303740" CornerRadius="5">
+            <TextBlock Text="C# 界面只负责交互与控制线程；ASIO/MIDI/实时白盒处理由原生后端执行。"
+                       Foreground="#C4CBD5" TextWrapping="Wrap" />
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+    </Border>
+
+    <Border Margin="0,14,0,0" Padding="10" Background="#171A1F" BorderBrush="#58616C"
+            BorderThickness="1" CornerRadius="8">
+      <Canvas x:Name="EditorCanvas" ClipToBounds="True" Background="#1B2027"
+              PointerPressed="CanvasPointerPressed" PointerMoved="CanvasPointerMoved"
+              PointerReleased="CanvasPointerReleased" SizeChanged="CanvasSizeChanged">
+        <ItemsControl ItemsSource="{Binding CanvasConnections}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Line StartPoint="{Binding SourcePoint}" EndPoint="{Binding DestinationPoint}"
+                    Stroke="#7B8795" StrokeThickness="3" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <ItemsControl ItemsSource="{Binding CanvasNodes}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemContainerTheme>
+            <ControlTheme TargetType="ContentPresenter">
+              <Setter Property="Canvas.Left" Value="{Binding CanvasX}" />
+              <Setter Property="Canvas.Top" Value="{Binding CanvasY}" />
+            </ControlTheme>
+          </ItemsControl.ItemContainerTheme>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Width="{Binding Width}" Height="{Binding Height}" Padding="10"
+                      Background="{Binding CardBackground}" BorderBrush="{Binding CardBorder}"
+                      BorderThickness="2" CornerRadius="8">
+                <StackPanel Spacing="4">
+                  <TextBlock FontSize="17" FontWeight="Bold" Text="{Binding InstanceId}" />
+                  <TextBlock Text="{Binding ModuleId}" TextWrapping="Wrap" Foreground="#D7DDE6" />
+                  <TextBlock Text="{Binding LayoutText}" Foreground="#B8C1CD" />
+                  <TextBlock Text="{Binding PerformanceText}" Foreground="#AAB5C5" TextWrapping="Wrap" />
+                  <TextBlock Text="缺失模块资源" IsVisible="{Binding Unresolved}" Foreground="#FFB454" />
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </Canvas>
+    </Border>
+  </DockPanel>
+</UserControl>

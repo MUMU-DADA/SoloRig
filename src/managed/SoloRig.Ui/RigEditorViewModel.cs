@@ -120,8 +120,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public bool IsDirty => snapshot.Dirty;
     public bool DarkTheme => snapshot.DarkTheme;
     public string WindowTitle => string.IsNullOrWhiteSpace(snapshot.PresetName)
-        ? "SoloRig Avalonia M5"
-        : $"SoloRig Avalonia M5 - {snapshot.PresetName}{(snapshot.Dirty ? " *" : string.Empty)}";
+        ? "SoloRig"
+        : $"SoloRig - {snapshot.PresetName}{(snapshot.Dirty ? " *" : string.Empty)}";
     public string AudioStatus => $"Audio: {snapshot.AudioStatus}";
     public string MidiStatus => $"MIDI: {snapshot.MidiStatus} | mappings: {snapshot.Bindings.Count}";
     public string FileStatus => string.IsNullOrWhiteSpace(snapshot.SourcePath)

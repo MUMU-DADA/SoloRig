@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SoloRig.Ui\SoloRig.Ui.csproj" />
+    <ProjectReference Include="..\SoloRig.Ui.Avalonia\SoloRig.Ui.Avalonia.csproj" />
     <PackageReference Include="Avalonia" Version="11.0.10" />
     <PackageReference Include="Avalonia.Desktop" Version="11.0.10" />
     <PackageReference Include="Avalonia.Themes.Simple" Version="11.0.10" />

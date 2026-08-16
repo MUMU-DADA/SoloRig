@@ -104,7 +104,7 @@ finally
     File.Delete(resourcePath);
 }
 
-Console.WriteLine("[PASS] Avalonia shared ViewModel performs M5 catalog, graph editing, performance, resource and preset workflow");
+Console.WriteLine("[PASS] Shared C# ViewModel performs catalog, graph editing, performance, resource and preset workflow");
 
 static void Require(bool condition, string description)
 {
