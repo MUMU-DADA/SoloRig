@@ -408,6 +408,15 @@
                 <TextBlock Canvas.Left="16" Canvas.Bottom="12"
                            Text="模块可拖动 · 连接操作：先点击源输出端点，再点击目标输入端点"
                            Classes="srg-muted" FontSize="10" />
+                <Border x:Name="ModuleDragPreview" IsVisible="False" IsHitTestVisible="False"
+                        Width="176" Padding="9,6" Background="{DynamicResource SrgInputPanelBrush}"
+                        BorderBrush="{DynamicResource SrgAccentBrush}" BorderThickness="1" CornerRadius="7"
+                        Canvas.Left="8" Canvas.Top="8" ZIndex="20">
+                  <StackPanel Spacing="1">
+                    <TextBlock x:Name="ModuleDragPreviewTitle" Classes="srg-text" FontSize="11" FontWeight="SemiBold" />
+                    <TextBlock Text="松开鼠标以添加到此位置" Classes="srg-muted" FontSize="9" />
+                  </StackPanel>
+                </Border>
                 <Border Canvas.Right="14" Canvas.Bottom="9" Background="{DynamicResource SrgOverlayBrush}" BorderBrush="{DynamicResource SrgToolBorderBrush}"
                         BorderThickness="1" CornerRadius="7" Padding="9,6">
                   <Button x:Name="CanvasAddModuleButton" Classes="srg-button ghost" Content="＋ 添加模块"

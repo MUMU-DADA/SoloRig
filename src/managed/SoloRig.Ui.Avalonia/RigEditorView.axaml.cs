@@ -91,6 +91,7 @@ public sealed partial class RigEditorView : UserControl
     private ModuleCatalogSnapshot? draggedModule;
     private Point moduleDragStart;
     private bool draggingModule;
+    private bool moduleDragOverCanvas;
 
     public RigEditorView()
     {
@@ -598,6 +599,37 @@ public sealed partial class RigEditorView : UserControl
             viewModel.RestoreDocumentState(originalDirty);
             viewModel.ClearHistory();
             viewModel.SelectedCatalogModule = originalSelectedCatalogModule;
+        }
+    }
+
+    public bool ProbeModuleDragPreview()
+    {
+        if (viewModel is null || ModuleDragPreview is null || ModuleDragPreviewTitle is null ||
+            EditorCanvas.Bounds.Width <= 0 || EditorCanvas.Bounds.Height <= 0)
+        {
+            return false;
+        }
+
+        var module = viewModel.FilteredModuleCatalog.FirstOrDefault();
+        if (module is null)
+        {
+            return false;
+        }
+
+        var originalTitle = ModuleDragPreviewTitle.Text;
+        try
+        {
+            UpdateModuleDragPreview(new Point(EditorCanvas.Bounds.Width * 0.5, EditorCanvas.Bounds.Height * 0.5), module.DisplayName);
+            var shown = ModuleDragPreview.IsVisible &&
+                        moduleDragOverCanvas &&
+                        ModuleDragPreviewTitle.Text == module.DisplayName;
+            HideModuleDragPreview();
+            return shown && !ModuleDragPreview.IsVisible && !moduleDragOverCanvas;
+        }
+        finally
+        {
+            HideModuleDragPreview();
+            ModuleDragPreviewTitle.Text = originalTitle;
         }
     }
 
@@ -1162,6 +1194,7 @@ public sealed partial class RigEditorView : UserControl
         draggedModule = module;
         moduleDragStart = args.GetPosition(this);
         draggingModule = false;
+        HideModuleDragPreview();
         args.Pointer.Capture(this);
         args.Handled = true;
     }
@@ -1182,6 +1215,22 @@ public sealed partial class RigEditorView : UserControl
         }
         if (draggingModule)
         {
+            var canvasPoint = args.GetPosition(EditorCanvas);
+            var insideCanvas = canvasPoint.X >= 0 && canvasPoint.Y >= 0 &&
+                               canvasPoint.X <= EditorCanvas.Bounds.Width &&
+                               canvasPoint.Y <= EditorCanvas.Bounds.Height;
+            if (insideCanvas)
+            {
+                if (!moduleDragOverCanvas)
+                {
+                    viewModel?.ReportInteractionStatus($"松开以添加 {draggedModule.DisplayName}");
+                }
+                UpdateModuleDragPreview(canvasPoint, draggedModule.DisplayName);
+            }
+            else
+            {
+                HideModuleDragPreview();
+            }
             args.Handled = true;
         }
     }
@@ -1197,6 +1246,7 @@ public sealed partial class RigEditorView : UserControl
         var canvasPoint = args.GetPosition(EditorCanvas);
         draggedModule = null;
         draggingModule = false;
+        HideModuleDragPreview();
         args.Pointer.Capture(null);
         if (wasDragging && viewModel is not null &&
             canvasPoint.X >= 0 && canvasPoint.Y >= 0 &&
@@ -1309,6 +1359,33 @@ public sealed partial class RigEditorView : UserControl
         pendingOutputNode = nodeId;
         viewModel.ReportInteractionStatus($"已选择 {nodeId} 的输出端点，请点击目标效果器的输入端点");
         args.Handled = true;
+    }
+
+    private void UpdateModuleDragPreview(Point canvasPoint, string displayName)
+    {
+        if (ModuleDragPreview is null || ModuleDragPreviewTitle is null)
+        {
+            return;
+        }
+
+        ModuleDragPreviewTitle.Text = displayName;
+        var previewWidth = ModuleDragPreview.Bounds.Width > 0 ? ModuleDragPreview.Bounds.Width : 176.0;
+        var previewHeight = ModuleDragPreview.Bounds.Height > 0 ? ModuleDragPreview.Bounds.Height : 42.0;
+        var maxLeft = Math.Max(8.0, EditorCanvas.Bounds.Width - previewWidth - 8.0);
+        var maxTop = Math.Max(8.0, EditorCanvas.Bounds.Height - previewHeight - 8.0);
+        Canvas.SetLeft(ModuleDragPreview, Math.Clamp(canvasPoint.X - previewWidth * 0.5, 8.0, maxLeft));
+        Canvas.SetTop(ModuleDragPreview, Math.Clamp(canvasPoint.Y - previewHeight * 0.5, 8.0, maxTop));
+        ModuleDragPreview.IsVisible = true;
+        moduleDragOverCanvas = true;
+    }
+
+    private void HideModuleDragPreview()
+    {
+        if (ModuleDragPreview is not null)
+        {
+            ModuleDragPreview.IsVisible = false;
+        }
+        moduleDragOverCanvas = false;
     }
 
     private void EffectChainNodeClick(object? sender, RoutedEventArgs args)

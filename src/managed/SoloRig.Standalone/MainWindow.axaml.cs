@@ -46,6 +46,8 @@ public sealed partial class MainWindow : Window
 
     public bool ProbeModuleInsertion() => EditorView.ProbeModuleInsertion();
 
+    public bool ProbeModuleDragPreview() => EditorView.ProbeModuleDragPreview();
+
     public bool ProbePresetLibrary() => EditorView.ProbePresetLibrary();
 
     public bool ProbeUndoRedo() => EditorView.ProbeUndoRedo();
