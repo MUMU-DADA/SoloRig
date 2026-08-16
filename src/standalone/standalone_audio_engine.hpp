@@ -12,12 +12,13 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace solo_rig::standalone {
 
 // Owns the non-real-time Standalone graph and the single-device ASIO host.
-// Open/Start/Stop/Close and ReloadPreset are control-thread operations. The
+// Open/Start/Stop/Close, ReloadPreset and SetNodeBypassed are control-thread operations. The
 // ASIO callback only copies into preallocated buffers and calls RigRuntime.
 class StandaloneAudioEngine final {
 public:
@@ -42,6 +43,7 @@ public:
     void Stop();
     void Close() noexcept;
     [[nodiscard]] bool ReloadPreset(RigPreset preset);
+    [[nodiscard]] bool SetNodeBypassed(std::string_view instance_id, bool bypassed);
     [[nodiscard]] bool RecoverAudio();
     void SetTunerEnabled(bool enabled) noexcept;
     [[nodiscard]] bool TunerEnabled() const noexcept;

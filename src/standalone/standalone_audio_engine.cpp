@@ -200,6 +200,37 @@ bool StandaloneAudioEngine::ReloadPreset(RigPreset preset) {
     return true;
 }
 
+bool StandaloneAudioEngine::SetNodeBypassed(std::string_view instance_id, bool bypassed) {
+    if (!active_preset_.has_value() || instance_id.empty()) {
+        return false;
+    }
+    auto candidate = *active_preset_;
+    const auto node = std::ranges::find_if(candidate.nodes, [instance_id](const PresetNode& item) {
+        return item.instance_id == instance_id;
+    });
+    if (node == candidate.nodes.end()) {
+        return false;
+    }
+    node->bypassed = bypassed;
+    if (asio_coordinator_.IsOpen()) {
+        return ReloadPreset(std::move(candidate));
+    }
+    if (format_.Validate().size() != 0U || !prepared_runtime_.has_value() || !rig_runtime_.has_value()) {
+        return false;
+    }
+    const auto previous = *active_preset_;
+    ReleaseRuntime();
+    if (BuildRuntime(candidate, format_)) {
+        error_text_.clear();
+        SetStatus(bypassed ? "Standalone graph bypassed node" : "Standalone graph enabled node");
+        return true;
+    }
+    ReleaseRuntime();
+    static_cast<void>(BuildRuntime(previous, format_));
+    SetErrorStatus("Standalone graph bypass change failed; previous graph restored");
+    return false;
+}
+
 bool StandaloneAudioEngine::RecoverAudio() {
     if (!asio_coordinator_.ResetRequested() && !asio_coordinator_.DropoutReported()) {
         return false;
@@ -330,6 +361,14 @@ bool StandaloneAudioEngine::RunExternalModulePackageRuntimeSelfTest() {
         float* outputs[] = {output.data()};
         engine.ProcessBlock(inputs, outputs, 1U, 1U);
         const auto valid = std::fabs(output[0] - 0.25F) < 0.0001F;
+        if (!engine.SetNodeBypassed("package-1", true)) {
+            std::filesystem::remove_all(directory, cleanup);
+            return false;
+        }
+        input[0] = 1.0F;
+        output[0] = 0.0F;
+        engine.ProcessBlock(inputs, outputs, 1U, 1U);
+        const auto bypassed = std::fabs(output[0] - 1.0F) < 0.0001F;
         if (!engine.active_preset_.has_value() || engine.active_preset_->preset_id != preset.preset_id) {
             std::filesystem::remove_all(directory, cleanup);
             return false;
@@ -381,7 +420,7 @@ bool StandaloneAudioEngine::RunExternalModulePackageRuntimeSelfTest() {
         direct_engine.ProcessBlock(direct_inputs, direct_outputs, 1U, 2U);
         direct_engine.ReleaseRuntime();
         std::filesystem::remove_all(directory, cleanup);
-        return valid && std::isfinite(direct_output[0]) && direct_output[0] > 0.5F;
+        return valid && bypassed && std::isfinite(direct_output[0]) && direct_output[0] > 0.5F;
     } catch (...) {
         std::filesystem::remove_all(directory, cleanup);
         return false;

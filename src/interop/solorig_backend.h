@@ -80,6 +80,7 @@ typedef struct SoloRigNodeView {
     double measured_cpu_percent;
     double peak_cpu_percent;
     uint8_t measurement_available;
+    uint8_t bypassed;
     const char* skin_id_utf8;
     const char* knob_skin_id_utf8;
     const char* toggle_skin_id_utf8;
@@ -221,6 +222,10 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_parameter_utf8(
     const char* instance_id_utf8,
     const char* parameter_id_utf8,
     float value);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_node_bypassed_utf8(
+    SoloRigBackend* backend,
+    const char* instance_id_utf8,
+    uint8_t bypassed);
 // Control/UI-thread host bridge. Values must come from an actual stopped
 // runtime snapshot; this function does not perform audio processing.
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_node_performance_utf8(

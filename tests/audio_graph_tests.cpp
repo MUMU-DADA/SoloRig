@@ -110,6 +110,20 @@ TEST_CASE("AudioGraph processes a serial effect chain and reports cumulative lat
     REQUIRE(output.ChannelData(0)[0] == 3.0F);
 }
 
+TEST_CASE("AudioGraph bypass copies the node input while preserving graph routing") {
+    solo_rig::AudioGraph graph;
+    const auto node = graph.AddNode(std::make_unique<GainProcessor>(2.0F, 0), true);
+    REQUIRE(graph.Connect(solo_rig::AudioGraph::InputNodeId, node));
+    REQUIRE(graph.Connect(node, solo_rig::AudioGraph::OutputNodeId));
+    REQUIRE(graph.Prepare(CreateFormat()).empty());
+
+    solo_rig::AudioBuffer input(1, 8);
+    solo_rig::AudioBuffer output(1, 8);
+    input.ChannelData(0)[0] = 0.5F;
+    REQUIRE(graph.Process(input, output, 1));
+    REQUIRE(output.ChannelData(0)[0] == 0.5F);
+}
+
 TEST_CASE("AudioGraph sums zero-latency parallel branches") {
     solo_rig::AudioGraph graph;
     const auto left = graph.AddNode(std::make_unique<GainProcessor>(2.0F, 0));

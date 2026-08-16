@@ -239,7 +239,8 @@ std::variant<PreparedPreset, RigBuildError> RigRuntimeBuilder::Build(const Prepa
         if (std::holds_alternative<RigBuildError>(processor)) {
             return std::get<RigBuildError>(processor);
         }
-        const auto node_id = graph->AddNode(std::move(std::get<std::unique_ptr<ModuleRuntimeProcessor>>(processor)));
+        const auto node_id = graph->AddNode(
+            std::move(std::get<std::unique_ptr<ModuleRuntimeProcessor>>(processor)), preset_node.bypassed);
         node_ids.emplace(preset_node.instance_id, node_id);
     }
 

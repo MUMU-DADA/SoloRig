@@ -47,6 +47,16 @@
     <Style Selector="Button.srg-button.ghost">
       <Setter Property="Background" Value="Transparent" />
     </Style>
+    <Style Selector="Button.srg-footswitch">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.srg-footswitch:pointerover">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
     <Style Selector="TextBox.srg-input">
       <Setter Property="Background" Value="{DynamicResource SrgWindowBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource SrgBorderBrush}" />
@@ -323,21 +333,24 @@
                                                HorizontalAlignment="Center" />
                                   </StackPanel>
                                 </DataTemplate>
-                              </ItemsControl.ItemTemplate>
+                            </ItemsControl.ItemTemplate>
                             </ItemsControl>
                             <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,5,0,0">
-                              <StackPanel Orientation="Horizontal" Spacing="4">
-                                <Border Width="22" Height="14" Background="{DynamicResource SrgControlBrush}"
-                                        BorderBrush="{DynamicResource SrgAccentBrush}" BorderThickness="1"
-                                        CornerRadius="5" Opacity="{Binding FootswitchOpacity}">
-                                  <Ellipse Width="7" Height="7" Fill="{DynamicResource SrgAccentBrush}"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
-                                <Image IsVisible="{Binding HasFootswitchImage}" Width="22" Height="14"
-                                       Source="{Binding FootswitchImagePath, Converter={StaticResource SkinImageConverter}}"
-                                       Stretch="Uniform" Opacity="{Binding FootswitchOpacity}" />
-                                <TextBlock Text="{Binding NodeStateText}" Foreground="{DynamicResource SrgAccentBrush}" FontSize="10" />
-                              </StackPanel>
+                              <Button Classes="srg-footswitch" Tag="{Binding InstanceId}" Click="NodeFootswitchClick"
+                                      ToolTip.Tip="切换旁路 / 启用">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                  <Border Width="22" Height="14" Background="{DynamicResource SrgControlBrush}"
+                                          BorderBrush="{DynamicResource SrgAccentBrush}" BorderThickness="1"
+                                          CornerRadius="5" Opacity="{Binding FootswitchOpacity}">
+                                    <Ellipse Width="7" Height="7" Fill="{DynamicResource SrgAccentBrush}"
+                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                  </Border>
+                                  <Image IsVisible="{Binding HasFootswitchImage}" Width="22" Height="14"
+                                         Source="{Binding FootswitchImagePath, Converter={StaticResource SkinImageConverter}}"
+                                         Stretch="Uniform" Opacity="{Binding FootswitchOpacity}" />
+                                  <TextBlock Text="{Binding NodeStateText}" Foreground="{DynamicResource SrgAccentBrush}" FontSize="10" />
+                                </StackPanel>
+                              </Button>
                               <TextBlock Grid.Column="1" Text="{Binding LatencyText}" Classes="srg-muted" FontSize="9" />
                             </Grid>
                           </Grid>

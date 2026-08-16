@@ -8,6 +8,7 @@ Require(viewModel.CanvasNodes.All(node => node.Controls.Count > 0 &&
 Require(viewModel.CanvasNodes.All(node => node.Skin.Id == "solorig.default-pedal" &&
     node.Skin.KnobId == "standard-knob" && node.Skin.FootswitchId == "standard-footswitch"),
     "node snapshots expose the default shared pedal skin metadata");
+Require(viewModel.Nodes.All(node => !node.Bypassed), "startup node snapshots expose enabled processing state");
 var driveRange = viewModel.Nodes.Single(node => node.InstanceId == "drive-1").Parameters.Single(parameter => parameter.Id == "drive");
 Require(driveRange.Minimum == 0.0F && driveRange.Maximum == 16.0F,
     "parameter snapshot exposes the validated Drive control range");
@@ -219,6 +220,10 @@ try
     Require(skinNode.Skin.Id == "contract.image-skin" && skinNode.Skin.KnobId == "contract-knob" &&
             skinNode.Controls.All(control => control.HasImage) && skinNode.HasFootswitchImage,
         "custom skin metadata and image paths reach shared node cards");
+    Require(viewModel.ToggleNodeBypass("drive-1"), "footswitch command toggles node bypass through the C ABI");
+    Require(viewModel.Nodes.Single(node => node.InstanceId == "drive-1").Bypassed &&
+            viewModel.CanvasNodes.Single(node => node.InstanceId == "drive-1").FootswitchText == "旁路",
+        "bypass state reaches the shared node card projection");
     Require(viewModel.SaveToPath(path), "explicit Save writes a validated preset");
     Require(!viewModel.IsDirty, "successful Save clears dirty state");
     Directory.CreateDirectory(midiBankDirectory);
@@ -243,6 +248,8 @@ try
         "Open restores the saved layout");
     Require(viewModel.Nodes.SelectMany(node => node.Parameters).Any(parameter => parameter.Id == "drive" && parameter.Value == 6.0F),
         "Open restores the saved parameter");
+    Require(viewModel.Nodes.Single(node => node.InstanceId == "drive-1").Bypassed,
+        "Open restores the saved node bypass state");
     var beforeCancel = viewModel.Snapshot;
     viewModel.ReportFileDialogCancelled("Open");
     Require(viewModel.Snapshot.SourcePath == beforeCancel.SourcePath && viewModel.IsDirty == beforeCancel.Dirty,

@@ -141,6 +141,7 @@ TEST_CASE("RigEditor validates relative skin image assets and preserves legacy c
 
 TEST_CASE("RigEditor exports a layout that round-trips through the preset schema") {
     solo_rig::RigEditorViewModel editor;
+    REQUIRE(editor.SetNodeBypassed("drive-1", true));
     REQUIRE(editor.BeginDrag({.x = 70.0, .y = 160.0}));
     REQUIRE(editor.DragTo({.x = 200.0, .y = 224.0}, false));
     editor.EndDrag();
@@ -151,6 +152,7 @@ TEST_CASE("RigEditor exports a layout that round-trips through the preset schema
     REQUIRE(restored->nodes.size() == exported.nodes.size());
     REQUIRE(restored->nodes.front().layout_x == exported.nodes.front().layout_x);
     REQUIRE(restored->nodes.front().layout_y == exported.nodes.front().layout_y);
+    REQUIRE(restored->nodes.front().bypassed);
     REQUIRE(restored->connections.size() == 1U);
 }
 
@@ -164,6 +166,7 @@ TEST_CASE("RigEditor saves and loads the edited preset with normalized source an
     REQUIRE(editor.DragTo({.x = 210.0, .y = 232.0}, false));
     editor.EndDrag();
     REQUIRE(editor.SetNodeParameter("drive-1", "drive", 7.0F));
+    REQUIRE(editor.SetNodeBypassed("drive-1", true));
     REQUIRE(editor.SetMidiBindings({{.message_type = solo_rig::MidiMessageType::ControlChange,
                                      .channel = 0,
                                      .number = 11,
@@ -189,6 +192,7 @@ TEST_CASE("RigEditor saves and loads the edited preset with normalized source an
     REQUIRE(!restored.IsDirty());
     REQUIRE(restored.ExportPreset().nodes.front().layout_x == editor.ExportPreset().nodes.front().layout_x);
     REQUIRE(restored.ExportPreset().nodes.front().parameter_values.at("drive") == 7.0F);
+    REQUIRE(restored.ExportPreset().nodes.front().bypassed);
     REQUIRE(restored.MidiBindings().has_value());
     REQUIRE(restored.MidiBindings()->size() == 1U);
     REQUIRE(restored.MidiBindings()->front().target_id == "drive-1.drive");

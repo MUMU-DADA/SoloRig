@@ -352,6 +352,7 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node(
     out_node->measured_cpu_percent = node->measured_cpu_percent;
     out_node->peak_cpu_percent = node->peak_cpu_percent;
     out_node->measurement_available = node->measurement_available ? 1U : 0U;
+    out_node->bypassed = node->bypassed ? 1U : 0U;
     out_node->skin_id_utf8 = node->skin.id.c_str();
     out_node->knob_skin_id_utf8 = node->skin.knob.c_str();
     out_node->toggle_skin_id_utf8 = node->skin.toggle.c_str();
@@ -434,6 +435,31 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_parameter_utf8(
     }
     if (!backend->editor.SetNodeParameter(instance_id_utf8, parameter_id_utf8, value)) {
         return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "parameter target was not found or value was rejected");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_node_bypassed_utf8(
+    SoloRigBackend* backend,
+    const char* instance_id_utf8,
+    uint8_t bypassed) {
+    if (!ValidBackend(backend) || !ValidText(instance_id_utf8) || bypassed > 1U) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "a valid node identifier and bypass value are required");
+    }
+    const auto previous = backend->editor.ExportPreset();
+    const auto previous_source = backend->editor.SourcePath();
+    const auto previous_dirty = backend->editor.IsDirty();
+    const auto previous_status = std::string(backend->editor.FileStatus());
+    if (!backend->editor.SetNodeBypassed(instance_id_utf8, bypassed != 0U)) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "bypass node was not found");
+    }
+    if (backend->audio_engine != nullptr && backend->audio_engine->IsOpen() &&
+        !backend->audio_engine->SetNodeBypassed(instance_id_utf8, bypassed != 0U)) {
+        const auto audio_error = backend->audio_engine->ErrorText();
+        backend->editor.RestoreDocument(previous, previous_source, previous_dirty, previous_status);
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR,
+                        audio_error.empty() ? "audio graph rejected bypass change" : audio_error);
     }
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;

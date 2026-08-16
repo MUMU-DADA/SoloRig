@@ -38,15 +38,16 @@ public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, dou
             : "Whitebox · Audio module";
     public bool Selected => Source.Selected;
     public bool Unresolved => Source.Unresolved;
+    public bool Bypassed => Source.Bypassed;
     public NodeSkinSnapshot Skin => Source.Skin;
     public string Diagnostic => Source.Diagnostic;
     public IReadOnlyList<ParameterSnapshot> Parameters => Source.Parameters;
     public string LayoutText => Source.LayoutText;
     public string PerformanceText => Source.PerformanceText;
     public string LatencyText => $"{Source.DeclaredLatencySamples} samples · {Source.EstimatedCpuPercent:0.0}% CPU";
-    public string NodeStateText => Unresolved ? "资源缺失" : "已启用";
-    public string FootswitchText => Unresolved ? "缺失" : "启用";
-    public double FootswitchOpacity => Unresolved ? 0.45 : 1.0;
+    public string NodeStateText => Unresolved ? "资源缺失" : Bypassed ? "旁路" : "已启用";
+    public string FootswitchText => Unresolved ? "缺失" : Bypassed ? "旁路" : "启用";
+    public double FootswitchOpacity => Unresolved ? 0.45 : Bypassed ? 0.72 : 1.0;
     public IReadOnlyList<NodeControlSnapshot> Controls => Parameters
         .Take(3)
         .Select(parameter =>
@@ -540,6 +541,33 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     {
         return float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) &&
                SetParameter(target, value);
+    }
+
+    public bool ToggleNodeBypass(string instanceId)
+    {
+        if (backend is null)
+        {
+            return false;
+        }
+        var node = snapshot.Nodes.FirstOrDefault(candidate => candidate.InstanceId == instanceId);
+        if (node is null)
+        {
+            return false;
+        }
+        try
+        {
+            backend.SetNodeBypassed(instanceId, !node.Bypassed);
+            Refresh();
+            Status = snapshot.Nodes.First(candidate => candidate.InstanceId == instanceId).Bypassed
+                ? $"{instanceId} 已旁路"
+                : $"{instanceId} 已启用";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            return false;
+        }
     }
 
     public bool ToggleTheme()

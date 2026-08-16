@@ -218,7 +218,11 @@ std::string SerializePreset(const RigPreset& preset) {
         }
         serialized += "{\"instanceId\":\"" + EscapeJsonString(node.instance_id) + "\",\"moduleId\":\"" +
                       EscapeJsonString(node.module_id) + "\",\"x\":" + std::to_string(node.layout_x) + ",\"y\":" +
-                      std::to_string(node.layout_y) + ",\"parameters\":{";
+                      std::to_string(node.layout_y);
+        if (node.bypassed) {
+            serialized += ",\"bypassed\":true";
+        }
+        serialized += ",\"parameters\":{";
         std::size_t parameter_index = 0;
         for (const auto& [id, value] : node.parameter_values) {
             if (parameter_index++ != 0) {
@@ -330,12 +334,24 @@ std::optional<RigPreset> DeserializePreset(std::string_view source) {
         const auto module_id = StringField(*node, "moduleId");
         const auto x = NumberField(*node, "x");
         const auto y = NumberField(*node, "y");
+        const auto* bypassed = Find(*node, "bypassed");
         const auto* parameters = Find(*node, "parameters");
         if (!instance_id.has_value() || !module_id.has_value() || !x.has_value() || !y.has_value() || parameters == nullptr ||
             parameters->AsObject() == nullptr) {
             return std::nullopt;
         }
-        PresetNode preset_node{.instance_id = *instance_id, .module_id = *module_id, .layout_x = *x, .layout_y = *y};
+        bool node_bypassed = false;
+        if (bypassed != nullptr) {
+            if (bypassed->AsBoolean() == nullptr) {
+                return std::nullopt;
+            }
+            node_bypassed = *bypassed->AsBoolean();
+        }
+        PresetNode preset_node{.instance_id = *instance_id,
+                               .module_id = *module_id,
+                               .layout_x = *x,
+                               .layout_y = *y,
+                               .bypassed = node_bypassed};
         for (const auto& [parameter_id, parameter_value] : *parameters->AsObject()) {
             if (parameter_value.AsNumber() == nullptr) {
                 return std::nullopt;

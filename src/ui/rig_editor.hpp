@@ -55,6 +55,7 @@ struct RigEditorNode {
     EditorRect bounds;
     bool selected{};
     bool unresolved{};
+    bool bypassed{};
     std::string diagnostic;
     uint32_t declared_latency_samples{};
     double estimated_cpu_percent{};
@@ -143,6 +144,7 @@ public:
     [[nodiscard]] bool SetNodeParameter(std::string_view instance_id,
                                          std::string_view parameter_id,
                                          float value);
+    [[nodiscard]] bool SetNodeBypassed(std::string_view instance_id, bool bypassed);
     // Control-thread host bridge for measurements captured by a stopped
     // RigRuntime. These diagnostics never become part of the saved preset.
     [[nodiscard]] bool SetMeasuredPerformance(std::string_view instance_id,

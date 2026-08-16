@@ -45,7 +45,7 @@ public:
     static constexpr NodeId InputNodeId = 0;
     static constexpr NodeId OutputNodeId = 1;
 
-    [[nodiscard]] NodeId AddNode(std::unique_ptr<EffectProcessor> processor);
+    [[nodiscard]] NodeId AddNode(std::unique_ptr<EffectProcessor> processor, bool bypassed = false);
     [[nodiscard]] bool Connect(NodeId source, NodeId destination);
     [[nodiscard]] std::vector<GraphPreparationError> Prepare(const AudioFormat& format);
     [[nodiscard]] bool Process(const AudioBuffer& input, AudioBuffer& output, std::uint32_t sample_count) noexcept;
@@ -73,6 +73,7 @@ private:
     struct Node {
         NodeId id{};
         std::unique_ptr<EffectProcessor> processor;
+        bool bypassed{};
         std::vector<NodeId> incoming;
         std::vector<NodeId> outgoing;
         std::vector<Route> input_routes;

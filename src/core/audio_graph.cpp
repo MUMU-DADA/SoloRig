@@ -10,9 +10,9 @@
 
 namespace solo_rig {
 
-AudioGraph::NodeId AudioGraph::AddNode(std::unique_ptr<EffectProcessor> processor) {
+AudioGraph::NodeId AudioGraph::AddNode(std::unique_ptr<EffectProcessor> processor, bool bypassed) {
     const auto next_id = static_cast<NodeId>(nodes_.size()) + 2U;
-    nodes_.push_back({.id = next_id, .processor = std::move(processor)});
+    nodes_.push_back({.id = next_id, .processor = std::move(processor), .bypassed = bypassed});
     prepared_ = false;
     return next_id;
 }
@@ -174,12 +174,17 @@ bool AudioGraph::Process(const AudioBuffer& input, AudioBuffer& output, std::uin
             const auto& source = route.source == InputNodeId ? input : FindNode(route.source)->output_buffer;
             route.compensation.AddFrom(source, node->input_buffer, sample_count);
         }
-        const auto started = std::chrono::steady_clock::now();
-        node->processor->Process(node->input_buffer, node->output_buffer, sample_count);
-        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - started).count();
-        node->performance_meter.RecordProcessingNanoseconds(
-            elapsed < 0 ? 0U : static_cast<std::uint64_t>(elapsed));
+        if (node->bypassed) {
+            static_cast<void>(node->output_buffer.CopyFrom(node->input_buffer, sample_count));
+            node->performance_meter.RecordProcessingNanoseconds(0U);
+        } else {
+            const auto started = std::chrono::steady_clock::now();
+            node->processor->Process(node->input_buffer, node->output_buffer, sample_count);
+            const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - started).count();
+            node->performance_meter.RecordProcessingNanoseconds(
+                elapsed < 0 ? 0U : static_cast<std::uint64_t>(elapsed));
+        }
     }
 
     output.Clear(sample_count);

@@ -404,6 +404,25 @@ bool RigEditorViewModel::SetNodeParameter(std::string_view instance_id,
     return true;
 }
 
+bool RigEditorViewModel::SetNodeBypassed(std::string_view instance_id, bool bypassed) {
+    auto candidate = preset_;
+    const auto node = std::ranges::find_if(candidate.nodes, [instance_id](const PresetNode& item) {
+        return item.instance_id == instance_id;
+    });
+    if (node == candidate.nodes.end()) {
+        return false;
+    }
+    node->bypassed = bypassed;
+    if (!ValidatePreset(candidate).empty() || HasInvalidTopology(candidate)) {
+        return false;
+    }
+    preset_ = std::move(candidate);
+    dirty_ = true;
+    SetFileStatus(bypassed ? "Node bypassed" : "Node enabled");
+    RebuildScene();
+    return true;
+}
+
 bool RigEditorViewModel::SetMeasuredPerformance(std::string_view instance_id,
                                                 uint32_t declared_latency_samples,
                                                 double measured_cpu_percent,
@@ -969,6 +988,7 @@ void RigEditorViewModel::RebuildScene() {
                                            .height = kNodeHeight * dpi_scale_},
                                 .selected = node.instance_id == dragging_instance_id_,
                                 .unresolved = !IsKnownModule(node.module_id),
+                                .bypassed = node.bypassed,
                                 .diagnostic = !IsKnownModule(node.module_id) ? "Missing module asset" : std::string{},
                                 .declared_latency_samples = measured == measured_performance_.end()
                                     ? (entry == nullptr ? 0U : entry->latency_samples)

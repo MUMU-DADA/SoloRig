@@ -19,6 +19,7 @@ struct PresetNode {
     double layout_x{};
     double layout_y{};
     std::map<std::string, float, std::less<>> parameter_values;
+    bool bypassed{};
 };
 
 struct PresetConnection {

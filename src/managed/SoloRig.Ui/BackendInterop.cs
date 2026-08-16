@@ -60,6 +60,7 @@ internal struct NativeNodeView
     public double MeasuredCpuPercent;
     public double PeakCpuPercent;
     public byte MeasurementAvailable;
+    public byte Bypassed;
     public IntPtr SkinId;
     public IntPtr KnobSkinId;
     public IntPtr ToggleSkinId;
@@ -226,6 +227,10 @@ internal static class NativeMethods
     internal static extern NativeStatus solorig_backend_set_parameter_utf8(
         IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string instanceId,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string parameterId, float value);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_set_node_bypassed_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string instanceId, byte bypassed);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_set_node_performance_utf8(
@@ -435,6 +440,7 @@ public sealed record NodeSnapshot(
     float LayoutY,
     bool Selected,
     bool Unresolved,
+    bool Bypassed,
     string Diagnostic,
     IReadOnlyList<ParameterSnapshot> Parameters,
     NodeSkinSnapshot Skin,
@@ -633,7 +639,7 @@ public sealed class BackendSession : IDisposable
                 }
                 nodes.Add(new NodeSnapshot(
                     NativeMethods.Utf8(node.InstanceId), NativeMethods.Utf8(node.ModuleId), node.LayoutX, node.LayoutY,
-                    node.Selected != 0, node.Unresolved != 0, NativeMethods.Utf8(node.Diagnostic), parameters,
+                    node.Selected != 0, node.Unresolved != 0, node.Bypassed != 0, NativeMethods.Utf8(node.Diagnostic), parameters,
                     new NodeSkinSnapshot(
                         NativeMethods.Utf8(node.SkinId), NativeMethods.Utf8(node.KnobSkinId),
                         NativeMethods.Utf8(node.ToggleSkinId), NativeMethods.Utf8(node.ButtonSkinId),
@@ -681,6 +687,10 @@ public sealed class BackendSession : IDisposable
         }
         Ensure(NativeMethods.solorig_backend_set_parameter_utf8(handle, target[..separator], target[(separator + 1)..], value), "set parameter");
     }
+
+    public void SetNodeBypassed(string instanceId, bool bypassed) =>
+        Ensure(NativeMethods.solorig_backend_set_node_bypassed_utf8(handle, instanceId, bypassed ? (byte)1 : (byte)0),
+            "set node bypass");
 
     public void SetNodePerformance(string instanceId, uint declaredLatencySamples,
         double measuredCpuPercent, double peakCpuPercent) =>

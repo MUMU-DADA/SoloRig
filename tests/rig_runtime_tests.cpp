@@ -109,6 +109,26 @@ TEST_CASE("RigRuntimeBuilder creates a prepared serial graph and parameters affe
     REQUIRE(performance.front().peak_cpu_percent >= performance.front().last_cpu_percent);
 }
 
+TEST_CASE("RigRuntimeBuilder applies a preset node bypass to the prepared graph") {
+    solo_rig::RigModuleRegistry registry;
+    REQUIRE(!registry.Register("test.gain", GainFactory()).has_value());
+    auto preset = MakeGainPreset("Bypassed", 0.5F);
+    preset.nodes.front().bypassed = true;
+    auto prepared = Prepare(std::move(preset), "bypassed");
+    const auto built = solo_rig::RigRuntimeBuilder{}.Build(prepared, registry, TestFormat());
+    REQUIRE(std::holds_alternative<solo_rig::PreparedPreset>(built));
+
+    solo_rig::RealtimePresetMailbox mailbox;
+    mailbox.Submit(std::get<solo_rig::PreparedPreset>(built));
+    solo_rig::RigRuntime runtime(mailbox, TestFormat());
+    REQUIRE(runtime.Prepare());
+    solo_rig::AudioBuffer input(1, 64);
+    solo_rig::AudioBuffer output(1, 64);
+    input.ChannelData(0)[0] = 1.0F;
+    REQUIRE(runtime.Process(input, output, 1));
+    REQUIRE(output.ChannelData(0)[0] == 1.0F);
+}
+
 TEST_CASE("RigRuntimeBuilder instantiates a registered external module package and routes its output") {
     solo_rig::RigModuleRegistry registry;
     solo_rig::ModulePackage package{

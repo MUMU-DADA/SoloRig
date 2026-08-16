@@ -46,7 +46,28 @@ TEST_CASE("C ABI backend creates a side-effect-free default snapshot") {
     REQUIRE(std::string(node.knob_skin_id_utf8) == "standard-knob");
     REQUIRE(std::string(node.footswitch_skin_id_utf8) == "standard-footswitch");
     REQUIRE(std::string(node.knob_image_path_utf8).empty());
+    REQUIRE(node.bypassed == 0U);
     solorig_snapshot_destroy(snapshot);
+    solorig_backend_destroy(backend);
+}
+
+TEST_CASE("C ABI backend toggles node bypass state through the editor transaction") {
+    SoloRigBackend* backend = nullptr;
+    REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_set_node_bypassed_utf8(backend, "drive-1", 1U) == SOLO_RIG_STATUS_OK);
+
+    SoloRigSnapshot* snapshot = nullptr;
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    SoloRigSnapshotInfo info{};
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    REQUIRE(info.dirty != 0U);
+    SoloRigNodeView node{};
+    REQUIRE(solorig_snapshot_node(snapshot, 0U, &node) == SOLO_RIG_STATUS_OK);
+    REQUIRE(node.bypassed != 0U);
+    solorig_snapshot_destroy(snapshot);
+
+    REQUIRE(solorig_backend_set_node_bypassed_utf8(backend, "drive-1", 2U) == SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    REQUIRE(solorig_backend_set_node_bypassed_utf8(backend, "missing", 1U) == SOLO_RIG_STATUS_NOT_FOUND);
     solorig_backend_destroy(backend);
 }
 
