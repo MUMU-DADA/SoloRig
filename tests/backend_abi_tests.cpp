@@ -89,6 +89,7 @@ TEST_CASE("C ABI backend performs a real parameter edit and preserves ownership 
 
     SoloRigSnapshot* snapshot = nullptr;
     REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    SoloRigSnapshotInfo info{};
     SoloRigParameterView parameter{};
     bool drive_found = false;
     SoloRigNodeView node{};
@@ -103,11 +104,47 @@ TEST_CASE("C ABI backend performs a real parameter edit and preserves ownership 
         }
     }
     REQUIRE(drive_found);
+    REQUIRE(solorig_backend_can_undo(backend) != 0U);
+    REQUIRE(solorig_backend_can_redo(backend) == 0U);
+    REQUIRE(solorig_backend_undo(backend) == SOLO_RIG_STATUS_OK);
+    solorig_snapshot_destroy(snapshot);
+    snapshot = nullptr;
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    REQUIRE(info.dirty == 0U);
+    REQUIRE(solorig_snapshot_node(snapshot, 0U, &node) == SOLO_RIG_STATUS_OK);
+    bool undo_restored_drive = false;
+    for (uint32_t index = 0; index < node.parameter_count; ++index) {
+        REQUIRE(solorig_snapshot_parameter(snapshot, 0U, index, &parameter) == SOLO_RIG_STATUS_OK);
+        if (std::string(parameter.parameter_id_utf8) == "drive") {
+            undo_restored_drive = parameter.value == 4.0F;
+        }
+    }
+    REQUIRE(undo_restored_drive);
+    REQUIRE(solorig_backend_can_redo(backend) != 0U);
+    REQUIRE(solorig_backend_redo(backend) == SOLO_RIG_STATUS_OK);
+    solorig_snapshot_destroy(snapshot);
+    snapshot = nullptr;
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    REQUIRE(info.dirty != 0U);
+    REQUIRE(solorig_snapshot_node(snapshot, 0U, &node) == SOLO_RIG_STATUS_OK);
+    bool redo_restored_drive = false;
+    for (uint32_t index = 0; index < node.parameter_count; ++index) {
+        REQUIRE(solorig_snapshot_parameter(snapshot, 0U, index, &parameter) == SOLO_RIG_STATUS_OK);
+        if (std::string(parameter.parameter_id_utf8) == "drive") {
+            redo_restored_drive = parameter.value == 6.0F;
+        }
+    }
+    REQUIRE(redo_restored_drive);
+    REQUIRE(solorig_backend_undo(backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_clear_history(backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_can_undo(backend) == 0U);
+    REQUIRE(solorig_backend_can_redo(backend) == 0U);
     REQUIRE(solorig_backend_set_theme_dark(backend, 0U) == SOLO_RIG_STATUS_OK);
     solorig_snapshot_destroy(snapshot);
     snapshot = nullptr;
     REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
-    SoloRigSnapshotInfo info{};
     REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
     REQUIRE(info.dark_theme == 0U);
     REQUIRE(solorig_backend_set_parameter_utf8(backend, "missing", "parameter", 1.0F) == SOLO_RIG_STATUS_NOT_FOUND);
@@ -161,11 +198,55 @@ TEST_CASE("C ABI backend exposes DPI-stable selection, drag snapping and connect
     REQUIRE(node.selected != 0U);
     REQUIRE(after_drag.dirty != 0U);
     solorig_snapshot_destroy(snapshot);
+    REQUIRE(solorig_backend_can_undo(backend) != 0U);
+    REQUIRE(solorig_backend_undo(backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    SoloRigSnapshotInfo after_undo{};
+    REQUIRE(solorig_snapshot_info(snapshot, &after_undo) == SOLO_RIG_STATUS_OK);
+    REQUIRE(after_undo.dirty == 0U);
+    REQUIRE(solorig_snapshot_node(snapshot, 0U, &node) == SOLO_RIG_STATUS_OK);
+    REQUIRE(node.layout_x == 128.0F);
+    REQUIRE(node.layout_y == 296.0F);
+    solorig_snapshot_destroy(snapshot);
+    REQUIRE(solorig_backend_can_redo(backend) != 0U);
+    REQUIRE(solorig_backend_redo(backend) == SOLO_RIG_STATUS_OK);
     REQUIRE(solorig_backend_clear_selection(backend) == SOLO_RIG_STATUS_OK);
     REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
     REQUIRE(solorig_snapshot_node(snapshot, 0U, &node) == SOLO_RIG_STATUS_OK);
     REQUIRE(node.selected == 0U);
     solorig_snapshot_destroy(snapshot);
+    solorig_backend_destroy(backend);
+}
+
+TEST_CASE("C ABI adds a node atomically to the visible chain and restores it") {
+    SoloRigBackend* backend = nullptr;
+    REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_add_node_to_chain_utf8(
+                backend, "org.mumu-dada.solorig.drive", "drive-2", 640.0, 160.0) == SOLO_RIG_STATUS_OK);
+
+    SoloRigSnapshot* snapshot = nullptr;
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    SoloRigSnapshotInfo info{};
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    REQUIRE(info.node_count == 3U);
+    REQUIRE(info.connection_count == 2U);
+    SoloRigConnectionView connection{};
+    REQUIRE(solorig_snapshot_connection(snapshot, 1U, &connection) == SOLO_RIG_STATUS_OK);
+    REQUIRE(std::string(connection.destination_instance_id_utf8) == "drive-2");
+    solorig_snapshot_destroy(snapshot);
+
+    REQUIRE(solorig_backend_undo(backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    REQUIRE(info.node_count == 2U);
+    REQUIRE(info.connection_count == 1U);
+    REQUIRE(info.dirty == 0U);
+    solorig_snapshot_destroy(snapshot);
+
+    REQUIRE(solorig_backend_redo(backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_clear_history(backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_can_undo(backend) == 0U);
+    REQUIRE(solorig_backend_can_redo(backend) == 0U);
     solorig_backend_destroy(backend);
 }
 

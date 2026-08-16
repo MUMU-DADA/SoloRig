@@ -146,6 +146,10 @@
             <Button Classes="srg-button ghost" Content="打开" Click="OpenClick" />
             <Button Classes="srg-button ghost" Content="另存为" Click="SaveAsClick" />
             <Button Classes="srg-button primary" Content="保存" Click="SaveClick" />
+            <Button x:Name="UndoButton" Classes="srg-button ghost" Content="撤销"
+                    IsEnabled="{Binding CanUndo}" ToolTip.Tip="撤销（Ctrl+Z）" Click="UndoClick" />
+            <Button x:Name="RedoButton" Classes="srg-button ghost" Content="重做"
+                    IsEnabled="{Binding CanRedo}" ToolTip.Tip="重做（Ctrl+Y / Ctrl+Shift+Z）" Click="RedoClick" />
             <Button Classes="srg-button ghost" Content="主题" ToolTip.Tip="加载主题 JSON" Click="LoadThemeClick" />
             <Button Classes="srg-button" Content="◐" ToolTip.Tip="切换主题" Command="{Binding ToggleThemeCommand}" />
           </StackPanel>

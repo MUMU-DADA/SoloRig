@@ -162,6 +162,13 @@ public sealed partial class RigEditorView : UserControl
         var originalTheme = viewModel.Theme;
         var originalWindow = (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color;
         var originalFingerprint = BuildVisualRegressionFingerprint();
+        var originalSelectedNode = viewModel.SelectedNode;
+        (double X, double Y)? originalSelectedPoint = null;
+        if (originalSelectedNode is not null &&
+            viewModel.CanvasNodes.FirstOrDefault(node => node.InstanceId == originalSelectedNode.InstanceId) is { } selectedCanvasNode)
+        {
+            originalSelectedPoint = (selectedCanvasNode.CanvasX + 10.0, selectedCanvasNode.CanvasY + 10.0);
+        }
         var customPath = Path.Combine(Path.GetTempPath(), $"solorig-theme-probe-{Guid.NewGuid():N}.json");
         var restorePath = Path.Combine(Path.GetTempPath(), $"solorig-theme-restore-{Guid.NewGuid():N}.json");
         try
@@ -199,9 +206,12 @@ public sealed partial class RigEditorView : UserControl
                           (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == Color.Parse("#0B1120") &&
                           (Resources["SrgAccentBrush"] as SolidColorBrush)?.Color == Color.Parse("#F97316") &&
                           BuildVisualRegressionFingerprint() != originalFingerprint;
-            var restored = viewModel.LoadTheme(restorePath, markDirty: false) && viewModel.Theme.Id == originalTheme.Id &&
-                           (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == originalWindow &&
-                           BuildVisualRegressionFingerprint() == originalFingerprint;
+            var restoredTheme = viewModel.LoadTheme(restorePath, markDirty: false) && viewModel.Theme.Id == originalTheme.Id &&
+                                (Resources["SrgWindowBrush"] as SolidColorBrush)?.Color == originalWindow;
+            var restoredSelection = originalSelectedPoint is { } point
+                ? viewModel.SelectAt(point.X, point.Y)
+                : viewModel.ClearSelection();
+            var restored = restoredTheme && restoredSelection && BuildVisualRegressionFingerprint() == originalFingerprint;
             return applied && restored;
         }
         catch
@@ -542,6 +552,7 @@ public sealed partial class RigEditorView : UserControl
                 viewModel.DeleteNode(addedNode.InstanceId);
             }
             viewModel.RestoreDocumentState(originalDirty);
+            viewModel.ClearHistory();
             viewModel.SelectedCatalogModule = originalSelectedCatalogModule;
         }
     }
@@ -607,6 +618,78 @@ public sealed partial class RigEditorView : UserControl
         return probePassed && BuildVisualRegressionFingerprint() == originalFingerprint &&
                viewModel.SelectedPresetLibraryIndex == originalIndex &&
                string.Equals(viewModel.PresetLibraryDirectory, originalDirectory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public bool ProbeUndoRedo()
+    {
+        if (viewModel is null || UndoButton is null || RedoButton is null)
+        {
+            return false;
+        }
+
+        var canvasNode = viewModel.CanvasNodes.FirstOrDefault(node => node.Parameters.Any(parameter => parameter.IsValidRange));
+        var parameter = canvasNode?.Parameters.FirstOrDefault(item => item.IsValidRange);
+        if (canvasNode is null || parameter is null)
+        {
+            return false;
+        }
+
+        var originalValue = parameter.Value;
+        var originalDirty = viewModel.IsDirty;
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        var candidate = parameter.Minimum + (parameter.Maximum - parameter.Minimum) *
+            (originalValue <= (parameter.Minimum + parameter.Maximum) * 0.5F ? 0.75F : 0.25F);
+        if (Math.Abs(candidate - originalValue) < 0.00001F)
+        {
+            candidate = (parameter.Minimum + parameter.Maximum) * 0.5F;
+        }
+        var target = $"{canvasNode.InstanceId}.{parameter.Id}";
+        var passed = false;
+        try
+        {
+            if (!viewModel.SetParameter(target, candidate) ||
+                viewModel.CanUndo != true || viewModel.CanRedo ||
+                !UndoButton.IsEnabled || RedoButton.IsEnabled)
+            {
+                return false;
+            }
+
+            var changed = viewModel.Snapshot.Nodes.First(node => node.InstanceId == canvasNode.InstanceId)
+                .Parameters.First(item => item.Id == parameter.Id).Value;
+            var undo = viewModel.Undo();
+            var undone = viewModel.Snapshot.Nodes.First(node => node.InstanceId == canvasNode.InstanceId)
+                .Parameters.First(item => item.Id == parameter.Id).Value;
+            var undoGate = undo && Math.Abs(undone - originalValue) < 0.00001F &&
+                           viewModel.CanRedo && RedoButton.IsEnabled;
+
+            var redo = viewModel.Redo();
+            var redone = viewModel.Snapshot.Nodes.First(node => node.InstanceId == canvasNode.InstanceId)
+                .Parameters.First(item => item.Id == parameter.Id).Value;
+            var redoGate = redo && Math.Abs(redone - candidate) < 0.00001F &&
+                           viewModel.CanUndo && !viewModel.CanRedo && UndoButton.IsEnabled && !RedoButton.IsEnabled;
+
+            passed = Math.Abs(changed - candidate) < 0.00001F && undoGate && redoGate && viewModel.Undo();
+        }
+        catch
+        {
+            passed = false;
+        }
+        finally
+        {
+            viewModel.SetParameter(target, originalValue, markDirty: false);
+            if (viewModel.IsDirty != originalDirty)
+            {
+                viewModel.RestoreDocumentState(originalDirty);
+            }
+            viewModel.ClearHistory();
+        }
+
+        var restored = Math.Abs(viewModel.Snapshot.Nodes.First(node => node.InstanceId == canvasNode.InstanceId)
+                           .Parameters.First(item => item.Id == parameter.Id).Value - originalValue) < 0.00001F &&
+                       viewModel.IsDirty == originalDirty &&
+                       !viewModel.CanUndo && !viewModel.CanRedo &&
+                       BuildVisualRegressionFingerprint() == originalFingerprint;
+        return passed && restored;
     }
 
     private RenderedSurfaceFingerprint? CaptureRenderedSurface()
@@ -715,6 +798,25 @@ public sealed partial class RigEditorView : UserControl
         if (!hasModifier && key == Key.T)
         {
             viewModel.ToggleTheme(markDirty);
+            return true;
+        }
+
+        if ((modifiers & KeyModifiers.Control) != 0 && (modifiers & KeyModifiers.Alt) == 0 && key == Key.Z)
+        {
+            if ((modifiers & KeyModifiers.Shift) != 0)
+            {
+                viewModel.Redo();
+            }
+            else
+            {
+                viewModel.Undo();
+            }
+            return true;
+        }
+
+        if ((modifiers & KeyModifiers.Control) != 0 && (modifiers & KeyModifiers.Alt) == 0 && key == Key.Y)
+        {
+            viewModel.Redo();
             return true;
         }
 
@@ -1040,6 +1142,8 @@ public sealed partial class RigEditorView : UserControl
     private void OpenClick(object? sender, RoutedEventArgs args) => _ = OpenAsync();
     private void SaveClick(object? sender, RoutedEventArgs args) => _ = SaveAsync();
     private void SaveAsClick(object? sender, RoutedEventArgs args) => _ = SaveAsAsync();
+    private void UndoClick(object? sender, RoutedEventArgs args) => viewModel?.Undo();
+    private void RedoClick(object? sender, RoutedEventArgs args) => viewModel?.Redo();
     private void NewPresetClick(object? sender, RoutedEventArgs args) => _ = SelectDefaultPresetAsync();
     private void DefaultPresetClick(object? sender, RoutedEventArgs args) => _ = SelectDefaultPresetAsync();
     private void PresetSelectionChanged(object? sender, SelectionChangedEventArgs args)

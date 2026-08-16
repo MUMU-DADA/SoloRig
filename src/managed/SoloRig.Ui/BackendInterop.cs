@@ -300,6 +300,21 @@ internal static class NativeMethods
     internal static extern NativeStatus solorig_backend_restore_document_state(IntPtr backend, byte dirty);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern byte solorig_backend_can_undo(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern byte solorig_backend_can_redo(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_undo(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_redo(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_clear_history(IntPtr backend);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_set_theme_dark(IntPtr backend, byte dark);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -359,6 +374,11 @@ internal static class NativeMethods
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_add_node_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string moduleId,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string instanceId, double layoutX, double layoutY);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_add_node_to_chain_utf8(
         IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string moduleId,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string instanceId, double layoutX, double layoutY);
 
@@ -811,6 +831,42 @@ public sealed class BackendSession : IDisposable
         Ensure(NativeMethods.solorig_backend_restore_document_state(handle, dirty ? (byte)1 : (byte)0),
             "restore document state");
 
+    public bool CanUndo
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return NativeMethods.solorig_backend_can_undo(handle) != 0;
+        }
+    }
+
+    public bool CanRedo
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return NativeMethods.solorig_backend_can_redo(handle) != 0;
+        }
+    }
+
+    public void Undo()
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_undo(handle), "undo document edit");
+    }
+
+    public void Redo()
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_redo(handle), "redo document edit");
+    }
+
+    public void ClearHistory()
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_clear_history(handle), "clear document history");
+    }
+
     public void SetTheme(bool dark) => SetTheme(dark, markDirty: true);
 
     public void SetTheme(bool dark, bool markDirty) =>
@@ -858,6 +914,10 @@ public sealed class BackendSession : IDisposable
 
     public void AddNode(string moduleId, string instanceId, double layoutX, double layoutY) =>
         Ensure(NativeMethods.solorig_backend_add_node_utf8(handle, moduleId, instanceId, layoutX, layoutY), "add node");
+
+    public void AddNodeToChain(string moduleId, string instanceId, double layoutX, double layoutY) =>
+        Ensure(NativeMethods.solorig_backend_add_node_to_chain_utf8(handle, moduleId, instanceId, layoutX, layoutY),
+            "add node to chain");
 
     public void DeleteNode(string instanceId) =>
         Ensure(NativeMethods.solorig_backend_delete_node_utf8(handle, instanceId), "delete node");

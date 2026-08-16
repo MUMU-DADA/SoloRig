@@ -246,7 +246,8 @@ void RigEditorViewModel::SetPreset(RigPreset preset) {
 void RigEditorViewModel::RestoreDocument(RigPreset preset,
                                          std::optional<std::filesystem::path> source,
                                          bool dirty,
-                                         std::string status) {
+                                         std::string status,
+                                         std::string resource_status) {
     if (preset.name.empty()) {
         preset = DefaultEditorPreset();
     }
@@ -257,7 +258,11 @@ void RigEditorViewModel::RestoreDocument(RigPreset preset,
     if (!diagnostic.empty()) {
         status += " External package placeholders: " + diagnostic;
     }
+    if (!resource_status.empty()) {
+        resource_status_ = std::move(resource_status);
+    }
     SetFileStatus(std::move(status));
+    RebuildScene();
 }
 
 void RigEditorViewModel::NewPreset() {

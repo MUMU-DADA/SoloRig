@@ -46,6 +46,8 @@ public sealed partial class MainWindow : Window
 
     public bool ProbePresetLibrary() => EditorView.ProbePresetLibrary();
 
+    public bool ProbeUndoRedo() => EditorView.ProbeUndoRedo();
+
     private void WindowKeyDown(object? sender, KeyEventArgs args) => EditorView.HandleWindowKeyDown(args);
 
     private async void WindowClosing(object? sender, WindowClosingEventArgs args)

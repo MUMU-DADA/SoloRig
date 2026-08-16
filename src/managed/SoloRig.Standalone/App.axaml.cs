@@ -44,8 +44,9 @@ public sealed class App : Application
                     var actionGates = documentStatus && RunVisualProbe("action gates", mainWindow.ProbeActionGates);
                     var moduleInsertion = actionGates && RunVisualProbe("module insertion", mainWindow.ProbeModuleInsertion);
                     var presetLibrary = moduleInsertion && RunVisualProbe("preset library", mainWindow.ProbePresetLibrary);
+                    var undoRedo = presetLibrary && RunVisualProbe("undo/redo", mainWindow.ProbeUndoRedo);
                     if (visualContent && externalTheme && themeSwitch && parameterBinding && dpiScaling && renderedSurface &&
-                        keyboardShortcuts && selectionState && documentStatus && actionGates && moduleInsertion && presetLibrary)
+                        keyboardShortcuts && selectionState && documentStatus && actionGates && moduleInsertion && presetLibrary && undoRedo)
                     {
                         probe.Stop();
                         desktop.Shutdown(0);

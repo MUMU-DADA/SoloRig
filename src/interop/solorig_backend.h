@@ -299,6 +299,13 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_clear_node_performance(
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_restore_document_state(
     SoloRigBackend* backend,
     uint8_t dirty);
+SOLO_RIG_BACKEND_API uint8_t solorig_backend_can_undo(const SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API uint8_t solorig_backend_can_redo(const SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_undo(SoloRigBackend* backend);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_redo(SoloRigBackend* backend);
+// Control/test helper used when a probe restores the document without
+// retaining the probe's transient edit history.
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_clear_history(SoloRigBackend* backend);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark(
     SoloRigBackend* backend,
     uint8_t dark);
@@ -358,6 +365,12 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_catalog_entry(
     uint32_t index,
     SoloRigModuleCatalogView* out_entry);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_add_node_utf8(
+    SoloRigBackend* backend,
+    const char* module_id_utf8,
+    const char* instance_id_utf8,
+    double layout_x,
+    double layout_y);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_add_node_to_chain_utf8(
     SoloRigBackend* backend,
     const char* module_id_utf8,
     const char* instance_id_utf8,

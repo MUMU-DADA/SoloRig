@@ -21,6 +21,15 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
+
+struct EditorHistoryState {
+    solo_rig::RigPreset preset;
+    std::optional<std::filesystem::path> source_path;
+    bool dirty{};
+    std::string file_status;
+    std::string resource_status;
+};
 
 struct SoloRigBackend {
     solo_rig::RigEditorViewModel editor{solo_rig::RigEditorViewModel::DefaultEditorPreset()};
@@ -28,6 +37,9 @@ struct SoloRigBackend {
     std::unique_ptr<solo_rig::standalone::StandaloneMidiControlSession> midi_session;
     std::vector<std::string> midi_device_names_utf8;
     std::vector<solo_rig::standalone::MidiLearnTarget> midi_learn_targets;
+    std::vector<EditorHistoryState> undo_history;
+    std::vector<EditorHistoryState> redo_history;
+    std::optional<EditorHistoryState> pending_drag_history;
     std::string last_error;
 };
 
@@ -158,6 +170,84 @@ SoloRigStatus MapFileResult(SoloRigBackend* backend, const EditorFileResult& res
         return SetError(backend, SOLO_RIG_STATUS_INVALID_PRESET, result.message);
     }
     return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, result.message);
+}
+
+constexpr std::size_t kMaximumEditorHistory = 64U;
+
+EditorHistoryState CaptureEditorHistory(const SoloRigBackend& backend) {
+    return {
+        .preset = backend.editor.ExportPreset(),
+        .source_path = backend.editor.SourcePath(),
+        .dirty = backend.editor.IsDirty(),
+        .file_status = std::string(backend.editor.FileStatus()),
+        .resource_status = backend.editor.Scene().resource_status,
+    };
+}
+
+void PushEditorHistory(std::vector<EditorHistoryState>& history, EditorHistoryState state) {
+    if (history.size() >= kMaximumEditorHistory) {
+        history.erase(history.begin());
+    }
+    history.push_back(std::move(state));
+}
+
+bool EditorHistoryChanged(const EditorHistoryState& previous,
+                          const EditorHistoryState& current);
+
+void CommitEditorEdit(SoloRigBackend& backend, EditorHistoryState previous) {
+    const auto current = CaptureEditorHistory(backend);
+    if (!EditorHistoryChanged(previous, current)) {
+        return;
+    }
+    PushEditorHistory(backend.undo_history, std::move(previous));
+    backend.redo_history.clear();
+}
+
+void ClearEditorHistory(SoloRigBackend& backend) {
+    backend.undo_history.clear();
+    backend.redo_history.clear();
+    backend.pending_drag_history.reset();
+}
+
+bool EditorHistoryLocked(const SoloRigBackend& backend) noexcept {
+    return (backend.audio_engine != nullptr && backend.audio_engine->IsOpen()) ||
+           (backend.midi_session != nullptr && backend.midi_session->IsOpen());
+}
+
+bool EditorLayoutChanged(const solo_rig::RigPreset& previous,
+                         const solo_rig::RigPreset& current) noexcept {
+    if (previous.nodes.size() != current.nodes.size()) {
+        return true;
+    }
+    for (std::size_t index = 0U; index < previous.nodes.size(); ++index) {
+        const auto& old_node = previous.nodes[index];
+        const auto& new_node = current.nodes[index];
+        if (old_node.instance_id != new_node.instance_id ||
+            std::abs(old_node.layout_x - new_node.layout_x) > 0.000001 ||
+            std::abs(old_node.layout_y - new_node.layout_y) > 0.000001) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool EditorPresetChanged(const solo_rig::RigPreset& previous,
+                         const solo_rig::RigPreset& current) {
+    return solo_rig::SerializePreset(previous) != solo_rig::SerializePreset(current);
+}
+
+bool EditorHistoryChanged(const EditorHistoryState& previous,
+                          const EditorHistoryState& current) {
+    return EditorPresetChanged(previous.preset, current.preset) ||
+           previous.source_path != current.source_path ||
+           previous.dirty != current.dirty ||
+           previous.resource_status != current.resource_status;
+}
+
+bool RestoreEditorHistory(SoloRigBackend& backend, EditorHistoryState state) {
+    backend.editor.RestoreDocument(std::move(state.preset), std::move(state.source_path), state.dirty,
+                                   std::move(state.file_status), std::move(state.resource_status));
+    return backend.midi_session == nullptr || backend.midi_session->SyncFromEditor();
 }
 
 const solo_rig::PresetNode* FindPresetNode(const SoloRigSnapshot* snapshot, uint32_t index) noexcept {
@@ -650,8 +740,14 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_parameter_utf8_with_dirty
         !std::isfinite(value) || mark_dirty > 1U) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "valid parameter identifiers and finite value are required");
     }
+    const auto previous = mark_dirty != 0U
+        ? std::optional<EditorHistoryState>(CaptureEditorHistory(*backend))
+        : std::nullopt;
     if (!backend->editor.SetNodeParameter(instance_id_utf8, parameter_id_utf8, value, mark_dirty != 0U)) {
         return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "parameter target was not found or value was rejected");
+    }
+    if (previous.has_value()) {
+        CommitEditorEdit(*backend, std::move(*previous));
     }
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
@@ -664,20 +760,18 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_node_bypassed_utf8(
     if (!ValidBackend(backend) || !ValidText(instance_id_utf8) || bypassed > 1U) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "a valid node identifier and bypass value are required");
     }
-    const auto previous = backend->editor.ExportPreset();
-    const auto previous_source = backend->editor.SourcePath();
-    const auto previous_dirty = backend->editor.IsDirty();
-    const auto previous_status = std::string(backend->editor.FileStatus());
+    auto previous = CaptureEditorHistory(*backend);
     if (!backend->editor.SetNodeBypassed(instance_id_utf8, bypassed != 0U)) {
         return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "bypass node was not found");
     }
     if (backend->audio_engine != nullptr && backend->audio_engine->IsOpen() &&
         !backend->audio_engine->SetNodeBypassed(instance_id_utf8, bypassed != 0U)) {
         const auto audio_error = backend->audio_engine->ErrorText();
-        backend->editor.RestoreDocument(previous, previous_source, previous_dirty, previous_status);
+        static_cast<void>(RestoreEditorHistory(*backend, std::move(previous)));
         return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR,
                         audio_error.empty() ? "audio graph rejected bypass change" : audio_error);
     }
+    CommitEditorEdit(*backend, std::move(previous));
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -728,6 +822,77 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_restore_document_state(
     return SOLO_RIG_STATUS_OK;
 }
 
+SOLO_RIG_BACKEND_API uint8_t solorig_backend_can_undo(const SoloRigBackend* backend) {
+    if (backend == nullptr || EditorHistoryLocked(*backend)) {
+        return 0U;
+    }
+    return backend->undo_history.empty() ? 0U : 1U;
+}
+
+SOLO_RIG_BACKEND_API uint8_t solorig_backend_can_redo(const SoloRigBackend* backend) {
+    if (backend == nullptr || EditorHistoryLocked(*backend)) {
+        return 0U;
+    }
+    return backend->redo_history.empty() ? 0U : 1U;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_undo(SoloRigBackend* backend) {
+    if (!ValidBackend(backend)) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    if (EditorHistoryLocked(*backend)) {
+        return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED,
+                        "close ASIO and MIDI before undoing document edits");
+    }
+    if (backend->undo_history.empty()) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "no document edit is available to undo");
+    }
+    const auto previous = backend->undo_history.back();
+    backend->undo_history.pop_back();
+    const auto current = CaptureEditorHistory(*backend);
+    if (!RestoreEditorHistory(*backend, previous)) {
+        PushEditorHistory(backend->undo_history, previous);
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR,
+                        "document undo could not synchronize the MIDI controller");
+    }
+    PushEditorHistory(backend->redo_history, current);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_redo(SoloRigBackend* backend) {
+    if (!ValidBackend(backend)) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    if (EditorHistoryLocked(*backend)) {
+        return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED,
+                        "close ASIO and MIDI before redoing document edits");
+    }
+    if (backend->redo_history.empty()) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "no document edit is available to redo");
+    }
+    const auto next = backend->redo_history.back();
+    backend->redo_history.pop_back();
+    const auto current = CaptureEditorHistory(*backend);
+    if (!RestoreEditorHistory(*backend, next)) {
+        PushEditorHistory(backend->redo_history, next);
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR,
+                        "document redo could not synchronize the MIDI controller");
+    }
+    PushEditorHistory(backend->undo_history, current);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_clear_history(SoloRigBackend* backend) {
+    if (!ValidBackend(backend)) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    ClearEditorHistory(*backend);
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark(
     SoloRigBackend* backend,
     uint8_t dark) {
@@ -741,7 +906,13 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_theme_dark_with_dirty(
     if (!ValidBackend(backend) || dark > 1U || mark_dirty > 1U) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "theme mode must be 0 or 1");
     }
+    const auto previous = mark_dirty != 0U
+        ? std::optional<EditorHistoryState>(CaptureEditorHistory(*backend))
+        : std::nullopt;
     backend->editor.SetThemeMode(dark != 0U, mark_dirty != 0U);
+    if (previous.has_value()) {
+        CommitEditorEdit(*backend, std::move(*previous));
+    }
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -759,8 +930,14 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_load_theme_utf8_with_dirty(
     if (!ValidBackend(backend) || !ValidText(path_utf8) || mark_dirty > 1U) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "a theme path is required");
     }
+    const auto previous = mark_dirty != 0U
+        ? std::optional<EditorHistoryState>(CaptureEditorHistory(*backend))
+        : std::nullopt;
     if (!backend->editor.LoadThemeFile(PathFromUtf8(path_utf8), mark_dirty != 0U)) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_THEME, "theme file could not be loaded");
+    }
+    if (previous.has_value()) {
+        CommitEditorEdit(*backend, std::move(*previous));
     }
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
@@ -838,6 +1015,7 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_begin_drag(
     if (!backend->editor.BeginDrag({.x = x, .y = y})) {
         return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "no node was found at the editor coordinate");
     }
+    backend->pending_drag_history = CaptureEditorHistory(*backend);
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -860,6 +1038,13 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_drag_to(
 SOLO_RIG_BACKEND_API void solorig_backend_end_drag(SoloRigBackend* backend) {
     if (ValidBackend(backend)) {
         backend->editor.EndDrag();
+        if (backend->pending_drag_history.has_value()) {
+            const auto current = backend->editor.ExportPreset();
+            if (EditorLayoutChanged(backend->pending_drag_history->preset, current)) {
+                CommitEditorEdit(*backend, std::move(*backend->pending_drag_history));
+            }
+            backend->pending_drag_history.reset();
+        }
         backend->last_error.clear();
     }
 }
@@ -887,6 +1072,7 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_open_utf8(
     if (backend->midi_session != nullptr && !backend->midi_session->SyncFromEditor()) {
         return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, "MIDI bindings could not be synchronized");
     }
+    ClearEditorHistory(*backend);
     return SOLO_RIG_STATUS_OK;
 }
 
@@ -898,6 +1084,7 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_new_preset(SoloRigBackend* ba
     if (backend->midi_session != nullptr && !backend->midi_session->SyncFromEditor()) {
         return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, "MIDI bindings could not be synchronized");
     }
+    ClearEditorHistory(*backend);
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -941,9 +1128,43 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_add_node_utf8(
         !std::isfinite(layout_x) || !std::isfinite(layout_y)) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "module, instance and finite layout are required");
     }
+    const auto previous = CaptureEditorHistory(*backend);
     if (!backend->editor.AddNode(module_id_utf8, instance_id_utf8, layout_x, layout_y)) {
         return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "module node could not be added");
     }
+    CommitEditorEdit(*backend, std::move(previous));
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_add_node_to_chain_utf8(
+    SoloRigBackend* backend, const char* module_id_utf8, const char* instance_id_utf8,
+    double layout_x, double layout_y) {
+    if (!ValidBackend(backend) || !ValidText(module_id_utf8) || !ValidText(instance_id_utf8) ||
+        !std::isfinite(layout_x) || !std::isfinite(layout_y)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "module, instance and finite layout are required");
+    }
+    const auto previous = CaptureEditorHistory(*backend);
+    const auto before = backend->editor.ExportPreset();
+    std::optional<std::string> terminal_node;
+    for (const auto& node : before.nodes) {
+        const auto has_successor = std::ranges::any_of(before.connections, [&node](const auto& connection) {
+            return connection.source_instance_id == node.instance_id;
+        });
+        if (!has_successor) {
+            terminal_node = node.instance_id;
+        }
+    }
+    if (!backend->editor.AddNode(module_id_utf8, instance_id_utf8, layout_x, layout_y)) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "module node could not be added");
+    }
+    if (terminal_node.has_value() && *terminal_node != instance_id_utf8 &&
+        !backend->editor.ConnectNodes(*terminal_node, instance_id_utf8)) {
+        static_cast<void>(RestoreEditorHistory(*backend, previous));
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_PRESET,
+                        "new module could not be appended to the effect chain");
+    }
+    CommitEditorEdit(*backend, std::move(previous));
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -953,9 +1174,11 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_delete_node_utf8(
     if (!ValidBackend(backend) || !ValidText(instance_id_utf8)) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "a node instance ID is required");
     }
+    const auto previous = CaptureEditorHistory(*backend);
     if (!backend->editor.DeleteNode(instance_id_utf8)) {
         return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "node could not be deleted");
     }
+    CommitEditorEdit(*backend, std::move(previous));
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -965,9 +1188,11 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_duplicate_node_utf8(
     if (!ValidBackend(backend) || !ValidText(source_instance_id_utf8) || !ValidText(new_instance_id_utf8)) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "source and destination node IDs are required");
     }
+    const auto previous = CaptureEditorHistory(*backend);
     if (!backend->editor.DuplicateNode(source_instance_id_utf8, new_instance_id_utf8)) {
         return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "node could not be duplicated");
     }
+    CommitEditorEdit(*backend, std::move(previous));
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -977,9 +1202,11 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_connect_utf8(
     if (!ValidBackend(backend) || !ValidText(source_instance_id_utf8) || !ValidText(destination_instance_id_utf8)) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "source and destination node IDs are required");
     }
+    const auto previous = CaptureEditorHistory(*backend);
     if (!backend->editor.ConnectNodes(source_instance_id_utf8, destination_instance_id_utf8)) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_PRESET, "connection was rejected by topology validation");
     }
+    CommitEditorEdit(*backend, std::move(previous));
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -989,9 +1216,11 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_disconnect_utf8(
     if (!ValidBackend(backend) || !ValidText(source_instance_id_utf8) || !ValidText(destination_instance_id_utf8)) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "source and destination node IDs are required");
     }
+    const auto previous = CaptureEditorHistory(*backend);
     if (!backend->editor.DisconnectNodes(source_instance_id_utf8, destination_instance_id_utf8)) {
         return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "connection was not found");
     }
+    CommitEditorEdit(*backend, std::move(previous));
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -1001,6 +1230,7 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_import_resource_utf8(
     if (!ValidBackend(backend) || !ValidText(path_utf8)) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "an explicit resource path is required");
     }
+    const auto previous = CaptureEditorHistory(*backend);
     const auto result = backend->editor.ImportResource(PathFromUtf8(path_utf8));
     if (!result.success) {
         if (result.error == solo_rig::EditorFileError::CannotRead) {
@@ -1008,6 +1238,7 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_import_resource_utf8(
         }
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, result.message);
     }
+    CommitEditorEdit(*backend, std::move(previous));
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -1208,7 +1439,11 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_drain(
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
                         "MIDI session and processed message count are required");
     }
+    const auto previous = CaptureEditorHistory(*backend);
     *out_processed_messages = static_cast<uint32_t>(backend->midi_session->Drain());
+    if (EditorPresetChanged(previous.preset, backend->editor.ExportPreset())) {
+        CommitEditorEdit(*backend, previous);
+    }
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -1272,9 +1507,11 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_delete_binding(
     if (!ValidBackend(backend) || backend->midi_session == nullptr) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "MIDI session is unavailable");
     }
+    const auto previous = CaptureEditorHistory(*backend);
     if (!backend->midi_session->SyncFromEditor() || !backend->midi_session->RemoveBinding(index)) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, backend->midi_session->StatusText());
     }
+    CommitEditorEdit(*backend, std::move(previous));
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -1283,9 +1520,11 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_clear_bindings(SoloRigBa
     if (!ValidBackend(backend) || backend->midi_session == nullptr) {
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "MIDI session is unavailable");
     }
+    const auto previous = CaptureEditorHistory(*backend);
     if (!backend->midi_session->SyncFromEditor() || !backend->midi_session->ClearBindings()) {
         return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, backend->midi_session->StatusText());
     }
+    CommitEditorEdit(*backend, std::move(previous));
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }
@@ -1296,10 +1535,12 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_midi_import_bank_utf8(
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
                         "MIDI session and a preset bank directory are required");
     }
+    const auto previous = CaptureEditorHistory(*backend);
     if (!backend->midi_session->SyncFromEditor() ||
         !backend->midi_session->LoadPresetBankDirectory(PathFromUtf8(directory_path_utf8))) {
         return SetError(backend, SOLO_RIG_STATUS_FILE_ERROR, backend->midi_session->StatusText());
     }
+    CommitEditorEdit(*backend, std::move(previous));
     backend->last_error.clear();
     return SOLO_RIG_STATUS_OK;
 }

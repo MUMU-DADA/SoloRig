@@ -16,6 +16,7 @@ Require(viewModel.Nodes.All(node => node.EstimatedCpuPercent > 0), "per-node est
 Require(viewModel.Nodes.All(node => !node.MeasurementAvailable), "startup keeps measured performance explicitly unavailable");
 Require(viewModel.PerformanceStatus.Contains("实测未连接", StringComparison.Ordinal), "performance status distinguishes estimate from measurement");
 Require(viewModel.Snapshot.Connections.Count == 1, "default snapshot exposes the Drive-to-Delay connection");
+Require(!viewModel.CanUndo && !viewModel.CanRedo, "startup document history is empty");
 Require(viewModel.ProbeDpiScaling(), "shared geometry and hit testing remain aligned at 1x/1.25x/2x DPI");
 Require(viewModel.MidiStatus.Contains("closed", StringComparison.OrdinalIgnoreCase), "startup MIDI remains closed");
 Require(viewModel.AsioDrivers.Count == 0 && viewModel.MidiDevices.Count == 0,
@@ -198,6 +199,19 @@ Require(viewModel.FileStatus.Contains("unsaved default", StringComparison.Ordina
         !viewModel.FileStatus.Contains("*", StringComparison.Ordinal),
     "document status identifies the clean in-memory default");
 Require(viewModel.SetParameter("drive-1.drive", 6.0F), "C ABI parameter edit succeeds");
+Require(viewModel.CanUndo && !viewModel.CanRedo, "parameter edit enables undo and clears redo");
+Require(viewModel.Undo(), "C ABI undo restores the previous parameter state");
+Require(viewModel.Nodes.SelectMany(node => node.Parameters).Any(parameter => parameter.Id == "drive" && parameter.Value == 4.0F) &&
+        !viewModel.IsDirty && viewModel.CanRedo,
+    "undo restores the parameter value and clean document state");
+Require(viewModel.Redo(), "C ABI redo reapplies the parameter edit");
+Require(viewModel.Nodes.SelectMany(node => node.Parameters).Any(parameter => parameter.Id == "drive" && parameter.Value == 6.0F) &&
+        viewModel.IsDirty && viewModel.CanUndo && !viewModel.CanRedo,
+    "redo reapplies the value and dirty state");
+Require(viewModel.Undo(), "second undo restores the clean parameter state");
+Require(viewModel.ClearHistory() && !viewModel.CanUndo && !viewModel.CanRedo,
+    "history can be cleared after a completed undo/redo round trip");
+Require(viewModel.SetParameter("drive-1.drive", 6.0F), "parameter edit remains available after history reset");
 Require(viewModel.Nodes.SelectMany(node => node.Parameters).Any(parameter => parameter.Id == "drive" && parameter.Value == 6.0F),
     "edited parameter is visible in the next snapshot");
 Require(viewModel.IsDirty && viewModel.FileStatus.Contains("*", StringComparison.Ordinal) &&

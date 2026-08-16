@@ -380,6 +380,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public bool CanDeleteSelected => SelectedNode is not null;
     public bool CanConnectNodes => snapshot.Nodes.Count >= 2;
     public bool CanDisconnectNodes => snapshot.Connections.Count > 0;
+    public bool CanUndo => backend is not null && backend.CanUndo;
+    public bool CanRedo => backend is not null && backend.CanRedo;
     public bool IsDirty => snapshot.Dirty;
     public bool DarkTheme => snapshot.DarkTheme;
     public string WindowTitle => string.IsNullOrWhiteSpace(snapshot.PresetName)
@@ -731,6 +733,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
                 nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
                 nameof(CanDuplicateSelected), nameof(CanDeleteSelected), nameof(CanConnectNodes), nameof(CanDisconnectNodes),
+                nameof(CanUndo), nameof(CanRedo),
                 nameof(Theme), nameof(ThemeDisplayName),
                 nameof(WindowTitle), nameof(AudioStatus), nameof(AudioOpen), nameof(AudioRunning),
                 nameof(AudioResetRequested), nameof(AudioDropoutReported), nameof(AudioSampleRateChangedTo),
@@ -781,7 +784,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 nameof(CanToggleTuner), nameof(CanEditAsioRoutes), nameof(CanRefreshAsio), nameof(MidiStatus), nameof(MidiOpen), nameof(MidiLearnArmed), nameof(MidiState),
                 nameof(MidiSelectedDeviceIndex), nameof(MidiDroppedMessageCount), nameof(MidiLifecycleText),
                 nameof(CanOpenMidi), nameof(CanEditMidiDeviceSelection), nameof(CanSelectMidiDevice), nameof(CanRefreshMidi), nameof(CanCloseMidi), nameof(CanDrainMidi), nameof(CanArmMidiLearn),
-                nameof(CanCancelMidiLearn));
+                nameof(CanCancelMidiLearn), nameof(CanUndo), nameof(CanRedo));
         }
         catch (Exception exception)
         {
@@ -902,6 +905,69 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         {
             backend.RestoreDocumentState(dirty);
             Refresh();
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Status = exception.Message;
+            return false;
+        }
+    }
+
+    public bool Undo()
+    {
+        if (backend is null || !CanUndo)
+        {
+            Status = "当前没有可撤销的文档编辑";
+            return false;
+        }
+        try
+        {
+            backend.Undo();
+            Refresh(reportStatus: false);
+            Status = "已撤销文档编辑";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Refresh(reportStatus: false);
+            Status = exception.Message;
+            return false;
+        }
+    }
+
+    public bool Redo()
+    {
+        if (backend is null || !CanRedo)
+        {
+            Status = "当前没有可重做的文档编辑";
+            return false;
+        }
+        try
+        {
+            backend.Redo();
+            Refresh(reportStatus: false);
+            Status = "已重做文档编辑";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Refresh(reportStatus: false);
+            Status = exception.Message;
+            return false;
+        }
+    }
+
+    public bool ClearHistory()
+    {
+        if (backend is null)
+        {
+            return false;
+        }
+        try
+        {
+            backend.ClearHistory();
+            Refresh(reportStatus: false);
             return true;
         }
         catch (Exception exception)
@@ -1086,11 +1152,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             !snapshot.Connections.Any(connection => connection.SourceInstanceId == node.InstanceId))?.InstanceId;
         try
         {
-            backend.AddNode(moduleId, instanceId, x, y);
-            if (!string.IsNullOrWhiteSpace(terminalNode) && !string.Equals(terminalNode, instanceId, StringComparison.Ordinal))
-            {
-                backend.Connect(terminalNode, instanceId);
-            }
+            backend.AddNodeToChain(moduleId, instanceId, x, y);
             Refresh();
             Status = string.IsNullOrWhiteSpace(terminalNode)
                 ? $"已添加效果器: {instanceId}"

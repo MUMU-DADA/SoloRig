@@ -135,7 +135,8 @@ public:
     void RestoreDocument(RigPreset preset,
                          std::optional<std::filesystem::path> source,
                          bool dirty,
-                         std::string status);
+                         std::string status,
+                         std::string resource_status = {});
     void NewPreset();
     [[nodiscard]] RigPreset ExportPreset() const;
     [[nodiscard]] EditorFileResult SaveTo(const std::filesystem::path& destination);
