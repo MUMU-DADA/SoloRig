@@ -633,6 +633,21 @@ public sealed partial class RigEditorView : UserControl
         }
     }
 
+    public bool ProbeDeviceAvailabilityState()
+    {
+        if (viewModel is null || AsioDeviceStatusText is null || MidiDeviceStatusText is null)
+        {
+            return false;
+        }
+
+        var statusVisible = !string.IsNullOrWhiteSpace(AsioDeviceStatusText.Text) &&
+                            !string.IsNullOrWhiteSpace(MidiDeviceStatusText.Text);
+        var asioGateSafe = viewModel.HasAsioDrivers || !viewModel.CanOpenAsio;
+        var midiGateSafe = viewModel.HasMidiDevices ||
+                           (!viewModel.CanSelectMidiDevice && !viewModel.CanOpenMidi);
+        return statusVisible && asioGateSafe && midiGateSafe;
+    }
+
     public bool ProbePresetLibrary()
     {
         if (viewModel is null || PresetLibraryList is null || PresetLibraryLoadButton is null)

@@ -247,6 +247,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private RealtimeContractSnapshot realtimeContract = EmptyRealtimeContract;
     private WhiteboxStatusSnapshot whiteboxStatus = EmptyWhiteboxStatus;
     private IReadOnlyList<AsioDriverSnapshot> asioDrivers = [];
+    private bool asioDevicesScanned;
     private readonly IReadOnlyList<AsioRouteSelection> asioInputRoutes =
     [
         new AsioRouteSelection("输入 1", 0U),
@@ -258,6 +259,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         new AsioRouteSelection("输出 2", 1U),
     ];
     private IReadOnlyList<MidiDeviceSnapshot> midiDevices = [];
+    private bool midiDevicesScanned;
     private IReadOnlyList<MidiLearnTargetSnapshot> midiLearnTargets = [];
     private IReadOnlyList<PresetLibraryEntry> presetLibraryEntries = [];
     private string presetLibraryDirectory = string.Empty;
@@ -431,6 +433,11 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public IReadOnlyList<AsioRouteSelection> AsioInputRoutes => asioInputRoutes;
     public IReadOnlyList<AsioRouteSelection> AsioOutputRoutes => asioOutputRoutes;
     public bool HasAsioDrivers => asioDrivers.Count > 0;
+    public string AsioDeviceStatusText => !asioDevicesScanned
+        ? "ASIO 设备：尚未扫描 · 点击“刷新 ASIO 设备”开始检查"
+        : HasAsioDrivers
+            ? $"ASIO 设备：已发现 {asioDrivers.Count} 个驱动 · 可配置输入/输出路由"
+            : "ASIO 设备：未发现已注册驱动 · 可继续编辑效果器链，打开音频前请安装驱动";
     public bool HasSelectedAsio => asioInputRoutes.Any(route => route.SelectedDriver is not null) ||
         asioOutputRoutes.Any(route => route.SelectedDriver is not null);
     public bool AsioRouteMapValid
@@ -464,6 +471,11 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public bool CanToggleTuner => AudioRunning || TunerEnabled;
     public IReadOnlyList<MidiDeviceSnapshot> MidiDevices => midiDevices;
     public bool HasMidiDevices => midiDevices.Count > 0;
+    public string MidiDeviceStatusText => !midiDevicesScanned
+        ? "MIDI 设备：尚未扫描 · 点击“刷新 MIDI 设备”开始检查"
+        : HasMidiDevices
+            ? $"MIDI 设备：已发现 {midiDevices.Count} 个输入设备"
+            : "MIDI 设备：未发现输入设备 · 连接设备后可再次刷新";
     public IReadOnlyList<MidiLearnTargetSnapshot> MidiLearnTargets => midiLearnTargets;
     public IReadOnlyList<BindingSnapshot> MidiBindings => snapshot.Bindings;
     public bool CanOpenMidi => SelectedMidiDevice is not null && !MidiOpen;
@@ -757,7 +769,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 nameof(SelectedPresetLibraryEntry), nameof(CanLoadSelectedPresetLibraryEntry),
                 nameof(ModuleCatalog), nameof(ModuleCatalogSummaryText), nameof(FilteredModuleCatalog),
                 nameof(SelectedCatalogModule),
-                nameof(MidiDevices), nameof(HasMidiDevices), nameof(CanSelectMidiDevice), nameof(MidiLearnTargets), nameof(MidiBindings), nameof(SelectedMidiDevice), nameof(SelectedMidiLearnTarget),
+                nameof(AsioDeviceStatusText), nameof(MidiDevices), nameof(HasMidiDevices), nameof(MidiDeviceStatusText), nameof(CanSelectMidiDevice), nameof(MidiLearnTargets), nameof(MidiBindings), nameof(SelectedMidiDevice), nameof(SelectedMidiLearnTarget),
                 nameof(SelectedMidiTargetIndex), nameof(SelectedMidiBindingIndex), nameof(MidiLearnStatus),
                 nameof(RealtimeContract),
                 nameof(RealtimeStatus), nameof(WhiteboxStatus), nameof(WhiteboxStatusText),
@@ -1271,11 +1283,12 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         {
             backend.RefreshAsioDrivers();
             asioDrivers = backend.ReadAsioDrivers();
+            asioDevicesScanned = true;
             foreach (var route in asioInputRoutes.Concat(asioOutputRoutes))
             {
                 route.SetDrivers(asioDrivers);
             }
-            OnPropertiesChanged(nameof(AsioDrivers));
+            OnPropertiesChanged(nameof(AsioDrivers), nameof(HasAsioDrivers), nameof(AsioDeviceStatusText));
             SelectedAsioDriverIndex = asioDrivers.Count == 0 ? -1 : 0;
             Refresh();
             Status = asioDrivers.Count == 0
@@ -1285,6 +1298,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         catch (Exception exception)
         {
+            asioDevicesScanned = true;
+            OnPropertiesChanged(nameof(AsioDeviceStatusText));
             Status = exception.Message;
             return false;
         }
@@ -1374,7 +1389,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         {
             backend.RefreshMidiDevices();
             midiDevices = backend.ReadMidiDevices();
-            OnPropertiesChanged(nameof(MidiDevices), nameof(HasMidiDevices));
+            midiDevicesScanned = true;
+            OnPropertiesChanged(nameof(MidiDevices), nameof(HasMidiDevices), nameof(MidiDeviceStatusText));
             SelectedMidiDeviceIndex = midiDevices.Count == 0 ? -1 : 0;
             Refresh();
             Status = midiDevices.Count == 0
@@ -1384,6 +1400,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         catch (Exception exception)
         {
+            midiDevicesScanned = true;
+            OnPropertiesChanged(nameof(MidiDeviceStatusText));
             Status = exception.Message;
             return false;
         }

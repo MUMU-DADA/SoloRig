@@ -512,6 +512,7 @@
 
               <Expander Classes="srg-expander" Header="音频设备 / 多 ASIO 路由" IsExpanded="False">
                 <StackPanel Spacing="7" Margin="0,8,0,0">
+                  <TextBlock x:Name="AsioDeviceStatusText" Text="{Binding AsioDeviceStatusText}" Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
                   <TextBlock Text="{Binding AsioRouteText}" Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
                   <TextBlock Text="{Binding AsioRouteValidationText}" Classes="srg-muted" FontSize="9" TextWrapping="Wrap" />
                   <Button Classes="srg-button" Content="刷新 ASIO 设备" IsEnabled="{Binding CanRefreshAsio}" Click="RefreshAsioClick" />
@@ -577,6 +578,7 @@
 
               <Expander Classes="srg-expander" Header="MIDI 控制" IsExpanded="False">
                 <StackPanel Spacing="7" Margin="0,8,0,0">
+                  <TextBlock x:Name="MidiDeviceStatusText" Text="{Binding MidiDeviceStatusText}" Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
                   <Button Classes="srg-button" Content="刷新 MIDI 设备" IsEnabled="{Binding CanRefreshMidi}" Click="RefreshMidiClick" />
                   <ComboBox x:Name="MidiDeviceSelector" Classes="srg-input" ItemsSource="{Binding MidiDevices}"
                             SelectedIndex="{Binding SelectedMidiDeviceIndex, Mode=TwoWay}" IsEnabled="{Binding CanSelectMidiDevice}"

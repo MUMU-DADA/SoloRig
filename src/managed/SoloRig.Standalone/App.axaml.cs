@@ -33,7 +33,8 @@ public sealed class App : Application
                     {
                         ReportVisualProbeFailure("visual content");
                     }
-                    var externalTheme = visualContent && RunVisualProbe("external theme", mainWindow.ProbeExternalTheme);
+                    var deviceAvailability = visualContent && RunVisualProbe("device availability", mainWindow.ProbeDeviceAvailabilityState);
+                    var externalTheme = deviceAvailability && RunVisualProbe("external theme", mainWindow.ProbeExternalTheme);
                     var themeSwitch = externalTheme && RunVisualProbe("theme switch", mainWindow.ProbeThemeSwitch);
                     var parameterBinding = themeSwitch && RunVisualProbe("parameter binding", mainWindow.ProbeParameterBinding);
                     var dpiScaling = parameterBinding && RunVisualProbe("DPI scaling", mainWindow.ProbeDpiScaling);
@@ -47,7 +48,7 @@ public sealed class App : Application
                     var moduleInsertion = moduleDragPreview && RunVisualProbe("module insertion", mainWindow.ProbeModuleInsertion);
                     var presetLibrary = moduleInsertion && RunVisualProbe("preset library", mainWindow.ProbePresetLibrary);
                     var undoRedo = presetLibrary && RunVisualProbe("undo/redo", mainWindow.ProbeUndoRedo);
-                    if (visualContent && externalTheme && themeSwitch && parameterBinding && dpiScaling && renderedSurface &&
+                    if (visualContent && deviceAvailability && externalTheme && themeSwitch && parameterBinding && dpiScaling && renderedSurface &&
                         keyboardShortcuts && selectionState && chainSelection && documentStatus && actionGates && moduleDragPreview &&
                         moduleInsertion && presetLibrary && undoRedo)
                     {
