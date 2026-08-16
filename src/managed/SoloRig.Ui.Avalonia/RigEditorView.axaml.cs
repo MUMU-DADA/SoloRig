@@ -1216,6 +1216,20 @@ public sealed partial class RigEditorView : UserControl
         args.Handled = true;
     }
 
+    private void EffectChainNodeClick(object? sender, RoutedEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control ||
+            control.DataContext is not CanvasNodeSnapshot node)
+        {
+            return;
+        }
+        if (viewModel.SelectNode(node.InstanceId))
+        {
+            viewModel.ReportInteractionStatus($"已选择效果器: {node.DisplayName}");
+        }
+        args.Handled = true;
+    }
+
     private void NodeInputEndpointPressed(object? sender, PointerPressedEventArgs args)
     {
         if (viewModel is null || sender is not Control control || control.Tag is not string nodeId)

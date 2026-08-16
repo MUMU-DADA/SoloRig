@@ -1081,6 +1081,17 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public bool SelectNode(string instanceId)
+    {
+        if (string.IsNullOrWhiteSpace(instanceId))
+        {
+            return false;
+        }
+        var node = CanvasNodes.FirstOrDefault(candidate =>
+            string.Equals(candidate.InstanceId, instanceId, StringComparison.Ordinal));
+        return node is not null && SelectAt(node.CanvasX + node.Width * 0.5, node.CanvasY + node.Height * 0.5);
+    }
+
     public bool ClearSelection()
     {
         if (backend is null)

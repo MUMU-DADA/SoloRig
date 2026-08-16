@@ -59,6 +59,18 @@
       <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentHoverBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource SrgAccentHoverBrush}" />
     </Style>
+    <Style Selector="Button.srg-chain-item">
+      <Setter Property="Background" Value="{DynamicResource SrgControlBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="{DynamicResource SrgTextBrush}" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Padding" Value="7,3" />
+    </Style>
+    <Style Selector="Button.srg-chain-item:pointerover">
+      <Setter Property="Background" Value="{DynamicResource SrgControlHoverBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentHoverBrush}" />
+    </Style>
     <Style Selector="Button.srg-footswitch">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
@@ -233,13 +245,12 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
-                        <Border Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgAccentBrush}"
-                                BorderThickness="1" CornerRadius="5" Padding="7,3">
+                        <Button Classes="srg-chain-item" Click="EffectChainNodeClick">
                           <StackPanel Orientation="Horizontal" Spacing="4">
                             <TextBlock Text="FX" Foreground="{DynamicResource SrgAccentBrush}" FontSize="8" FontWeight="Bold" />
                             <TextBlock Text="{Binding DisplayName}" Classes="srg-text" FontSize="9" />
                           </StackPanel>
-                        </Border>
+                        </Button>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>

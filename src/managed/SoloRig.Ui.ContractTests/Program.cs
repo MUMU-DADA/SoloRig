@@ -20,6 +20,10 @@ Require(viewModel.EffectChainNodes.Count == 2 &&
         viewModel.EffectChainNodes[0].InstanceId == "drive-1" &&
         viewModel.EffectChainNodes[1].InstanceId == "delay-1",
     "default snapshot exposes an ordered visible effect-chain projection");
+Require(viewModel.SelectNode("delay-1") && viewModel.SelectedNode?.InstanceId == "delay-1",
+    "effect-chain projection can select a node for inspector editing");
+Require(viewModel.ClearSelection() && viewModel.SelectedNode is null,
+    "effect-chain selection can return to the empty selection state");
 Require(!viewModel.CanUndo && !viewModel.CanRedo, "startup document history is empty");
 Require(viewModel.ProbeDpiScaling(), "shared geometry and hit testing remain aligned at 1x/1.25x/2x DPI");
 Require(viewModel.MidiStatus.Contains("closed", StringComparison.OrdinalIgnoreCase), "startup MIDI remains closed");
