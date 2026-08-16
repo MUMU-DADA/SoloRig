@@ -15,6 +15,26 @@ Require(!viewModel.ArmSelectedMidiLearn(), "MIDI learn rejects an unopened MIDI 
 Require(!viewModel.StartAsio(), "ASIO start is rejected before an explicit device open");
 Require(viewModel.ModuleCatalog.Count >= 2, "module catalog exposes built-in modules");
 Require(viewModel.ModuleCatalog.Any(module => module.ModuleId == "org.mumu-dada.solorig.drive"), "catalog exposes Drive metadata");
+var builtInCatalogCount = viewModel.ModuleCatalog.Count;
+Require(viewModel.ModuleCatalogFilter == "全部" && viewModel.FilteredModuleCatalog.Count == builtInCatalogCount,
+    "module catalog starts unfiltered");
+Require(viewModel.SetModuleCatalogFilter("模拟"), "analog catalog filter is accepted");
+Require(viewModel.FilteredModuleCatalog.Count > 0 && viewModel.FilteredModuleCatalog.All(module => module.Category == "Analog"),
+    "analog catalog filter only exposes analog modules");
+Require(viewModel.SetModuleCatalogFilter("数字"), "digital catalog filter is accepted");
+Require(viewModel.FilteredModuleCatalog.Count > 0 && viewModel.FilteredModuleCatalog.All(module => module.Category == "Digital"),
+    "digital catalog filter only exposes digital modules");
+Require(viewModel.SetModuleCatalogFilter("外部") && viewModel.FilteredModuleCatalog.Count == 0,
+    "external catalog filter is empty before external import");
+Require(!viewModel.SetModuleCatalogFilter("invalid"), "unknown catalog filter is rejected");
+Require(viewModel.SetModuleCatalogFilter("全部"), "catalog can return to the all filter");
+Require(viewModel.SelectInspectorTab("端口") && viewModel.IsPortInspectorVisible && !viewModel.IsParameterInspectorVisible,
+    "inspector port tab is selectable");
+Require(viewModel.SelectInspectorTab("资源") && viewModel.IsResourceInspectorVisible,
+    "inspector resource tab is selectable");
+Require(!viewModel.SelectInspectorTab("invalid"), "unknown inspector tab is rejected");
+Require(viewModel.SelectInspectorTab("参数") && viewModel.IsParameterInspectorVisible,
+    "inspector returns to parameter tab");
 Require(viewModel.RealtimeContract.IsRealtimeSafe, "C ABI reports a C++-only, preallocated realtime boundary");
 Require(viewModel.RealtimeContract.MaximumOversampling is >= 1 and <= 16, "realtime contract bounds oversampling");
 Require(viewModel.RealtimeStatus.Contains("C++ safe", StringComparison.Ordinal), "realtime status is visible to the shared ViewModel");
@@ -111,6 +131,10 @@ try
     File.Copy(sourceModel!, resourcePath, true);
     Require(viewModel.ImportResource(resourcePath), "explicit resource import is recognized");
     Require(viewModel.Snapshot.ResourceStatus.Contains("NAM", StringComparison.Ordinal), "resource status identifies NAM");
+    Require(viewModel.ModuleCatalog.Count > builtInCatalogCount, "resource import refreshes the module catalog");
+    Require(viewModel.SetModuleCatalogFilter("外部") && viewModel.FilteredModuleCatalog.Count > 0,
+        "external catalog filter exposes the imported resource");
+    Require(viewModel.SetModuleCatalogFilter("全部"), "catalog filter resets after external import");
     Require(viewModel.SaveToPath(path), "explicit Save writes a validated preset");
     Require(!viewModel.IsDirty, "successful Save clears dirty state");
     Directory.CreateDirectory(midiBankDirectory);

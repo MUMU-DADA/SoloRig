@@ -123,17 +123,16 @@
             <StackPanel Spacing="11">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="模块库" Classes="srg-text" FontSize="13" FontWeight="SemiBold" />
-                <TextBlock Grid.Column="1" Text="{Binding ModuleCatalog.Count, StringFormat={}{0} 个可用}" Classes="srg-small" />
+                <TextBlock Grid.Column="1" Text="{Binding ModuleCatalogSummaryText}" Classes="srg-small" />
               </Grid>
               <TextBox Classes="srg-input" Watermark="搜索模块" Text="{Binding ModuleSearchText}" />
               <Grid ColumnDefinitions="*,*,*">
-                <Border Grid.Column="0" Background="#2A3440" CornerRadius="5" Padding="6,5">
-                  <TextBlock Text="模拟" Classes="srg-text" FontSize="11" HorizontalAlignment="Center" />
-                </Border>
-                <TextBlock Grid.Column="1" Text="数字" Classes="srg-muted" FontSize="11"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="2" Text="外部" Classes="srg-muted" FontSize="11"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <Button Grid.Column="0" Classes="srg-button ghost" Content="模拟" Tag="模拟"
+                        Click="ModuleCatalogFilterClick" HorizontalContentAlignment="Center" />
+                <Button Grid.Column="1" Classes="srg-button ghost" Content="数字" Tag="数字"
+                        Click="ModuleCatalogFilterClick" HorizontalContentAlignment="Center" />
+                <Button Grid.Column="2" Classes="srg-button ghost" Content="外部" Tag="外部"
+                        Click="ModuleCatalogFilterClick" HorizontalContentAlignment="Center" />
               </Grid>
               <ListBox x:Name="ModuleCatalogList" Classes="srg-list" Height="205"
                        ItemsSource="{Binding FilteredModuleCatalog}" SelectedItem="{Binding SelectedCatalogModule}">
@@ -340,7 +339,7 @@
                 <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                   <TextBlock Text="{Binding SelectedNode.InstanceId, FallbackValue=未选择效果器}"
                              Classes="srg-text" FontSize="17" />
-                  <TextBlock Text="选择节点后在此编辑参数" Classes="srg-muted" FontSize="10" />
+                  <TextBlock Text="{Binding InspectorTab} · 选择节点后在此编辑" Classes="srg-muted" FontSize="10" />
                 </StackPanel>
               </Grid>
               <Grid ColumnDefinitions="Auto,Auto,Auto">
@@ -355,15 +354,14 @@
                 </Border>
               </Grid>
               <Grid ColumnDefinitions="*,*,*">
-                <Border Grid.Column="0" Background="#2A3440" CornerRadius="5" Padding="7,6">
-                  <TextBlock Text="参数" Classes="srg-text" FontSize="11" HorizontalAlignment="Center" />
-                </Border>
-                <TextBlock Grid.Column="1" Text="端口" Classes="srg-muted" FontSize="11"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="2" Text="资源" Classes="srg-muted" FontSize="11"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <Button Grid.Column="0" Classes="srg-button ghost" Content="参数" Tag="参数"
+                        Click="InspectorTabClick" HorizontalContentAlignment="Center" />
+                <Button Grid.Column="1" Classes="srg-button ghost" Content="端口" Tag="端口"
+                        Click="InspectorTabClick" HorizontalContentAlignment="Center" />
+                <Button Grid.Column="2" Classes="srg-button ghost" Content="资源" Tag="资源"
+                        Click="InspectorTabClick" HorizontalContentAlignment="Center" />
               </Grid>
-              <Border Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="7" Padding="9">
+              <Border IsVisible="{Binding IsPortInspectorVisible}" Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="7" Padding="9">
                 <StackPanel Spacing="7">
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="连接端口" Classes="srg-muted" FontSize="10" />
@@ -373,7 +371,7 @@
                   <TextBlock Text="输出 · audio / 2ch" Classes="srg-text" FontSize="11" />
                 </StackPanel>
               </Border>
-              <ItemsControl ItemsSource="{Binding SelectedParameters}">
+              <ItemsControl IsVisible="{Binding IsParameterInspectorVisible}" ItemsSource="{Binding SelectedParameters}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Grid ColumnDefinitions="*,90" Margin="0,2">
@@ -389,7 +387,7 @@
                 <Button Classes="srg-button" Content="复制" Command="{Binding DuplicateSelectedCommand}" HorizontalAlignment="Stretch" />
                 <Button Classes="srg-button" Content="删除" Command="{Binding DeleteSelectedCommand}" HorizontalAlignment="Stretch" />
               </StackPanel>
-              <Border Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="7" Padding="9">
+              <Border IsVisible="{Binding IsResourceInspectorVisible}" Background="#222A34" BorderBrush="#394655" BorderThickness="1" CornerRadius="7" Padding="9">
                 <StackPanel Spacing="5">
                   <TextBlock Text="{Binding ResourceStatus}" Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
                   <Button Classes="srg-button" Content="导入模块资源" Click="ImportResourceClick" />

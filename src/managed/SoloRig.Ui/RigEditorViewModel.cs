@@ -60,7 +60,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private IReadOnlyList<CanvasConnectionSnapshot> canvasConnections = [];
     private IReadOnlyList<ModuleCatalogSnapshot> moduleCatalog = [];
     private string moduleSearchText = string.Empty;
+    private string moduleCatalogFilter = "全部";
     private ModuleCatalogSnapshot? selectedCatalogModule;
+    private string inspectorTab = "参数";
     private string selectedPresetName = "SoloRig Default";
     private string status = "Starting backend probe...";
     private RealtimeContractSnapshot realtimeContract = EmptyRealtimeContract;
@@ -123,7 +125,10 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         .Where(module => string.IsNullOrWhiteSpace(ModuleSearchText) ||
                          module.DisplayText.Contains(ModuleSearchText, StringComparison.OrdinalIgnoreCase) ||
                          module.ModuleId.Contains(ModuleSearchText, StringComparison.OrdinalIgnoreCase))
+        .Where(MatchesModuleCatalogFilter)
         .ToArray();
+    public string ModuleCatalogFilter => moduleCatalogFilter;
+    public string ModuleCatalogSummaryText => $"{FilteredModuleCatalog.Count} 个可用 · {ModuleCatalogFilter}";
     public string ModuleSearchText
     {
         get => moduleSearchText;
@@ -140,7 +145,31 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         get => selectedCatalogModule;
         set => Set(ref selectedCatalogModule, value);
     }
+    public bool SetModuleCatalogFilter(string filter)
+    {
+        if (filter is not ("全部" or "模拟" or "数字" or "外部"))
+        {
+            return false;
+        }
+        if (string.Equals(moduleCatalogFilter, filter, StringComparison.Ordinal))
+        {
+            return true;
+        }
+        moduleCatalogFilter = filter;
+        if (selectedCatalogModule is not null &&
+            !FilteredModuleCatalog.Any(module => module.ModuleId == selectedCatalogModule.ModuleId))
+        {
+            selectedCatalogModule = null;
+        }
+        OnPropertiesChanged(nameof(ModuleCatalogFilter), nameof(ModuleCatalogSummaryText),
+            nameof(FilteredModuleCatalog), nameof(SelectedCatalogModule));
+        Status = $"模块库筛选: {filter}";
+        return true;
+    }
     public NodeSnapshot? SelectedNode => snapshot.Nodes.FirstOrDefault(node => node.Selected);
+    public string SelectedNodeDisplayName => SelectedNode is null
+        ? "未选择效果器"
+        : CanvasNodes.FirstOrDefault(node => node.InstanceId == SelectedNode.InstanceId)?.DisplayName ?? SelectedNode.InstanceId;
     public IReadOnlyList<ParameterEditorSnapshot> SelectedParameters =>
         SelectedNode is null
             ? []
@@ -264,6 +293,26 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         get => tunerEnabled;
         private set => Set(ref tunerEnabled, value);
     }
+    public string InspectorTab => inspectorTab;
+    public bool IsParameterInspectorVisible => inspectorTab == "参数";
+    public bool IsPortInspectorVisible => inspectorTab == "端口";
+    public bool IsResourceInspectorVisible => inspectorTab == "资源";
+    public bool SelectInspectorTab(string tab)
+    {
+        if (tab is not ("参数" or "端口" or "资源"))
+        {
+            return false;
+        }
+        if (string.Equals(inspectorTab, tab, StringComparison.Ordinal))
+        {
+            return true;
+        }
+        inspectorTab = tab;
+        OnPropertiesChanged(nameof(InspectorTab), nameof(IsParameterInspectorVisible),
+            nameof(IsPortInspectorVisible), nameof(IsResourceInspectorVisible));
+        Status = $"检查器页签: {tab}";
+        return true;
+    }
     public string AsioRouteText => SelectedAsioDriver is null
         ? "ASIO: 未选择设备；输入/输出端口固定为选定设备的物理通道"
         : $"ASIO: {SelectedAsioDriver.DisplayName} · 输入 {SelectedInputChannel0}/{SelectedInputChannel1} → 输出 {SelectedOutputChannel0}/{SelectedOutputChannel1}";
@@ -319,10 +368,16 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         try
         {
+            var nextModuleCatalog = backend.ReadCatalog();
             var nextSnapshot = backend.ReadSnapshot();
             var nextRealtimeContract = backend.ReadRealtimeContract();
             var nextWhiteboxStatus = backend.ReadWhiteboxStatus();
             var nextMidiLearnTargets = backend.ReadMidiLearnTargets();
+            var selectedCatalogModuleId = selectedCatalogModule?.ModuleId;
+            moduleCatalog = nextModuleCatalog;
+            selectedCatalogModule = selectedCatalogModuleId is null
+                ? null
+                : moduleCatalog.FirstOrDefault(module => module.ModuleId == selectedCatalogModuleId);
             snapshot = nextSnapshot;
             selectedPresetName = string.IsNullOrWhiteSpace(snapshot.SourcePath) ||
                                  string.IsNullOrWhiteSpace(snapshot.PresetName)
@@ -344,9 +399,11 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             RebuildCanvasProjections();
             Status = $"Backend probe OK | schema {snapshot.SchemaVersion} | theme {(snapshot.DarkTheme ? "dark" : "light")}";
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
-                nameof(SelectedNode), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
+                nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
                 nameof(WindowTitle), nameof(AudioStatus), nameof(MidiStatus), nameof(FileStatus),
                 nameof(PerformanceStatus), nameof(ResourceStatus), nameof(PresetNames), nameof(SelectedPresetName),
+                nameof(ModuleCatalog), nameof(ModuleCatalogSummaryText), nameof(FilteredModuleCatalog),
+                nameof(SelectedCatalogModule),
                 nameof(MidiLearnTargets), nameof(MidiBindings), nameof(SelectedMidiLearnTarget),
                 nameof(SelectedMidiTargetIndex), nameof(SelectedMidiBindingIndex), nameof(MidiLearnStatus),
                 nameof(RealtimeContract),
@@ -371,7 +428,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections),
-                nameof(SelectedNode), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme), nameof(WindowTitle),
+                nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme), nameof(WindowTitle),
                 nameof(FileStatus));
         }
         catch (Exception exception)
@@ -435,7 +492,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             backend.SelectAt(ToBackendX(x), ToBackendY(y));
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
-            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode), nameof(SelectedParameters));
+            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode),
+                nameof(SelectedNodeDisplayName), nameof(SelectedParameters));
             return true;
         }
         catch (Exception exception)
@@ -456,7 +514,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             backend.BeginDrag(ToBackendX(x), ToBackendY(y));
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
-            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode), nameof(SelectedParameters));
+            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode),
+                nameof(SelectedNodeDisplayName), nameof(SelectedParameters));
             return true;
         }
         catch (Exception exception)
@@ -477,7 +536,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             backend.DragTo(ToBackendX(x), ToBackendY(y), snapToGrid);
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
-            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode), nameof(SelectedParameters),
+            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode),
+                nameof(SelectedNodeDisplayName), nameof(SelectedParameters),
                 nameof(IsDirty), nameof(WindowTitle), nameof(FileStatus));
             return true;
         }
@@ -934,6 +994,15 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         var id = CreateUniqueNodeId(baseId);
         AddModule(module.ModuleId, id, 64 + snapshot.Nodes.Count * 32, 300);
     }
+
+    private bool MatchesModuleCatalogFilter(ModuleCatalogSnapshot module) => moduleCatalogFilter switch
+    {
+        "模拟" => module.Category.Equals("Analog", StringComparison.OrdinalIgnoreCase),
+        "数字" => module.Category.Equals("Digital", StringComparison.OrdinalIgnoreCase),
+        "外部" => !module.Category.Equals("Analog", StringComparison.OrdinalIgnoreCase) &&
+                   !module.Category.Equals("Digital", StringComparison.OrdinalIgnoreCase),
+        _ => true
+    };
 
     private void DeleteSelectedNode()
     {

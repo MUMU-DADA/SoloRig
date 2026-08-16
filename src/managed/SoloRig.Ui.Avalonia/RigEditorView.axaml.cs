@@ -184,6 +184,22 @@ public sealed partial class RigEditorView : UserControl
     private void SaveAsClick(object? sender, RoutedEventArgs args) => _ = SaveAsAsync();
     private void ImportResourceClick(object? sender, RoutedEventArgs args) => _ = ImportResourceAsync();
 
+    private void ModuleCatalogFilterClick(object? sender, RoutedEventArgs args)
+    {
+        if (viewModel is not null && sender is Control control && control.Tag is string filter)
+        {
+            viewModel.SetModuleCatalogFilter(filter);
+        }
+    }
+
+    private void InspectorTabClick(object? sender, RoutedEventArgs args)
+    {
+        if (viewModel is not null && sender is Control control && control.Tag is string tab)
+        {
+            viewModel.SelectInspectorTab(tab);
+        }
+    }
+
     private void RefreshAsioClick(object? sender, RoutedEventArgs args) => viewModel?.RefreshAsioDevices();
 
     private void OpenAsioClick(object? sender, RoutedEventArgs args)
