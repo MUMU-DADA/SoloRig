@@ -42,14 +42,15 @@ public sealed class App : Application
                     var keyboardShortcuts = renderedSurface && RunVisualProbe("keyboard shortcuts", mainWindow.ProbeKeyboardShortcuts);
                     var selectionState = keyboardShortcuts && RunVisualProbe("selection state", mainWindow.ProbeSelectionState);
                     var chainSelection = selectionState && RunVisualProbe("effect chain selection", mainWindow.ProbeEffectChainSelection);
-                    var documentStatus = chainSelection && RunVisualProbe("document status", mainWindow.ProbeDocumentStatus);
+                    var connectionSelection = chainSelection && RunVisualProbe("connection selection", mainWindow.ProbeConnectionSelection);
+                    var documentStatus = connectionSelection && RunVisualProbe("document status", mainWindow.ProbeDocumentStatus);
                     var actionGates = documentStatus && RunVisualProbe("action gates", mainWindow.ProbeActionGates);
                     var moduleDragPreview = actionGates && RunVisualProbe("module drag preview", mainWindow.ProbeModuleDragPreview);
                     var moduleInsertion = moduleDragPreview && RunVisualProbe("module insertion", mainWindow.ProbeModuleInsertion);
                     var presetLibrary = moduleInsertion && RunVisualProbe("preset library", mainWindow.ProbePresetLibrary);
                     var undoRedo = presetLibrary && RunVisualProbe("undo/redo", mainWindow.ProbeUndoRedo);
                     if (visualContent && deviceAvailability && externalTheme && themeSwitch && parameterBinding && dpiScaling && renderedSurface &&
-                        keyboardShortcuts && selectionState && chainSelection && documentStatus && actionGates && moduleDragPreview &&
+                        keyboardShortcuts && selectionState && chainSelection && connectionSelection && documentStatus && actionGates && moduleDragPreview &&
                         moduleInsertion && presetLibrary && undoRedo)
                     {
                         probe.Stop();

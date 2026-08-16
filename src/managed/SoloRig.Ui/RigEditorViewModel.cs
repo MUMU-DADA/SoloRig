@@ -99,10 +99,13 @@ public sealed record CanvasConnectionSnapshot(
     double SourceX,
     double SourceY,
     double DestinationX,
-    double DestinationY)
+    double DestinationY,
+    bool Selected = false)
 {
     public string SourcePoint => $"{SourceX:0.###},{SourceY:0.###}";
     public string DestinationPoint => $"{DestinationX:0.###},{DestinationY:0.###}";
+    public double StrokeThickness => Selected ? 5.0 : 3.0;
+    public double StrokeOpacity => Selected ? 1.0 : 0.82;
 }
 
 public sealed record ParameterEditorSnapshot(string Target, string Id, float Value, float Minimum, float Maximum)
@@ -237,6 +240,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private IReadOnlyList<CanvasNodeSnapshot> canvasNodes = [];
     private IReadOnlyList<CanvasConnectionSnapshot> canvasConnections = [];
     private IReadOnlyList<CanvasNodeSnapshot> effectChainNodes = [];
+    private string? selectedConnectionSource;
+    private string? selectedConnectionDestination;
     private IReadOnlyList<ModuleCatalogSnapshot> moduleCatalog = [];
     private string moduleSearchText = string.Empty;
     private string moduleCatalogFilter = "全部";
@@ -322,6 +327,10 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public IReadOnlyList<NodeSnapshot> Nodes => snapshot.Nodes;
     public IReadOnlyList<CanvasNodeSnapshot> CanvasNodes => canvasNodes;
     public IReadOnlyList<CanvasConnectionSnapshot> CanvasConnections => canvasConnections;
+    public CanvasConnectionSnapshot? SelectedConnection => canvasConnections.FirstOrDefault(connection => connection.Selected);
+    public string ConnectionSelectionText => SelectedConnection is { } connection
+        ? $"已选择连接：{connection.SourceInstanceId} → {connection.DestinationInstanceId}"
+        : "未选择连接 · 点击连接线可针对该连接操作";
     // The chain projection is ordered from the first node through each serial
     // connection, then appends any disconnected nodes deterministically.  The
     // canvas remains the editing surface; this projection makes successful
@@ -748,7 +757,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             {
                 Status = $"Backend probe OK | schema {snapshot.SchemaVersion} | theme {(snapshot.DarkTheme ? "dark" : "light")}";
             }
-            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections), nameof(EffectChainNodes),
+            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections), nameof(SelectedConnection), nameof(ConnectionSelectionText), nameof(EffectChainNodes),
                 nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
                 nameof(CanDuplicateSelected), nameof(CanDeleteSelected), nameof(CanConnectNodes), nameof(CanDisconnectNodes),
                 nameof(CanUndo), nameof(CanRedo),
@@ -821,7 +830,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             backend.SetViewport(width, height, dpiScale);
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
-            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections), nameof(EffectChainNodes),
+            OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections), nameof(SelectedConnection), nameof(ConnectionSelectionText), nameof(EffectChainNodes),
                 nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme), nameof(WindowTitle),
                 nameof(FileStatus), nameof(CanDuplicateSelected), nameof(CanDeleteSelected), nameof(CanConnectNodes), nameof(CanDisconnectNodes));
         }
@@ -1259,6 +1268,40 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         if (backend is null) return false;
         try { backend.Disconnect(sourceInstanceId, destinationInstanceId); Refresh(); Status = "Connection removed"; return true; }
         catch (Exception exception) { Status = exception.Message; Refresh(); return false; }
+    }
+
+    public bool SelectConnection(string sourceInstanceId, string destinationInstanceId)
+    {
+        if (string.IsNullOrWhiteSpace(sourceInstanceId) || string.IsNullOrWhiteSpace(destinationInstanceId))
+        {
+            return false;
+        }
+        var connection = snapshot.Connections.FirstOrDefault(candidate =>
+            string.Equals(candidate.SourceInstanceId, sourceInstanceId, StringComparison.Ordinal) &&
+            string.Equals(candidate.DestinationInstanceId, destinationInstanceId, StringComparison.Ordinal));
+        if (connection is null)
+        {
+            return false;
+        }
+        selectedConnectionSource = sourceInstanceId;
+        selectedConnectionDestination = destinationInstanceId;
+        RebuildCanvasProjections();
+        OnPropertiesChanged(nameof(CanvasConnections), nameof(SelectedConnection), nameof(ConnectionSelectionText));
+        Status = $"已选择连接：{sourceInstanceId} → {destinationInstanceId}";
+        return true;
+    }
+
+    public bool ClearConnectionSelection()
+    {
+        if (selectedConnectionSource is null && selectedConnectionDestination is null)
+        {
+            return true;
+        }
+        selectedConnectionSource = null;
+        selectedConnectionDestination = null;
+        RebuildCanvasProjections();
+        OnPropertiesChanged(nameof(CanvasConnections), nameof(SelectedConnection), nameof(ConnectionSelectionText));
+        return true;
     }
 
     public bool ImportResource(string path)
@@ -1857,7 +1900,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     private void DisconnectSelectedNodes()
     {
-        var connection = snapshot.Connections.FirstOrDefault();
+        var connection = SelectedConnection ?? canvasConnections.FirstOrDefault();
         if (connection is not null) DisconnectNodes(connection.SourceInstanceId, connection.DestinationInstanceId);
     }
 
@@ -1951,7 +1994,14 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         canvasConnections = snapshot.Connections.Select(connection => new CanvasConnectionSnapshot(
             connection.SourceInstanceId, connection.DestinationInstanceId,
             connection.SourceX / scale, connection.SourceY / scale,
-            connection.DestinationX / scale, connection.DestinationY / scale)).ToArray();
+            connection.DestinationX / scale, connection.DestinationY / scale,
+            string.Equals(selectedConnectionSource, connection.SourceInstanceId, StringComparison.Ordinal) &&
+            string.Equals(selectedConnectionDestination, connection.DestinationInstanceId, StringComparison.Ordinal))).ToArray();
+        if (selectedConnectionSource is not null && !canvasConnections.Any(connection => connection.Selected))
+        {
+            selectedConnectionSource = null;
+            selectedConnectionDestination = null;
+        }
 
         var nodesById = projectedNodes.ToDictionary(node => node.InstanceId, StringComparer.Ordinal);
         var successors = snapshot.Connections

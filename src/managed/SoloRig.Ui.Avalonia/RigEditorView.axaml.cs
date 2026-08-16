@@ -420,6 +420,34 @@ public sealed partial class RigEditorView : UserControl
                BuildVisualRegressionFingerprint() == originalFingerprint;
     }
 
+    public bool ProbeConnectionSelection()
+    {
+        if (viewModel is null || viewModel.CanvasConnections.Count == 0)
+        {
+            return false;
+        }
+
+        var original = viewModel.SelectedConnection;
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        var target = viewModel.CanvasConnections[0];
+        if (!viewModel.SelectConnection(target.SourceInstanceId, target.DestinationInstanceId))
+        {
+            return false;
+        }
+
+        var selected = viewModel.SelectedConnection is { } selectedConnection &&
+                       selectedConnection.SourceInstanceId == target.SourceInstanceId &&
+                       selectedConnection.DestinationInstanceId == target.DestinationInstanceId &&
+                       selectedConnection.Selected &&
+                       viewModel.ConnectionSelectionText.Contains(target.SourceInstanceId, StringComparison.Ordinal);
+        var restored = original is null
+            ? viewModel.ClearConnectionSelection()
+            : viewModel.SelectConnection(original.SourceInstanceId, original.DestinationInstanceId);
+        return selected && restored &&
+               BuildVisualRegressionFingerprint() == originalFingerprint &&
+               (viewModel.SelectedConnection?.SourceInstanceId ?? string.Empty) == (original?.SourceInstanceId ?? string.Empty);
+    }
+
     public bool ProbeDocumentStatus()
     {
         if (viewModel is null || DocumentStatusText is null)
@@ -837,7 +865,9 @@ public sealed partial class RigEditorView : UserControl
             $"{entry.DisplayName}:{entry.IsValid}:{entry.SourcePath}"));
         var chain = string.Join("|", viewModel.EffectChainNodes.Select(node =>
             $"{node.InstanceId}:{node.Selected}:{node.Bypassed}"));
-        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};file={viewModel.FileStatus};filter={viewModel.ModuleCatalogFilter};inspector={viewModel.InspectorTab};library={viewModel.PresetLibraryDirectory}:{viewModel.SelectedPresetLibraryIndex}:{library};resources={resources};nodes={nodes};chain={chain};connections={viewModel.CanvasConnections.Count}";
+        var connections = string.Join("|", viewModel.CanvasConnections.Select(connection =>
+            $"{connection.SourceInstanceId}>{connection.DestinationInstanceId}:{connection.Selected}"));
+        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};file={viewModel.FileStatus};filter={viewModel.ModuleCatalogFilter};inspector={viewModel.InspectorTab};library={viewModel.PresetLibraryDirectory}:{viewModel.SelectedPresetLibraryIndex}:{library};resources={resources};nodes={nodes};chain={chain};connections={connections}";
     }
 
     private void NodeFootswitchClick(object? sender, RoutedEventArgs args)
@@ -1373,6 +1403,17 @@ public sealed partial class RigEditorView : UserControl
         }
         pendingOutputNode = nodeId;
         viewModel.ReportInteractionStatus($"已选择 {nodeId} 的输出端点，请点击目标效果器的输入端点");
+        args.Handled = true;
+    }
+
+    private void CanvasConnectionPressed(object? sender, PointerPressedEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control ||
+            control.DataContext is not CanvasConnectionSnapshot connection)
+        {
+            return;
+        }
+        viewModel.SelectConnection(connection.SourceInstanceId, connection.DestinationInstanceId);
         args.Handled = true;
     }
 

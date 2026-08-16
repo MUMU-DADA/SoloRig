@@ -40,6 +40,8 @@ public sealed partial class MainWindow : Window
 
     public bool ProbeEffectChainSelection() => EditorView.ProbeEffectChainSelection();
 
+    public bool ProbeConnectionSelection() => EditorView.ProbeConnectionSelection();
+
     public bool ProbeDocumentStatus() => EditorView.ProbeDocumentStatus();
 
     public bool ProbeActionGates() => EditorView.ProbeActionGates();

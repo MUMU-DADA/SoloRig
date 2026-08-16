@@ -238,6 +238,7 @@
               <StackPanel Spacing="2">
                 <TextBlock Text="效果器链路" Classes="srg-text" FontSize="13" FontWeight="SemiBold" />
                 <TextBlock Text="自由移动模块 · 点击两个端点建立方向连接" Classes="srg-muted" FontSize="10" />
+                <TextBlock Text="{Binding ConnectionSelectionText}" Classes="srg-muted" FontSize="9" TextTrimming="CharacterEllipsis" />
                 <ScrollViewer Height="30" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Hidden" Margin="0,6,0,0">
                   <StackPanel x:Name="EffectChainStripPanel" Orientation="Horizontal" Spacing="5" />
                 </ScrollViewer>
@@ -245,7 +246,7 @@
               <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
                 <Button x:Name="CanvasConnectButton" Classes="srg-button ghost" Content="连接首尾"
                         Command="{Binding ConnectSelectedCommand}" IsEnabled="{Binding CanConnectNodes}" />
-                <Button x:Name="CanvasDisconnectButton" Classes="srg-button ghost" Content="断开首条"
+                <Button x:Name="CanvasDisconnectButton" Classes="srg-button ghost" Content="断开连接"
                         Command="{Binding DisconnectSelectedCommand}" IsEnabled="{Binding CanDisconnectNodes}" />
               </StackPanel>
             </Grid>
@@ -307,7 +308,8 @@
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
                       <Line StartPoint="{Binding SourcePoint}" EndPoint="{Binding DestinationPoint}"
-                            Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="3" Opacity="0.82" />
+                            Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="{Binding StrokeThickness}"
+                            Opacity="{Binding StrokeOpacity}" PointerPressed="CanvasConnectionPressed" />
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
