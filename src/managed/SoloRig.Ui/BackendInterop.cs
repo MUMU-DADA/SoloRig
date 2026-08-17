@@ -107,6 +107,48 @@ internal struct NativeNodeView
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct NativeNodePortView
+{
+    public IntPtr PortId;
+    public byte Direction;
+    public uint MaxChannels;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeNodeResourceView
+{
+    public IntPtr Kind;
+    public IntPtr Path;
+    public IntPtr Status;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeNodeSkinLayoutView
+{
+    public double Width;
+    public double Height;
+    public IntPtr BackgroundColor;
+    public IntPtr LabelColor;
+    public byte HasFootswitchPosition;
+    public double FootswitchX;
+    public double FootswitchY;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeNodeSkinParameterLayoutView
+{
+    public IntPtr ParameterId;
+    public double X;
+    public double Y;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeNodeBatchEntry
+{
+    public IntPtr InstanceId;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal struct NativeParameterView
 {
     public IntPtr ParameterId;
@@ -177,6 +219,76 @@ internal struct NativeWhiteboxStatusView
     public IntPtr RuntimeStatus;
     public IntPtr EvidenceStatus;
     public IntPtr Diagnostic;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeModuleAuditionView
+{
+    public uint SampleRateHz;
+    public uint BlockSize;
+    public uint ChannelCount;
+    public uint DeclaredLatencySamples;
+    public double OutputPeak;
+    public double OutputRms;
+    public double ProcessingCpuPercent;
+    public byte OutputFinite;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeModuleAuditionConfigV2
+{
+    public uint SampleRateHz;
+    public uint BlockSize;
+    public uint ChannelCount;
+    public uint StimulusKind;
+    public IntPtr InputPort;
+    public IntPtr OutputPort;
+    public double Amplitude;
+    public double StartFrequencyHz;
+    public double EndFrequencyHz;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeModuleAuditionAnalysisV2
+{
+    public uint SchemaVersion;
+    public uint SampleRateHz;
+    public uint BlockSize;
+    public uint ChannelCount;
+    public uint DeclaredLatencySamples;
+    public uint WaveformSampleCount;
+    public double InputPeak;
+    public double InputRms;
+    public double InputDc;
+    public double OutputPeak;
+    public double OutputRms;
+    public double OutputDc;
+    public double ProcessingCpuPercent;
+    public byte OutputFinite;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeModuleAuditionAnalysisV3
+{
+    public uint SchemaVersion;
+    public uint SampleRateHz;
+    public uint BlockSize;
+    public uint ChannelCount;
+    public uint DeclaredLatencySamples;
+    public uint WaveformSampleCount;
+    public double InputPeak;
+    public double InputRms;
+    public double InputDc;
+    public double OutputPeak;
+    public double OutputRms;
+    public double OutputDc;
+    public double ProcessingCpuPercent;
+    public byte OutputFinite;
+    public ulong SolverProcessedSampleCount;
+    public ulong SolverTotalIterations;
+    public uint SolverMaximumIterations;
+    public uint SolverFailureCount;
+    public uint SolverLastError;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -263,6 +375,30 @@ internal static class NativeMethods
     internal static extern NativeStatus solorig_snapshot_node(IntPtr snapshot, uint index, out NativeNodeView node);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_snapshot_node_port_count(
+        IntPtr snapshot, uint nodeIndex, out uint count);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_snapshot_node_port(
+        IntPtr snapshot, uint nodeIndex, uint portIndex, out NativeNodePortView port);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_snapshot_node_resource(
+        IntPtr snapshot, uint nodeIndex, out NativeNodeResourceView resource);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_snapshot_node_skin_layout(
+        IntPtr snapshot, uint nodeIndex, out NativeNodeSkinLayoutView layout);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_snapshot_node_skin_parameter_layout_count(
+        IntPtr snapshot, uint nodeIndex, out uint count);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_snapshot_node_skin_parameter_layout(
+        IntPtr snapshot, uint nodeIndex, uint layoutIndex, out NativeNodeSkinParameterLayoutView layout);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_snapshot_parameter(
         IntPtr snapshot, uint nodeIndex, uint parameterIndex, out NativeParameterView parameter);
 
@@ -287,6 +423,10 @@ internal static class NativeMethods
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_set_node_bypassed_utf8(
         IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string instanceId, byte bypassed);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_set_nodes_bypassed(
+        IntPtr backend, [In] NativeNodeBatchEntry[] nodes, uint nodeCount, byte bypassed);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_set_node_performance_utf8(
@@ -406,6 +546,37 @@ internal static class NativeMethods
         IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_validate_module_package_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string directoryPath);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_audition_module_package_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string directoryPath,
+        out NativeModuleAuditionView audition);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_audition_module_package_v2_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string directoryPath,
+        ref NativeModuleAuditionConfigV2 config,
+        [In, Out] float[] inputWaveform, [In, Out] float[] outputWaveform,
+        uint waveformCapacity, out NativeModuleAuditionAnalysisV2 analysis);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_audition_module_package_v3_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string directoryPath,
+        ref NativeModuleAuditionConfigV2 config,
+        [In, Out] float[] inputWaveform, [In, Out] float[] outputWaveform,
+        uint waveformCapacity, out NativeModuleAuditionAnalysisV3 analysis);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_backend_audition_module_package_v4_utf8(
+        IntPtr backend, [MarshalAs(UnmanagedType.LPUTF8Str)] string directoryPath,
+        ref NativeModuleAuditionConfigV2 config,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string parameterId, double parameterValue,
+        [In, Out] float[] inputWaveform, [In, Out] float[] outputWaveform,
+        uint waveformCapacity, out NativeModuleAuditionAnalysisV3 analysis);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_backend_asio_refresh(IntPtr backend);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -505,6 +676,8 @@ public sealed record ParameterSnapshot(string Id, float Value, float Minimum = 0
     public bool IsValidRange => float.IsFinite(Minimum) && float.IsFinite(Maximum) && Maximum > Minimum;
 }
 
+public sealed record NodeSkinParameterPlacementSnapshot(string ParameterId, double X, double Y);
+
 public sealed record NodeSkinSnapshot(
     string Id,
     string KnobId,
@@ -514,12 +687,49 @@ public sealed record NodeSkinSnapshot(
     string KnobImagePath,
     string ToggleImagePath,
     string ButtonImagePath,
-    string FootswitchImagePath)
+    string FootswitchImagePath,
+    double Width,
+    double Height,
+    string BackgroundColor,
+    string LabelColor,
+    IReadOnlyList<NodeSkinParameterPlacementSnapshot> ParameterPlacements,
+    bool HasFootswitchPosition,
+    double FootswitchX,
+    double FootswitchY)
 {
     public bool HasKnobImage => !string.IsNullOrWhiteSpace(KnobImagePath);
     public bool HasToggleImage => !string.IsNullOrWhiteSpace(ToggleImagePath);
     public bool HasButtonImage => !string.IsNullOrWhiteSpace(ButtonImagePath);
     public bool HasFootswitchImage => !string.IsNullOrWhiteSpace(FootswitchImagePath);
+    public bool HasCustomLayout => ParameterPlacements.Count > 0 || HasFootswitchPosition ||
+                                   !string.IsNullOrWhiteSpace(BackgroundColor) ||
+                                   Math.Abs(Width - 196.0) > 0.001 || Math.Abs(Height - 154.0) > 0.001;
+}
+
+public sealed record NodePortSnapshot(string Id, bool IsOutput, uint MaxChannels)
+{
+    public string DirectionText => IsOutput ? "输出" : "输入";
+    public string ChannelText => MaxChannels == 1U ? "mono / 1ch" : $"audio / {MaxChannels}ch";
+    public string DisplayText => $"{DirectionText} · {Id} · {ChannelText}";
+}
+
+public sealed record NodeResourceSnapshot(string Kind, string Path, string Status)
+{
+    public bool IsReady => string.Equals(Status, "Ready", StringComparison.OrdinalIgnoreCase);
+    public string KindText => Kind switch
+    {
+        "Built-in module" => "内置模块",
+        "External package" => "外部模块包",
+        "Module resource" => "模块资源",
+        _ => Kind
+    };
+    public string StatusText => Status switch
+    {
+        "Ready" => "就绪",
+        "Unresolved" => "未解析",
+        _ => Status
+    };
+    public string PathText => string.IsNullOrWhiteSpace(Path) ? "未提供路径" : Path;
 }
 
 public sealed record ThemeSnapshot(string Id, string DisplayName, IReadOnlyDictionary<string, string> Colors)
@@ -538,6 +748,8 @@ public sealed record NodeSnapshot(
     bool Bypassed,
     string Diagnostic,
     IReadOnlyList<ParameterSnapshot> Parameters,
+    IReadOnlyList<NodePortSnapshot> Ports,
+    NodeResourceSnapshot Resource,
     NodeSkinSnapshot Skin,
     uint DeclaredLatencySamples,
     double EstimatedCpuPercent,
@@ -637,6 +849,93 @@ public sealed record WhiteboxStatusSnapshot(
     string RuntimeStatus,
     string EvidenceStatus,
     string Diagnostic);
+public sealed record ModuleAuditionSnapshot(
+    uint SampleRateHz,
+    uint BlockSize,
+    uint ChannelCount,
+    uint DeclaredLatencySamples,
+    double OutputPeak,
+    double OutputRms,
+    double ProcessingCpuPercent,
+    bool OutputFinite);
+public enum ModuleAuditionStimulus
+{
+    Sine = 0,
+    Impulse = 1,
+    LogarithmicSweep = 2,
+    CallerWaveform = 3,
+}
+public sealed record ModuleAuditionRequest(
+    uint SampleRateHz,
+    uint BlockSize,
+    uint ChannelCount,
+    ModuleAuditionStimulus Stimulus,
+    string InputPortId,
+    string OutputPortId,
+    double Amplitude,
+    double StartFrequencyHz,
+    double EndFrequencyHz,
+    IReadOnlyList<float>? InputWaveform = null);
+public sealed record ModuleAuditionAnalysisSnapshot(
+    uint SchemaVersion,
+    uint SampleRateHz,
+    uint BlockSize,
+    uint ChannelCount,
+    uint DeclaredLatencySamples,
+    double InputPeak,
+    double InputRms,
+    double InputDc,
+    double OutputPeak,
+    double OutputRms,
+    double OutputDc,
+    double ProcessingCpuPercent,
+    bool OutputFinite,
+    IReadOnlyList<float> InputWaveform,
+    IReadOnlyList<float> OutputWaveform,
+    ulong SolverProcessedSampleCount = 0,
+    ulong SolverTotalIterations = 0,
+    uint SolverMaximumIterations = 0,
+    uint SolverFailureCount = 0,
+    uint SolverLastError = 0)
+{
+    public double AverageSolverIterations => SolverProcessedSampleCount == 0
+        ? 0.0 : (double)SolverTotalIterations / SolverProcessedSampleCount;
+    public bool HasSolverDiagnostics => SolverProcessedSampleCount > 0;
+}
+public sealed record ModuleFrequencyResponsePoint(
+    double FrequencyHz,
+    double MagnitudeDb,
+    double PhaseDegrees);
+public sealed record ModuleFrequencyResponseSnapshot(
+    uint SampleRateHz,
+    uint BlockSize,
+    string InputPortId,
+    string OutputPortId,
+    double Amplitude,
+    IReadOnlyList<ModuleFrequencyResponsePoint> Points,
+    double AverageCpuPercent,
+    double PeakCpuPercent);
+public sealed record ModuleParameterSweepPoint(
+    double ParameterValue,
+    double OutputPeak,
+    double OutputRms,
+    double GainDb,
+    double AverageSolverIterations);
+public sealed record ModuleParameterSweepSnapshot(
+    string ParameterId,
+    double Minimum,
+    double Maximum,
+    IReadOnlyList<ModuleParameterSweepPoint> Points);
+public sealed record ModuleAuditionComparisonSnapshot(
+    string ParameterId,
+    double ValueA,
+    double ValueB,
+    ModuleAuditionAnalysisSnapshot ResultA,
+    ModuleAuditionAnalysisSnapshot ResultB)
+{
+    public double OutputRmsDeltaDb => 20.0 * Math.Log10(
+        Math.Max(ResultB.OutputRms, 1.0e-12) / Math.Max(ResultA.OutputRms, 1.0e-12));
+}
 public sealed record BackendSnapshot(
     uint SchemaVersion,
     bool DarkTheme,
@@ -756,15 +1055,45 @@ public sealed class BackendSession : IDisposable
                     parameters.Add(new ParameterSnapshot(NativeMethods.Utf8(parameter.ParameterId), parameter.Value,
                         parameter.Minimum, parameter.Maximum));
                 }
+                Ensure(NativeMethods.solorig_snapshot_node_port_count(snapshot, nodeIndex, out var portCount),
+                    "snapshot node port count");
+                var ports = new List<NodePortSnapshot>((int)portCount);
+                for (uint portIndex = 0; portIndex < portCount; portIndex++)
+                {
+                    Ensure(NativeMethods.solorig_snapshot_node_port(snapshot, nodeIndex, portIndex, out var port),
+                        "snapshot node port");
+                    ports.Add(new NodePortSnapshot(NativeMethods.Utf8(port.PortId), port.Direction != 0,
+                        port.MaxChannels));
+                }
+                Ensure(NativeMethods.solorig_snapshot_node_resource(snapshot, nodeIndex, out var resource),
+                    "snapshot node resource");
+                Ensure(NativeMethods.solorig_snapshot_node_skin_layout(snapshot, nodeIndex, out var skinLayout),
+                    "snapshot node skin layout");
+                Ensure(NativeMethods.solorig_snapshot_node_skin_parameter_layout_count(snapshot, nodeIndex,
+                    out var skinParameterLayoutCount), "snapshot node skin parameter layout count");
+                var skinParameterLayouts = new List<NodeSkinParameterPlacementSnapshot>((int)skinParameterLayoutCount);
+                for (uint layoutIndex = 0; layoutIndex < skinParameterLayoutCount; layoutIndex++)
+                {
+                    Ensure(NativeMethods.solorig_snapshot_node_skin_parameter_layout(snapshot, nodeIndex, layoutIndex,
+                        out var skinParameterLayout), "snapshot node skin parameter layout");
+                    skinParameterLayouts.Add(new NodeSkinParameterPlacementSnapshot(
+                        NativeMethods.Utf8(skinParameterLayout.ParameterId), skinParameterLayout.X, skinParameterLayout.Y));
+                }
                 nodes.Add(new NodeSnapshot(
                     NativeMethods.Utf8(node.InstanceId), NativeMethods.Utf8(node.ModuleId), node.LayoutX, node.LayoutY,
                     node.Selected != 0, node.Unresolved != 0, node.Bypassed != 0, NativeMethods.Utf8(node.Diagnostic), parameters,
+                    ports,
+                    new NodeResourceSnapshot(NativeMethods.Utf8(resource.Kind), NativeMethods.Utf8(resource.Path),
+                        NativeMethods.Utf8(resource.Status)),
                     new NodeSkinSnapshot(
                         NativeMethods.Utf8(node.SkinId), NativeMethods.Utf8(node.KnobSkinId),
                         NativeMethods.Utf8(node.ToggleSkinId), NativeMethods.Utf8(node.ButtonSkinId),
                         NativeMethods.Utf8(node.FootswitchSkinId), NativeMethods.Utf8(node.KnobImagePath),
                         NativeMethods.Utf8(node.ToggleImagePath), NativeMethods.Utf8(node.ButtonImagePath),
-                        NativeMethods.Utf8(node.FootswitchImagePath)),
+                        NativeMethods.Utf8(node.FootswitchImagePath), skinLayout.Width, skinLayout.Height,
+                        NativeMethods.Utf8(skinLayout.BackgroundColor), NativeMethods.Utf8(skinLayout.LabelColor),
+                        skinParameterLayouts, skinLayout.HasFootswitchPosition != 0,
+                        skinLayout.FootswitchX, skinLayout.FootswitchY),
                     node.DeclaredLatencySamples, node.EstimatedCpuPercent, node.MeasuredCpuPercent,
                     node.PeakCpuPercent, node.MeasurementAvailable != 0));
             }
@@ -818,6 +1147,36 @@ public sealed class BackendSession : IDisposable
     public void SetNodeBypassed(string instanceId, bool bypassed) =>
         Ensure(NativeMethods.solorig_backend_set_node_bypassed_utf8(handle, instanceId, bypassed ? (byte)1 : (byte)0),
             "set node bypass");
+
+    public void SetNodesBypassed(IReadOnlyList<string> instanceIds, bool bypassed)
+    {
+        ThrowIfDisposed();
+        if (instanceIds.Count is < 1 or > 128 || instanceIds.Any(string.IsNullOrWhiteSpace) ||
+            instanceIds.Distinct(StringComparer.Ordinal).Count() != instanceIds.Count)
+        {
+            throw new ArgumentException("Node batch must contain 1-128 unique instance IDs.", nameof(instanceIds));
+        }
+        var entries = new NativeNodeBatchEntry[instanceIds.Count];
+        try
+        {
+            for (var index = 0; index < instanceIds.Count; index++)
+            {
+                entries[index].InstanceId = Marshal.StringToCoTaskMemUTF8(instanceIds[index]);
+            }
+            Ensure(NativeMethods.solorig_backend_set_nodes_bypassed(handle, entries, (uint)entries.Length,
+                bypassed ? (byte)1 : (byte)0), "set node batch bypass");
+        }
+        finally
+        {
+            foreach (var entry in entries)
+            {
+                if (entry.InstanceId != IntPtr.Zero)
+                {
+                    Marshal.FreeCoTaskMem(entry.InstanceId);
+                }
+            }
+        }
+    }
 
     public void SetNodePerformance(string instanceId, uint declaredLatencySamples,
         double measuredCpuPercent, double peakCpuPercent) =>
@@ -933,6 +1292,217 @@ public sealed class BackendSession : IDisposable
 
     public void ImportResource(string path) =>
         Ensure(NativeMethods.solorig_backend_import_resource_utf8(handle, path), "import resource");
+
+    public void ValidateModulePackage(string directoryPath)
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_validate_module_package_utf8(handle, directoryPath),
+            "validate module package");
+    }
+
+    public ModuleAuditionSnapshot AuditionModulePackage(string directoryPath)
+    {
+        ThrowIfDisposed();
+        Ensure(NativeMethods.solorig_backend_audition_module_package_utf8(handle, directoryPath, out var value),
+            "audition module package");
+        return new ModuleAuditionSnapshot(
+            value.SampleRateHz, value.BlockSize, value.ChannelCount, value.DeclaredLatencySamples,
+            value.OutputPeak, value.OutputRms, value.ProcessingCpuPercent, value.OutputFinite != 0);
+    }
+
+    public ModuleAuditionAnalysisSnapshot AuditionModulePackage(
+        string directoryPath, ModuleAuditionRequest request) =>
+        AuditionModulePackageCore(directoryPath, request, null, 0.0);
+
+    public ModuleAuditionAnalysisSnapshot AuditionModulePackage(
+        string directoryPath, ModuleAuditionRequest request, string parameterId, double parameterValue)
+    {
+        if (string.IsNullOrWhiteSpace(parameterId) || !double.IsFinite(parameterValue))
+        {
+            throw new ArgumentException("a finite parameter override is required", nameof(parameterId));
+        }
+        return AuditionModulePackageCore(directoryPath, request, parameterId.Trim(), parameterValue);
+    }
+
+    private ModuleAuditionAnalysisSnapshot AuditionModulePackageCore(
+        string directoryPath, ModuleAuditionRequest request, string? parameterId, double parameterValue)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(request);
+        var inputWaveform = new float[checked((int)request.BlockSize)];
+        var outputWaveform = new float[checked((int)request.BlockSize)];
+        if (request.Stimulus == ModuleAuditionStimulus.CallerWaveform)
+        {
+            if (request.InputWaveform is null || request.InputWaveform.Count != inputWaveform.Length)
+            {
+                throw new ArgumentException("caller waveform length must match the audition block size", nameof(request));
+            }
+            for (var index = 0; index < inputWaveform.Length; ++index)
+            {
+                var sample = request.InputWaveform[index];
+                if (!float.IsFinite(sample))
+                {
+                    throw new ArgumentException("caller waveform contains a non-finite sample", nameof(request));
+                }
+                inputWaveform[index] = sample;
+            }
+        }
+        var inputPort = Marshal.StringToCoTaskMemUTF8(request.InputPortId ?? string.Empty);
+        var outputPort = Marshal.StringToCoTaskMemUTF8(request.OutputPortId ?? string.Empty);
+        try
+        {
+            var config = new NativeModuleAuditionConfigV2
+            {
+                SampleRateHz = request.SampleRateHz,
+                BlockSize = request.BlockSize,
+                ChannelCount = request.ChannelCount,
+                StimulusKind = (uint)request.Stimulus,
+                InputPort = inputPort,
+                OutputPort = outputPort,
+                Amplitude = request.Amplitude,
+                StartFrequencyHz = request.StartFrequencyHz,
+                EndFrequencyHz = request.EndFrequencyHz,
+            };
+            NativeModuleAuditionAnalysisV3 value;
+            var status = parameterId is null
+                ? NativeMethods.solorig_backend_audition_module_package_v3_utf8(
+                    handle, directoryPath, ref config, inputWaveform, outputWaveform,
+                    request.BlockSize, out value)
+                : NativeMethods.solorig_backend_audition_module_package_v4_utf8(
+                    handle, directoryPath, ref config, parameterId, parameterValue,
+                    inputWaveform, outputWaveform, request.BlockSize, out value);
+            Ensure(status, parameterId is null
+                ? "audition module package v3" : "parameterized audition module package v4");
+            if (value.WaveformSampleCount < request.BlockSize)
+            {
+                Array.Resize(ref inputWaveform, checked((int)value.WaveformSampleCount));
+                Array.Resize(ref outputWaveform, checked((int)value.WaveformSampleCount));
+            }
+            return new ModuleAuditionAnalysisSnapshot(
+                value.SchemaVersion, value.SampleRateHz, value.BlockSize, value.ChannelCount,
+                value.DeclaredLatencySamples, value.InputPeak, value.InputRms, value.InputDc,
+                value.OutputPeak, value.OutputRms, value.OutputDc, value.ProcessingCpuPercent,
+                value.OutputFinite != 0, inputWaveform, outputWaveform,
+                value.SolverProcessedSampleCount, value.SolverTotalIterations,
+                value.SolverMaximumIterations, value.SolverFailureCount, value.SolverLastError);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(inputPort);
+            Marshal.FreeCoTaskMem(outputPort);
+        }
+    }
+
+    public ModuleFrequencyResponseSnapshot MeasureModuleFrequencyResponse(
+        string directoryPath, ModuleAuditionRequest request, int pointCount = 24)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(request);
+        if (pointCount is < 8 or > 96 || !double.IsFinite(request.StartFrequencyHz) ||
+            !double.IsFinite(request.EndFrequencyHz) || request.StartFrequencyHz <= 0.0 ||
+            request.EndFrequencyHz <= request.StartFrequencyHz || request.Amplitude <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "frequency response settings are invalid");
+        }
+        var blockSize = Math.Clamp(request.BlockSize, 4096U, 8192U);
+        var points = new List<ModuleFrequencyResponsePoint>(pointCount);
+        double cpuSum = 0.0;
+        double cpuPeak = 0.0;
+        for (var index = 0; index < pointCount; index++)
+        {
+            var progress = pointCount == 1 ? 0.0 : (double)index / (pointCount - 1);
+            var frequency = request.StartFrequencyHz *
+                Math.Pow(request.EndFrequencyHz / request.StartFrequencyHz, progress);
+            var measurement = AuditionModulePackage(directoryPath, request with
+            {
+                BlockSize = blockSize,
+                Stimulus = ModuleAuditionStimulus.Sine,
+                StartFrequencyHz = frequency,
+                EndFrequencyHz = frequency,
+            });
+            points.Add(MeasureFundamental(measurement.InputWaveform, measurement.OutputWaveform,
+                request.SampleRateHz, frequency));
+            cpuSum += measurement.ProcessingCpuPercent;
+            cpuPeak = Math.Max(cpuPeak, measurement.ProcessingCpuPercent);
+        }
+        return new ModuleFrequencyResponseSnapshot(
+            request.SampleRateHz, blockSize, request.InputPortId, request.OutputPortId, request.Amplitude,
+            points, cpuSum / pointCount, cpuPeak);
+    }
+
+    public ModuleParameterSweepSnapshot MeasureModuleParameterSweep(
+        string directoryPath, ModuleAuditionRequest request, string parameterId,
+        double minimum, double maximum, int pointCount = 16)
+    {
+        if (string.IsNullOrWhiteSpace(parameterId) || !double.IsFinite(minimum) ||
+            !double.IsFinite(maximum) || maximum <= minimum || pointCount is < 3 or > 64)
+        {
+            throw new ArgumentOutOfRangeException(nameof(parameterId), "parameter sweep settings are invalid");
+        }
+        var points = new List<ModuleParameterSweepPoint>(pointCount);
+        for (var index = 0; index < pointCount; index++)
+        {
+            var value = minimum + (maximum - minimum) * index / (pointCount - 1);
+            var result = AuditionModulePackage(directoryPath, request, parameterId, value);
+            var gainDb = 20.0 * Math.Log10(
+                Math.Max(result.OutputRms, 1.0e-12) / Math.Max(result.InputRms, 1.0e-12));
+            points.Add(new ModuleParameterSweepPoint(value, result.OutputPeak, result.OutputRms,
+                gainDb, result.AverageSolverIterations));
+        }
+        return new ModuleParameterSweepSnapshot(parameterId, minimum, maximum, points);
+    }
+
+    public ModuleAuditionComparisonSnapshot CompareModuleParameter(
+        string directoryPath, ModuleAuditionRequest request, string parameterId,
+        double valueA, double valueB)
+    {
+        var resultA = AuditionModulePackage(directoryPath, request, parameterId, valueA);
+        var resultB = AuditionModulePackage(directoryPath, request, parameterId, valueB);
+        return new ModuleAuditionComparisonSnapshot(parameterId, valueA, valueB, resultA, resultB);
+    }
+
+    private static ModuleFrequencyResponsePoint MeasureFundamental(
+        IReadOnlyList<float> input, IReadOnlyList<float> output, uint sampleRateHz, double frequencyHz)
+    {
+        var count = Math.Min(input.Count, output.Count);
+        var start = count / 2;
+        if (count - start < 16)
+        {
+            throw new InvalidOperationException("frequency response waveform is too short");
+        }
+        var inputReal = 0.0;
+        var inputImaginary = 0.0;
+        var outputReal = 0.0;
+        var outputImaginary = 0.0;
+        var weightSum = 0.0;
+        var measuredCount = count - start;
+        for (var index = start; index < count; index++)
+        {
+            var localIndex = index - start;
+            var weight = measuredCount <= 1
+                ? 1.0
+                : 0.5 - 0.5 * Math.Cos(2.0 * Math.PI * localIndex / (measuredCount - 1));
+            var phase = 2.0 * Math.PI * frequencyHz * index / sampleRateHz;
+            var cosine = Math.Cos(phase);
+            var sine = Math.Sin(phase);
+            inputReal += input[index] * cosine * weight;
+            inputImaginary -= input[index] * sine * weight;
+            outputReal += output[index] * cosine * weight;
+            outputImaginary -= output[index] * sine * weight;
+            weightSum += weight;
+        }
+        var inputMagnitude = Math.Sqrt(inputReal * inputReal + inputImaginary * inputImaginary) /
+                             Math.Max(weightSum, double.Epsilon);
+        var outputMagnitude = Math.Sqrt(outputReal * outputReal + outputImaginary * outputImaginary) /
+                              Math.Max(weightSum, double.Epsilon);
+        var gain = outputMagnitude / Math.Max(inputMagnitude, 1.0e-12);
+        var magnitudeDb = 20.0 * Math.Log10(Math.Max(gain, 1.0e-8));
+        var phaseDegrees = (Math.Atan2(outputImaginary, outputReal) -
+                            Math.Atan2(inputImaginary, inputReal)) * 180.0 / Math.PI;
+        while (phaseDegrees > 180.0) phaseDegrees -= 360.0;
+        while (phaseDegrees < -180.0) phaseDegrees += 360.0;
+        return new ModuleFrequencyResponsePoint(frequencyHz, magnitudeDb, phaseDegrees);
+    }
 
     public void RefreshAsioDrivers()
     {

@@ -222,7 +222,9 @@ TEST_CASE("RigEditor explicitly validates an external module package resource") 
                 {"id":"input","direction":"input","maxChannels":1},
                 {"id":"output","direction":"output","maxChannels":1}
             ],
-            "parameters": []
+            "parameters": [
+                {"id":"gain","minimum":0,"maximum":2,"default":0.5}
+            ]
         })";
         std::filesystem::create_directories(directory / "ui");
         std::ofstream skin(directory / "ui/pedal.json", std::ios::binary | std::ios::trunc);
@@ -234,6 +236,16 @@ TEST_CASE("RigEditor explicitly validates an external module package resource") 
                 "toggle": "package-toggle",
                 "button": "package-button",
                 "footswitch": "package-footswitch"
+            },
+            "layout": {
+                "width": 248,
+                "height": 188,
+                "background": "#173B4A",
+                "labelColor": "#F4F7FA",
+                "parameters": [
+                    {"id":"gain","x":172,"y":92}
+                ],
+                "footswitch": {"x":124,"y":158}
             }
         })";
         std::ofstream logic(directory / "logic/circuit.json", std::ios::binary | std::ios::trunc);
@@ -259,7 +271,7 @@ TEST_CASE("RigEditor explicitly validates an external module package resource") 
     REQUIRE(editor.Catalog().size() == 3U);
     REQUIRE(std::ranges::any_of(editor.Catalog(), [](const auto& entry) {
         return entry.module_id == "org.mumu-dada.solorig.editor-package" &&
-               entry.default_parameters.empty();
+               entry.default_parameters.size() == 1U && entry.default_parameters.front().first == "gain";
     }));
 
     const auto preset_path = std::filesystem::temp_directory_path() / "solorig-editor-module-package.srig";
@@ -273,6 +285,15 @@ TEST_CASE("RigEditor explicitly validates an external module package resource") 
     REQUIRE(!restored.Scene().nodes.back().unresolved);
     REQUIRE(restored.Scene().nodes.back().skin.id == "editor.package.skin");
     REQUIRE(restored.Scene().nodes.back().skin.footswitch == "package-footswitch");
+    REQUIRE(restored.Scene().nodes.back().bounds.width == 248.0);
+    REQUIRE(restored.Scene().nodes.back().bounds.height == 188.0);
+    REQUIRE(restored.Scene().nodes.back().skin.background_color == "#173B4A");
+    REQUIRE(restored.Scene().nodes.back().skin.label_color == "#F4F7FA");
+    REQUIRE(restored.Scene().nodes.back().skin.parameter_placements.size() == 1U);
+    REQUIRE(restored.Scene().nodes.back().skin.parameter_placements.front().parameter_id == "gain");
+    REQUIRE(restored.Scene().nodes.back().skin.parameter_placements.front().x == 172.0);
+    REQUIRE(restored.Scene().nodes.back().skin.footswitch_position.has_value());
+    REQUIRE(restored.Scene().nodes.back().skin.footswitch_position->y == 158.0);
     std::filesystem::remove(preset_path, cleanup);
     std::filesystem::remove_all(directory, cleanup);
 }

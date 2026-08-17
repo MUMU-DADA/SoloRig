@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -9,6 +10,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Layout;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using SoloRig.Ui;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -42,6 +44,7 @@ public sealed partial class RigEditorView : UserControl
         string CardBorder,
         string Text,
         string Muted,
+        string Error,
         string Accent,
         string AccentHover,
         string AccentText,
@@ -60,13 +63,13 @@ public sealed partial class RigEditorView : UserControl
     private static readonly ThemePalette DarkPalette = new(
         "#11151B", "#161B22", "#191F27", "#151C24", "#182029", "#222A34", "#2A3440",
         "#1B242D", "#1D2A38", "#282038", "#394655", "#3A4753", "#2C3946", "#EEF3F8",
-        "#9AA8B8", "#4DD6A4", "#69E2B5", "#10261F", "#66A7FF", "#E8F2FF", "#B889F5",
+        "#9AA8B8", "#FF7B72", "#4DD6A4", "#69E2B5", "#10261F", "#66A7FF", "#E8F2FF", "#B889F5",
         "#FFF4FF", "#10151A", "#303C47", "#31414F", "#26313C", "#131820", "#D8FAED", "#637384");
 
     private static readonly ThemePalette LightPalette = new(
         "#F4F7FB", "#FFFFFF", "#EEF3F7", "#E6EDF4", "#DCE6EF", "#FFFFFF", "#E8F0F6",
         "#F8FAFC", "#EAF2F9", "#F1ECFB", "#C7D2DE", "#B5C2CF", "#C5D1DC", "#172033",
-        "#5F6B78", "#0F766E", "#0B5F59", "#FFFFFF", "#2F80ED", "#EAF2FF", "#7C3AED",
+        "#5F6B78", "#B42318", "#0F766E", "#0B5F59", "#FFFFFF", "#2F80ED", "#EAF2FF", "#7C3AED",
         "#F5F3FF", "#CBD5E1", "#E2E8F0", "#B7C5D4", "#DDE7F0", "#F5F8FB", "#D1FAE5", "#94A3B8");
 
     private static readonly FilePickerFileType SrigFileType = new("SoloRig preset")
@@ -88,16 +91,30 @@ public sealed partial class RigEditorView : UserControl
     private RigEditorViewModel? viewModel;
     private DispatcherTimer? runtimeRefreshTimer;
     private bool dragging;
-    private string? pendingOutputNode;
     private ModuleCatalogSnapshot? draggedModule;
     private Point moduleDragStart;
     private bool draggingModule;
     private bool moduleDragOverCanvas;
+    private const double MinimumCanvasZoom = 0.6;
+    private const double MaximumCanvasZoom = 1.8;
+    private double canvasZoom = 1.0;
+    private double canvasPanX;
+    private double canvasPanY;
+    private bool panningCanvas;
+    private Point canvasPanPointerStart;
+    private double canvasPanOriginX;
+    private double canvasPanOriginY;
+    private bool compactWorkspace;
+    private bool moduleDrawerOpen;
+    private bool inspectorDrawerOpen;
+    private int workspaceFocusIndex = -1;
+    private readonly Dictionary<TextBox, string> parameterEditBaselines = [];
 
     public RigEditorView()
     {
         InitializeComponent();
         ApplyTheme(ThemeSnapshot.Empty, true);
+        ApplyCanvasTransform();
     }
 
     public RigEditorView(RigEditorViewModel editor)
@@ -107,6 +124,9 @@ public sealed partial class RigEditorView : UserControl
     }
 
     public RigEditorViewModel? ViewModel => viewModel;
+    public double CanvasZoom => canvasZoom;
+    public Vector CanvasPan => new(canvasPanX, canvasPanY);
+    public bool IsCompactWorkspace => compactWorkspace;
 
     public bool HasGraphVisualContent =>
         EditorCanvas is not null && CanvasConnectionLayer is not null && CanvasNodeLayer is not null && viewModel is not null &&
@@ -295,6 +315,89 @@ public sealed partial class RigEditorView : UserControl
                BuildVisualRegressionFingerprint() == originalFingerprint;
     }
 
+    public bool ProbeParameterEditingWorkflow()
+    {
+        if (viewModel is null || viewModel.CanvasNodes.Count == 0)
+        {
+            return false;
+        }
+        var originalSelectedId = viewModel.SelectedNode?.InstanceId;
+        var originalTab = viewModel.InspectorTab;
+        var originalDirty = viewModel.IsDirty;
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        var node = viewModel.CanvasNodes[0];
+        var parameter = node.Parameters.FirstOrDefault(item => item.IsValidRange);
+        if (parameter is null || !viewModel.SelectNode(node.InstanceId) || !viewModel.SelectInspectorTab("参数"))
+        {
+            return false;
+        }
+        UpdateLayout();
+        var editor = viewModel.SelectedParameters.FirstOrDefault(item => item.Id == parameter.Id);
+        if (editor is null || editor.CoarseStep <= 0 || editor.FineStep <= 0)
+        {
+            return false;
+        }
+        var originalValue = editor.Value;
+        var target = editor.Target;
+        var passed = false;
+        try
+        {
+            var textBox = FindParameterTextBox(target);
+            var slider = ParameterControlsList.GetVisualDescendants().OfType<Slider>()
+                .FirstOrDefault(control => string.Equals(control.Tag as string, target, StringComparison.Ordinal));
+            var nudgeButtons = ParameterControlsList.GetVisualDescendants().OfType<Button>()
+                .Count(control => string.Equals(control.Tag as string, target, StringComparison.Ordinal));
+            var chip = this.GetVisualDescendants().OfType<Button>().FirstOrDefault(control =>
+                control.Classes.Contains("srg-parameter-chip") &&
+                string.Equals(control.Tag as string, target, StringComparison.Ordinal));
+            var capturePath = Environment.GetEnvironmentVariable("SOLO_RIG_PARAMETER_PROBE_CAPTURE");
+            var captureReady = string.IsNullOrWhiteSpace(capturePath) || CaptureRenderedSurface(capturePath) is not null;
+            var controlsReady = textBox is not null && slider is not null && nudgeButtons == 2 && chip is not null &&
+                                Math.Abs(slider.SmallChange - editor.FineStep) < 0.000001 &&
+                                Math.Abs(slider.LargeChange - editor.CoarseStep) < 0.000001 &&
+                                FocusParameterEditor(target) && captureReady;
+
+            var midpoint = editor.Minimum + (editor.Maximum - editor.Minimum) * 0.5F;
+            var percentAccepted = viewModel.SetParameterText(target, "50%") &&
+                                  Math.Abs(viewModel.SelectedParameters.First(item => item.Target == target).Value - midpoint) < 0.00001F;
+            var fineNudge = viewModel.NudgeParameter(target, 1, fine: true);
+            var nudged = viewModel.SelectedParameters.First(item => item.Target == target).Value;
+            var nudgeCorrect = fineNudge && Math.Abs(nudged - Math.Min(midpoint + editor.FineStep, editor.Maximum)) < 0.00001F;
+            var invalidRejected = !viewModel.SetParameterText(target, "not-a-number") &&
+                                  Math.Abs(viewModel.SelectedParameters.First(item => item.Target == target).Value - nudged) < 0.00001F;
+            passed = controlsReady && percentAccepted && nudgeCorrect && invalidRejected;
+            if (!passed)
+            {
+                Console.Error.WriteLine($"[standalone-visual-probe] parameter editing detail: text={textBox is not null}, slider={slider is not null}, buttons={nudgeButtons}, chip={chip is not null}, small={slider?.SmallChange}, fine={editor.FineStep}, large={slider?.LargeChange}, coarse={editor.CoarseStep}, focus={controlsReady}, percent={percentAccepted}, nudge={nudgeCorrect}, invalid={invalidRejected}");
+            }
+        }
+        finally
+        {
+            viewModel.SetParameter(target, originalValue, markDirty: false);
+            if (viewModel.IsDirty != originalDirty)
+            {
+                viewModel.RestoreDocumentState(originalDirty);
+            }
+            viewModel.ClearHistory();
+            if (originalSelectedId is null)
+            {
+                viewModel.ClearSelection();
+            }
+            else
+            {
+                viewModel.SelectNode(originalSelectedId);
+            }
+            viewModel.SelectInspectorTab(originalTab);
+            UpdateLayout();
+        }
+        var restoredFingerprint = BuildVisualRegressionFingerprint();
+        if (passed && restoredFingerprint != originalFingerprint)
+        {
+            Console.Error.WriteLine($"[standalone-visual-probe] parameter editing restore detail: original={originalFingerprint}; restored={restoredFingerprint}");
+        }
+        return passed && restoredFingerprint == originalFingerprint;
+    }
+
     public bool ProbeDpiScaling()
     {
         if (viewModel is null || !viewModel.ProbeDpiScaling())
@@ -304,6 +407,129 @@ public sealed partial class RigEditorView : UserControl
 
         UpdateLayout();
         return HasGraphVisualContent;
+    }
+
+    public bool ProbeCanvasNavigation()
+    {
+        if (viewModel is null || CanvasNodeLayer is null || CanvasConnectionLayer is null ||
+            viewModel.CanvasNodes.Count == 0 || EditorCanvas.Bounds.Width <= 0 || EditorCanvas.Bounds.Height <= 0)
+        {
+            return false;
+        }
+        var originalZoom = canvasZoom;
+        var originalPanX = canvasPanX;
+        var originalPanY = canvasPanY;
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        var originBefore = CanvasNodeLayer.ContainerFromIndex(0)?.TranslatePoint(default, EditorCanvas);
+        var passed = false;
+        try
+        {
+            ZoomCanvasAt(new Point(EditorCanvas.Bounds.Width * 0.5, EditorCanvas.Bounds.Height * 0.5), 1.25);
+            UpdateLayout();
+            var originAfterZoom = CanvasNodeLayer.ContainerFromIndex(0)?.TranslatePoint(default, EditorCanvas);
+            var firstNode = viewModel.CanvasNodes[0];
+            var zoomed = Math.Abs(canvasZoom - 1.25) < 0.00001 && CanvasZoomText.Text == "125%" &&
+                         originBefore is { } before && originAfterZoom is { } after &&
+                         (Math.Abs(after.X - before.X) > 0.5 || Math.Abs(after.Y - before.Y) > 0.5) &&
+                         Math.Abs(after.X - (firstNode.CanvasX * canvasZoom + canvasPanX)) < 1.0 &&
+                         Math.Abs(after.Y - (firstNode.CanvasY * canvasZoom + canvasPanY)) < 1.0;
+            var panBeforeX = canvasPanX;
+            var panBeforeY = canvasPanY;
+            PanCanvasBy(24, 18);
+            var panned = Math.Abs(canvasPanX - panBeforeX - 24) < 0.001 &&
+                         Math.Abs(canvasPanY - panBeforeY - 18) < 0.001;
+            FitCanvasToNodes();
+            var fitted = canvasZoom is >= MinimumCanvasZoom and <= MaximumCanvasZoom &&
+                          string.Equals(CanvasZoomText.Text, $"{canvasZoom * 100:0}%", StringComparison.Ordinal);
+            passed = zoomed && panned && fitted;
+        }
+        finally
+        {
+            SetCanvasViewport(originalZoom, originalPanX, originalPanY);
+            UpdateLayout();
+        }
+        return passed && BuildVisualRegressionFingerprint() == originalFingerprint;
+    }
+
+    public bool ProbeResponsiveWorkspace()
+    {
+        if (Bounds.Width <= 0 || TopbarGrid.ColumnDefinitions.Count < 1 ||
+            WorkspaceGrid.ColumnDefinitions.Count < 3)
+        {
+            return false;
+        }
+
+        var originalWidth = Bounds.Width;
+        var originalCompact = compactWorkspace;
+        var originalModuleDrawerOpen = moduleDrawerOpen;
+        var originalInspectorDrawerOpen = inspectorDrawerOpen;
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        var passed = false;
+        try
+        {
+            moduleDrawerOpen = false;
+            inspectorDrawerOpen = false;
+            UpdateResponsiveLayout(900);
+            UpdateLayout();
+            var compact = compactWorkspace &&
+                          WorkspaceGrid.ColumnDefinitions[0].Width.Value == 0 &&
+                          WorkspaceGrid.ColumnDefinitions[2].Width.Value == 0 &&
+                          ModulePanelToggleButton.IsVisible && InspectorPanelToggleButton.IsVisible &&
+                          !ModuleLibraryPanel.IsVisible && !InspectorPanel.IsVisible &&
+                          Grid.GetColumn(ModuleLibraryPanel) == 1 && Grid.GetColumn(InspectorPanel) == 1;
+            var compactFingerprint = BuildVisualRegressionFingerprint();
+
+            ToggleModulePanel(900);
+            UpdateLayout();
+            var moduleDrawer = moduleDrawerOpen && !inspectorDrawerOpen &&
+                               ModuleLibraryPanel.IsVisible && !InspectorPanel.IsVisible &&
+                               ModuleLibraryPanel.HorizontalAlignment == HorizontalAlignment.Left &&
+                               Math.Abs(ModuleLibraryPanel.Width - 286) < 0.01 &&
+                               ModuleLibraryPanel.GetValue(Panel.ZIndexProperty) == 40;
+            NodeNavigatorList.BringIntoView();
+            UpdateLayout();
+            var navigatorOrigin = NodeNavigatorList.TranslatePoint(default, ModuleLibraryPanel);
+            var navigatorDrawerFits = navigatorOrigin is { } origin &&
+                                      NodeNavigatorList.Bounds.Width > 0 && NodeNavigatorList.Bounds.Height > 0 &&
+                                      origin.X >= 0 && origin.X + NodeNavigatorList.Bounds.Width <= ModuleLibraryPanel.Bounds.Width + 0.01 &&
+                                      NodeNavigatorBypassButton.Bounds.Width > 0 && NodeNavigatorEnableButton.Bounds.Width > 0;
+            var compactCapturePath = Environment.GetEnvironmentVariable("SOLO_RIG_NODE_NAVIGATOR_COMPACT_CAPTURE");
+            var compactCaptureReady = string.IsNullOrWhiteSpace(compactCapturePath) ||
+                                      CaptureRenderedSurface(compactCapturePath) is not null;
+            var moduleFingerprint = BuildVisualRegressionFingerprint();
+
+            ToggleInspectorPanel(900);
+            UpdateLayout();
+            var inspectorDrawer = !moduleDrawerOpen && inspectorDrawerOpen &&
+                                  !ModuleLibraryPanel.IsVisible && InspectorPanel.IsVisible &&
+                                  InspectorPanel.HorizontalAlignment == HorizontalAlignment.Right &&
+                                  Math.Abs(InspectorPanel.Width - 320) < 0.01 &&
+                                  InspectorPanel.GetValue(Panel.ZIndexProperty) == 40;
+            var inspectorFingerprint = BuildVisualRegressionFingerprint();
+
+            passed = compact && moduleDrawer && navigatorDrawerFits && compactCaptureReady && inspectorDrawer &&
+                     compactFingerprint != originalFingerprint &&
+                     moduleFingerprint != compactFingerprint &&
+                     inspectorFingerprint != moduleFingerprint;
+        }
+        finally
+        {
+            moduleDrawerOpen = originalModuleDrawerOpen;
+            inspectorDrawerOpen = originalInspectorDrawerOpen;
+            UpdateResponsiveLayout(originalWidth);
+            if (originalCompact)
+            {
+                moduleDrawerOpen = originalModuleDrawerOpen;
+                inspectorDrawerOpen = originalInspectorDrawerOpen;
+                UpdateResponsiveLayout(originalWidth);
+            }
+            UpdateLayout();
+        }
+
+        return passed && compactWorkspace == originalCompact &&
+               moduleDrawerOpen == originalModuleDrawerOpen &&
+               inspectorDrawerOpen == originalInspectorDrawerOpen &&
+               BuildVisualRegressionFingerprint() == originalFingerprint;
     }
 
     public bool ProbeRenderedSurface()
@@ -386,11 +612,83 @@ public sealed partial class RigEditorView : UserControl
         var modifierBaseline = viewModel.DarkTheme;
         var modifiedHandled = HandleShortcut(Key.T, KeyModifiers.Control);
         var modifierIgnored = !modifiedHandled && viewModel.DarkTheme == modifierBaseline;
+        var originalFocusIndex = workspaceFocusIndex;
+        var expectedForwardIndex = (originalFocusIndex + 1 + 5) % 5;
+        var expectedBackwardIndex = (expectedForwardIndex - 1 + 5) % 5;
+        var focusForward = HandleShortcut(Key.F6, KeyModifiers.None, markDirty: false) &&
+                           workspaceFocusIndex == expectedForwardIndex;
+        var focusBackward = HandleShortcut(Key.F6, KeyModifiers.Shift, markDirty: false) &&
+                            workspaceFocusIndex == expectedBackwardIndex;
+        workspaceFocusIndex = originalFocusIndex;
         if (viewModel.DarkTheme != originalDark)
         {
             viewModel.ToggleTheme(markDirty: false);
         }
-        return toggled && modifierIgnored && viewModel.DarkTheme == originalDark;
+        return toggled && modifierIgnored && focusForward && focusBackward && viewModel.DarkTheme == originalDark;
+    }
+
+    public bool ProbeKeyboardAccessibility()
+    {
+        if (viewModel is null || viewModel.CanvasNodes.Count == 0 || CanvasNodeLayer.ItemCount == 0)
+        {
+            return false;
+        }
+
+        UpdateLayout();
+        var firstNode = viewModel.CanvasNodes[0];
+        var nodeControl = FindCanvasNodeControl(firstNode.InstanceId);
+        var controlsReady = CanvasSurface.Focusable && ConnectionToolPanel.Focusable &&
+                            nodeControl?.Focusable == true &&
+                            !string.IsNullOrWhiteSpace(CanvasSurface.GetValue(AutomationProperties.NameProperty)) &&
+                            !string.IsNullOrWhiteSpace(ConnectionToolPanel.GetValue(AutomationProperties.NameProperty)) &&
+                            !string.IsNullOrWhiteSpace(nodeControl.GetValue(AutomationProperties.NameProperty));
+        if (!controlsReady)
+        {
+            return false;
+        }
+
+        var originalSelectedId = viewModel.SelectedNode?.InstanceId;
+        var originalDirty = viewModel.IsDirty;
+        var originalSource = viewModel.ConnectionSourceNodeId;
+        var originalDestination = viewModel.ConnectionDestinationNodeId;
+        var originalX = firstNode.CanvasX;
+        var originalY = firstNode.CanvasY;
+        var moved = false;
+        var restoredPosition = false;
+        try
+        {
+            moved = MoveCanvasNodeByKeyboard(firstNode.InstanceId, 8, 0);
+            var shifted = viewModel.CanvasNodes.First(node => node.InstanceId == firstNode.InstanceId);
+            moved = moved && Math.Abs(shifted.CanvasX - originalX - 8) < 0.01 &&
+                    Math.Abs(shifted.CanvasY - originalY) < 0.01;
+            restoredPosition = MoveCanvasNodeByKeyboard(firstNode.InstanceId, -8, 0);
+            var restored = viewModel.CanvasNodes.First(node => node.InstanceId == firstNode.InstanceId);
+            restoredPosition = restoredPosition && Math.Abs(restored.CanvasX - originalX) < 0.01 &&
+                               Math.Abs(restored.CanvasY - originalY) < 0.01;
+
+            SelectConnectionSource(firstNode.InstanceId);
+            var endpointKeyboardState = viewModel.ConnectionSourceNodeId == firstNode.InstanceId;
+            return moved && restoredPosition && endpointKeyboardState;
+        }
+        finally
+        {
+            viewModel.ConnectionSourceNodeId = originalSource;
+            viewModel.ConnectionDestinationNodeId = originalDestination;
+            if (originalSelectedId is null)
+            {
+                viewModel.ClearSelection();
+            }
+            else
+            {
+                viewModel.SelectNode(originalSelectedId);
+            }
+            if (viewModel.IsDirty != originalDirty)
+            {
+                viewModel.RestoreDocumentState(originalDirty);
+            }
+            viewModel.ClearHistory();
+            UpdateLayout();
+        }
     }
 
     public bool ProbeSelectionState()
@@ -433,6 +731,58 @@ public sealed partial class RigEditorView : UserControl
         return probePassed && BuildVisualRegressionFingerprint() == originalFingerprint && filterRestored && tabRestored;
     }
 
+    public bool ProbeInspectorDetails()
+    {
+        if (viewModel is null)
+        {
+            return false;
+        }
+
+        var originalSelected = viewModel.SelectedNode?.InstanceId;
+        var originalTab = viewModel.InspectorTab;
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        var passed = false;
+        try
+        {
+            if (!viewModel.SelectNode("drive-1") || !viewModel.SelectInspectorTab("端口"))
+            {
+                return false;
+            }
+            UpdateSelectionStyles();
+            UpdateLayout();
+            var portsVisible = PortInspectorList.IsVisible && PortInspectorList.ItemCount == 2 &&
+                               viewModel.SelectedPorts.Count == 2 &&
+                               Enumerable.Range(0, PortInspectorList.ItemCount).All(index =>
+                                   PortInspectorList.ContainerFromIndex(index) is Control container &&
+                                   container.Bounds.Width > 0 && container.Bounds.Height > 0);
+            if (!viewModel.SelectInspectorTab("资源"))
+            {
+                return false;
+            }
+            UpdateSelectionStyles();
+            UpdateLayout();
+            var resourceVisible = ResourceKindText.IsVisible && ResourceKindText.Text == "内置模块" &&
+                                  ResourcePathText.Text == "Embedded runtime" &&
+                                  ResourceStateText.Text == "就绪";
+            passed = portsVisible && resourceVisible;
+        }
+        finally
+        {
+            if (originalSelected is null)
+            {
+                viewModel.ClearSelection();
+            }
+            else
+            {
+                viewModel.SelectNode(originalSelected);
+            }
+            viewModel.SelectInspectorTab(originalTab);
+            UpdateSelectionStyles();
+            UpdateLayout();
+        }
+        return passed && BuildVisualRegressionFingerprint() == originalFingerprint;
+    }
+
     public bool ProbeConnectionSelection()
     {
         if (viewModel is null || viewModel.CanvasConnections.Count == 0)
@@ -441,6 +791,8 @@ public sealed partial class RigEditorView : UserControl
         }
 
         var original = viewModel.SelectedConnection;
+        var originalSource = viewModel.ConnectionSourceNodeId;
+        var originalDestination = viewModel.ConnectionDestinationNodeId;
         var originalFingerprint = BuildVisualRegressionFingerprint();
         var target = viewModel.CanvasConnections[0];
         if (!viewModel.SelectConnection(target.SourceInstanceId, target.DestinationInstanceId))
@@ -456,9 +808,46 @@ public sealed partial class RigEditorView : UserControl
         var restored = original is null
             ? viewModel.ClearConnectionSelection()
             : viewModel.SelectConnection(original.SourceInstanceId, original.DestinationInstanceId);
+        viewModel.ConnectionSourceNodeId = originalSource;
+        viewModel.ConnectionDestinationNodeId = originalDestination;
         return selected && restored &&
                BuildVisualRegressionFingerprint() == originalFingerprint &&
                (viewModel.SelectedConnection?.SourceInstanceId ?? string.Empty) == (original?.SourceInstanceId ?? string.Empty);
+    }
+
+    public bool ProbeTopologyEditor()
+    {
+        if (viewModel is null || viewModel.ConnectionNodeIds.Count < 2)
+        {
+            return false;
+        }
+        var originalSource = viewModel.ConnectionSourceNodeId;
+        var originalDestination = viewModel.ConnectionDestinationNodeId;
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        var passed = false;
+        try
+        {
+            viewModel.ConnectionSourceNodeId = "drive-1";
+            viewModel.ConnectionDestinationNodeId = "delay-1";
+            UpdateLayout();
+            var duplicateRejected = ConnectionSourceSelector.SelectedItem as string == "drive-1" &&
+                                    ConnectionDestinationSelector.SelectedItem as string == "delay-1" &&
+                                    !CanvasConnectButton.IsEnabled &&
+                                    ConnectionCandidateStatusText.Text?.Contains("已存在", StringComparison.Ordinal) == true;
+            viewModel.ConnectionSourceNodeId = "delay-1";
+            viewModel.ConnectionDestinationNodeId = "drive-1";
+            UpdateLayout();
+            var cycleRejected = !CanvasConnectButton.IsEnabled &&
+                                ConnectionCandidateStatusText.Text?.Contains("环路", StringComparison.Ordinal) == true;
+            passed = duplicateRejected && cycleRejected;
+        }
+        finally
+        {
+            viewModel.ConnectionSourceNodeId = originalSource;
+            viewModel.ConnectionDestinationNodeId = originalDestination;
+            UpdateLayout();
+        }
+        return passed && BuildVisualRegressionFingerprint() == originalFingerprint;
     }
 
     public bool ProbeDocumentStatus()
@@ -584,6 +973,141 @@ public sealed partial class RigEditorView : UserControl
             Console.Error.WriteLine($"[standalone-visual-probe] action gates detail: cleared={cleared}, graph={graphActions}, selected={selected}, restored={restored}");
         }
         return probePassed && restored;
+    }
+
+    public bool ProbeNodeNavigatorBatchWorkflow()
+    {
+        if (viewModel is null || NodeNavigatorList is null || NodeNavigatorSearchBox is null ||
+            NodeNavigatorSelectAllButton is null || NodeNavigatorClearButton is null ||
+            NodeNavigatorBypassButton is null || NodeNavigatorEnableButton is null ||
+            viewModel.NodeNavigatorEntries.Count < 2)
+        {
+            return false;
+        }
+
+        var originalFingerprint = BuildVisualRegressionFingerprint();
+        var originalSearch = viewModel.NodeNavigatorSearchText;
+        var originalSelectedNodeId = viewModel.SelectedNode?.InstanceId;
+        var originalCanvasZoom = canvasZoom;
+        var originalCanvasPanX = canvasPanX;
+        var originalCanvasPanY = canvasPanY;
+        var originalBatchSelection = viewModel.NodeNavigatorEntries
+            .Where(entry => entry.IsBatchSelected)
+            .Select(entry => entry.InstanceId)
+            .ToHashSet(StringComparer.Ordinal);
+        var originalBypass = viewModel.NodeNavigatorEntries.ToDictionary(
+            entry => entry.InstanceId, entry => entry.Node.Bypassed, StringComparer.Ordinal);
+        var originalDirty = viewModel.IsDirty;
+        var batchApplied = false;
+        var batchUndone = false;
+        var passed = false;
+        try
+        {
+            viewModel.ClearBatchNodeSelection();
+            viewModel.NodeNavigatorSearchText = "drive-1";
+            NodeNavigatorList.BringIntoView();
+            UpdateLayout();
+            var filtered = viewModel.FilteredNodeNavigatorEntries.Count == 1 &&
+                           viewModel.FilteredNodeNavigatorEntries[0].InstanceId == "drive-1";
+            var materialized = NodeNavigatorList.ItemCount == 1 &&
+                               NodeNavigatorList.ContainerFromIndex(0) is Control container &&
+                               container.Bounds.Width > 0 && container.Bounds.Height > 0;
+            var navigatorItem = NodeNavigatorList.ContainerFromIndex(0) as Control;
+            var navigatorCheckBox = navigatorItem?.GetVisualDescendants().OfType<CheckBox>().FirstOrDefault();
+            var navigatorLocateButton = navigatorItem?.GetVisualDescendants().OfType<Button>().FirstOrDefault(button =>
+                string.Equals(button.Tag as string, "drive-1", StringComparison.Ordinal));
+            var navigatorCheckBoxName = navigatorCheckBox?.GetValue(AutomationProperties.NameProperty) ?? string.Empty;
+            var navigatorLocateName = navigatorLocateButton?.GetValue(AutomationProperties.NameProperty) ?? string.Empty;
+            var automationNamed = navigatorCheckBoxName.Contains("drive-1", StringComparison.Ordinal) &&
+                                  navigatorLocateName.Contains("drive-1", StringComparison.Ordinal);
+            viewModel.ClearSelection();
+            UpdateLayout();
+            var activeNavigatorItem = NodeNavigatorList.ContainerFromIndex(0) as Control;
+            var activeLocateButton = activeNavigatorItem?.GetVisualDescendants().OfType<Button>().FirstOrDefault(button =>
+                string.Equals(button.Tag as string, "drive-1", StringComparison.Ordinal));
+            if (activeLocateButton is not null)
+            {
+                NodeNavigatorLocateClick(activeLocateButton, new RoutedEventArgs());
+            }
+            var located = viewModel.SelectedNode?.InstanceId == "drive-1";
+            var mediumLayoutFits = NodeNavigatorList.Bounds.Width > 0 &&
+                                   NodeNavigatorList.Bounds.Width <= ModuleLibraryPanel.Bounds.Width + 0.01 &&
+                                   NodeNavigatorSelectAllButton.Bounds.Width > 0 && NodeNavigatorClearButton.Bounds.Width > 0;
+            var capturePath = Environment.GetEnvironmentVariable("SOLO_RIG_NODE_NAVIGATOR_PROBE_CAPTURE");
+            var captureReady = string.IsNullOrWhiteSpace(capturePath) ||
+                               CaptureRenderedSurface(capturePath) is not null;
+            var emptyGates = !NodeNavigatorClearButton.IsEnabled &&
+                             !NodeNavigatorBypassButton.IsEnabled && !NodeNavigatorEnableButton.IsEnabled;
+
+            viewModel.SelectAllFilteredNodes();
+            UpdateLayout();
+            var oneSelected = viewModel.BatchSelectedNodeCount == 1 &&
+                              NodeNavigatorClearButton.IsEnabled &&
+                              NodeNavigatorBypassButton.IsEnabled == viewModel.CanBatchBypassNodes &&
+                              NodeNavigatorEnableButton.IsEnabled == viewModel.CanBatchEnableNodes;
+
+            viewModel.NodeNavigatorSearchText = string.Empty;
+            viewModel.SelectAllFilteredNodes();
+            var beforeBatch = viewModel.NodeNavigatorEntries.ToDictionary(
+                entry => entry.InstanceId, entry => entry.Node.Bypassed, StringComparer.Ordinal);
+            var bypass = viewModel.NodeNavigatorEntries.Any(entry => !entry.Node.Bypassed);
+            UpdateLayout();
+            var targetGate = bypass ? NodeNavigatorBypassButton.IsEnabled : NodeNavigatorEnableButton.IsEnabled;
+            batchApplied = targetGate && viewModel.SetBatchNodesBypassed(bypass);
+            NodeNavigatorList.BringIntoView();
+            UpdateLayout();
+            var projected = batchApplied &&
+                            NodeNavigatorList.ItemCount == viewModel.NodeNavigatorEntries.Count &&
+                            viewModel.NodeNavigatorEntries.All(entry =>
+                                entry.IsBatchSelected && entry.Node.Bypassed == bypass) &&
+                            viewModel.BatchSelectedNodeCount == viewModel.NodeNavigatorEntries.Count;
+            batchUndone = batchApplied && viewModel.Undo();
+            var restoredByUndo = batchUndone && viewModel.NodeNavigatorEntries.All(entry =>
+                beforeBatch.TryGetValue(entry.InstanceId, out var original) && entry.Node.Bypassed == original);
+            passed = filtered && materialized && automationNamed && located && mediumLayoutFits && captureReady && emptyGates &&
+                     oneSelected && targetGate && projected && restoredByUndo;
+            if (!passed)
+            {
+                Console.Error.WriteLine($"[standalone-visual-probe] node navigator assertions: filtered={filtered}, materialized={materialized}, automation={automationNamed}, located={located}, layout={mediumLayoutFits}, capture={captureReady}, emptyGates={emptyGates}, oneSelected={oneSelected}, targetGate={targetGate}, projected={projected}, undo={restoredByUndo}");
+            }
+        }
+        finally
+        {
+            if (batchApplied && !batchUndone)
+            {
+                viewModel.Undo();
+            }
+            viewModel.NodeNavigatorSearchText = originalSearch;
+            viewModel.ClearBatchNodeSelection();
+            foreach (var entry in viewModel.NodeNavigatorEntries.Where(entry =>
+                         originalBatchSelection.Contains(entry.InstanceId)))
+            {
+                entry.IsBatchSelected = true;
+            }
+            viewModel.RestoreDocumentState(originalDirty);
+            viewModel.ClearHistory();
+            if (originalSelectedNodeId is null)
+            {
+                viewModel.ClearSelection();
+            }
+            else
+            {
+                viewModel.SelectNode(originalSelectedNodeId);
+            }
+            SetCanvasViewport(originalCanvasZoom, originalCanvasPanX, originalCanvasPanY);
+            UpdateLayout();
+        }
+
+        var currentFingerprint = BuildVisualRegressionFingerprint();
+        var restored = viewModel.NodeNavigatorEntries.All(entry =>
+                           originalBypass.TryGetValue(entry.InstanceId, out var bypassed) &&
+                           entry.Node.Bypassed == bypassed) &&
+                       currentFingerprint == originalFingerprint;
+        if (!passed || !restored)
+        {
+            Console.Error.WriteLine($"[standalone-visual-probe] node navigator detail: passed={passed}, restored={restored}, items={NodeNavigatorList.ItemCount}, selected={viewModel.BatchSelectedNodeCount}");
+        }
+        return passed && restored;
     }
 
     public bool ProbeModuleInsertion()
@@ -907,9 +1431,25 @@ public sealed partial class RigEditorView : UserControl
             $"{entry.DisplayName}:{entry.IsValid}:{entry.SourcePath}"));
         var chain = string.Join("|", viewModel.EffectChainNodes.Select(node =>
             $"{node.InstanceId}:{node.Selected}:{node.Bypassed}"));
+        var navigator = string.Join("|", viewModel.NodeNavigatorEntries.Select(entry =>
+            $"{entry.InstanceId}:{entry.IsBatchSelected}:{entry.Node.Bypassed}"));
         var connections = string.Join("|", viewModel.CanvasConnections.Select(connection =>
             $"{connection.SourceInstanceId}>{connection.DestinationInstanceId}:{connection.Selected}"));
-        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};file={viewModel.FileStatus};filter={viewModel.ModuleCatalogFilter};inspector={viewModel.InspectorTab};library={viewModel.PresetLibraryDirectory}:{viewModel.SelectedPresetLibraryIndex}:{library};resources={resources};nodes={nodes};chain={chain};connections={connections}";
+        var inspectorDetails = viewModel.SelectedNode is null
+            ? "none"
+            : $"{viewModel.SelectedNode.InstanceId}:ports={string.Join(",", viewModel.SelectedPorts.Select(port => port.DisplayText))}:" +
+              $"resource={viewModel.SelectedResource?.Kind}:{viewModel.SelectedResource?.Path}:{viewModel.SelectedResource?.Status}";
+        var workspace = $"{compactWorkspace}:{moduleDrawerOpen}:{inspectorDrawerOpen}:" +
+                        $"columns={WorkspaceGrid.ColumnDefinitions[0].Width.Value:0.###},{WorkspaceGrid.ColumnDefinitions[2].Width.Value:0.###}:" +
+                        $"visible={ModuleLibraryPanel.IsVisible},{InspectorPanel.IsVisible}";
+        return $"theme={viewModel.Theme.Id};dark={viewModel.DarkTheme};file={viewModel.FileStatus};filter={viewModel.ModuleCatalogFilter};" +
+               $"canvas={canvasZoom:0.###}:{canvasPanX:0.###},{canvasPanY:0.###};" +
+               $"workspace={workspace};" +
+               $"inspector={viewModel.InspectorTab}:{inspectorDetails};" +
+               $"topology={viewModel.ConnectionSourceNodeId}>{viewModel.ConnectionDestinationNodeId}:{viewModel.ConnectionCandidateStatusText};" +
+               $"navigator={viewModel.NodeNavigatorSearchText}:{navigator};" +
+               $"library={viewModel.PresetLibraryDirectory}:{viewModel.SelectedPresetLibraryIndex}:{library};resources={resources};" +
+               $"nodes={nodes};chain={chain};connections={connections}";
     }
 
     private void NodeFootswitchClick(object? sender, RoutedEventArgs args)
@@ -940,6 +1480,7 @@ public sealed partial class RigEditorView : UserControl
         editor.PropertyChanged += ViewModelPropertyChanged;
         ApplyTheme(editor.Theme, editor.DarkTheme);
         UpdateSelectionStyles();
+        ResetCanvasViewport();
         StartRuntimeRefreshTimer();
     }
 
@@ -958,6 +1499,11 @@ public sealed partial class RigEditorView : UserControl
         if (viewModel is null)
         {
             return false;
+        }
+        if ((modifiers & (KeyModifiers.Control | KeyModifiers.Alt)) == 0 && key == Key.F6)
+        {
+            CycleWorkspaceFocus((modifiers & KeyModifiers.Shift) != 0);
+            return true;
         }
         var hasModifier = (modifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt)) != KeyModifiers.None;
         if (!hasModifier && key == Key.T)
@@ -1014,6 +1560,109 @@ public sealed partial class RigEditorView : UserControl
             return true;
         }
         return false;
+    }
+
+    private void CycleWorkspaceFocus(bool reverse)
+    {
+        Control[] targets = [PresetSelector, ModuleCatalogList, CanvasSurface, ConnectionToolPanel, ParameterInspectorButton];
+        if (workspaceFocusIndex < 0)
+        {
+            workspaceFocusIndex = reverse ? targets.Length - 1 : 0;
+        }
+        else
+        {
+            var direction = reverse ? -1 : 1;
+            workspaceFocusIndex = (workspaceFocusIndex + direction + targets.Length) % targets.Length;
+        }
+        var target = targets[workspaceFocusIndex];
+
+        if (compactWorkspace)
+        {
+            if (ReferenceEquals(target, ModuleCatalogList))
+            {
+                moduleDrawerOpen = true;
+                inspectorDrawerOpen = false;
+                UpdateResponsiveLayout(Bounds.Width);
+            }
+            else if (ReferenceEquals(target, ParameterInspectorButton))
+            {
+                moduleDrawerOpen = false;
+                inspectorDrawerOpen = true;
+                UpdateResponsiveLayout(Bounds.Width);
+            }
+            else
+            {
+                CloseCompactPanels();
+            }
+        }
+
+        target.Focus();
+    }
+
+    private Control? FindCanvasNodeControl(string instanceId)
+    {
+        var index = viewModel?.CanvasNodes.ToList().FindIndex(node =>
+            string.Equals(node.InstanceId, instanceId, StringComparison.Ordinal)) ?? -1;
+        if (index < 0 || CanvasNodeLayer.ContainerFromIndex(index) is not Control container)
+        {
+            return null;
+        }
+        return container.GetVisualDescendants().OfType<Control>().FirstOrDefault(control =>
+            control.Classes.Contains("srg-canvas-node"));
+    }
+
+    private bool SelectAdjacentCanvasNode(int direction, bool focusNode)
+    {
+        if (viewModel is null || viewModel.CanvasNodes.Count == 0)
+        {
+            return false;
+        }
+        var currentId = viewModel.SelectedNode?.InstanceId;
+        var currentIndex = viewModel.CanvasNodes.ToList().FindIndex(node =>
+            string.Equals(node.InstanceId, currentId, StringComparison.Ordinal));
+        var nextIndex = currentIndex < 0
+            ? (direction < 0 ? viewModel.CanvasNodes.Count - 1 : 0)
+            : (currentIndex + direction + viewModel.CanvasNodes.Count) % viewModel.CanvasNodes.Count;
+        var next = viewModel.CanvasNodes[nextIndex];
+        if (!viewModel.SelectNode(next.InstanceId))
+        {
+            return false;
+        }
+        FocusSelectedCanvasNode();
+        if (focusNode)
+        {
+            UpdateLayout();
+            FindCanvasNodeControl(next.InstanceId)?.Focus();
+        }
+        return true;
+    }
+
+    private bool MoveCanvasNodeByKeyboard(string instanceId, double deltaX, double deltaY)
+    {
+        if (viewModel is null || !viewModel.SelectNode(instanceId))
+        {
+            return false;
+        }
+        var node = viewModel.CanvasNodes.FirstOrDefault(candidate =>
+            string.Equals(candidate.InstanceId, instanceId, StringComparison.Ordinal));
+        if (node is null)
+        {
+            return false;
+        }
+        var centerX = node.CanvasX + node.Width * 0.5;
+        var centerY = node.CanvasY + node.Height * 0.5;
+        if (!viewModel.BeginDrag(centerX, centerY))
+        {
+            return false;
+        }
+        try
+        {
+            return viewModel.DragTo(centerX + deltaX, centerY + deltaY, snapToGrid: false);
+        }
+        finally
+        {
+            viewModel.EndDrag();
+        }
     }
 
     private void ViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
@@ -1093,6 +1742,7 @@ public sealed partial class RigEditorView : UserControl
         SetBrush("SrgCardBorderBrush", palette.CardBorder);
         SetBrush("SrgTextBrush", palette.Text);
         SetBrush("SrgMutedBrush", palette.Muted);
+        SetBrush("SrgErrorBrush", palette.Error);
         SetBrush("SrgAccentBrush", palette.Accent);
         SetBrush("SrgAccentHoverBrush", palette.AccentHover);
         SetBrush("SrgAccentTextBrush", palette.AccentText);
@@ -1146,6 +1796,7 @@ public sealed partial class RigEditorView : UserControl
             CardBorder = ThemeColor(theme, "cardBorder", fallback.CardBorder),
             Text = ThemeColor(theme, "text", fallback.Text),
             Muted = ThemeColor(theme, "muted", fallback.Muted),
+            Error = ThemeColor(theme, "error", fallback.Error),
             Accent = accent,
             AccentHover = ThemeColor(theme, "accentHover", accent),
             AccentText = ThemeColor(theme, "accentText", fallback.AccentText),
@@ -1177,13 +1828,316 @@ public sealed partial class RigEditorView : UserControl
         }
     }
 
+    private void RigEditorSizeChanged(object? sender, SizeChangedEventArgs args) =>
+        UpdateResponsiveLayout(args.NewSize.Width);
+
+    private void UpdateResponsiveLayout(double width)
+    {
+        if (TopbarGrid is null || TopbarGrid.ColumnDefinitions.Count < 1 ||
+            WorkspaceGrid is null || WorkspaceGrid.ColumnDefinitions.Count < 3 ||
+            ModuleLibraryPanel is null || InspectorPanel is null ||
+            ModulePanelToggleButton is null || InspectorPanelToggleButton is null)
+        {
+            return;
+        }
+        compactWorkspace = width > 0 && width < 980.0;
+        if (compactWorkspace)
+        {
+            BrandPanel.IsVisible = false;
+            TopbarGrid.ColumnDefinitions[0].Width = new GridLength(0);
+            PresetSelector.Width = 138;
+            TopbarActions.Width = 360;
+            WorkspaceGrid.ColumnDefinitions[0].Width = new GridLength(0);
+            WorkspaceGrid.ColumnDefinitions[2].Width = new GridLength(0);
+            ModulePanelToggleButton.IsVisible = true;
+            InspectorPanelToggleButton.IsVisible = true;
+            Grid.SetColumn(ModuleLibraryPanel, 1);
+            Grid.SetColumn(InspectorPanel, 1);
+            ModuleLibraryPanel.Width = 286;
+            InspectorPanel.Width = 320;
+            ModuleLibraryPanel.HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Left;
+            InspectorPanel.HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right;
+            ModuleLibraryPanel.IsVisible = moduleDrawerOpen;
+            InspectorPanel.IsVisible = inspectorDrawerOpen;
+            ModuleLibraryPanel.SetValue(Panel.ZIndexProperty, 40);
+            InspectorPanel.SetValue(Panel.ZIndexProperty, 40);
+        }
+        else
+        {
+            moduleDrawerOpen = false;
+            inspectorDrawerOpen = false;
+            BrandPanel.IsVisible = true;
+            TopbarGrid.ColumnDefinitions[0].Width = GridLength.Auto;
+            PresetSelector.Width = 178;
+            TopbarActions.Width = double.NaN;
+            var medium = width > 0 && width < 1250.0;
+            WorkspaceGrid.ColumnDefinitions[0].Width = new GridLength(medium ? 190 : 226);
+            WorkspaceGrid.ColumnDefinitions[2].Width = new GridLength(medium ? 240 : 286);
+            ModulePanelToggleButton.IsVisible = false;
+            InspectorPanelToggleButton.IsVisible = false;
+            Grid.SetColumn(ModuleLibraryPanel, 0);
+            Grid.SetColumn(InspectorPanel, 2);
+            ModuleLibraryPanel.Width = double.NaN;
+            InspectorPanel.Width = double.NaN;
+            ModuleLibraryPanel.HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Stretch;
+            InspectorPanel.HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Stretch;
+            ModuleLibraryPanel.IsVisible = true;
+            InspectorPanel.IsVisible = true;
+            ModuleLibraryPanel.SetValue(Panel.ZIndexProperty, 0);
+            InspectorPanel.SetValue(Panel.ZIndexProperty, 0);
+        }
+    }
+
+    private void ToggleModulePanel(double? layoutWidth = null)
+    {
+        if (!compactWorkspace) return;
+        moduleDrawerOpen = !moduleDrawerOpen;
+        inspectorDrawerOpen = false;
+        UpdateResponsiveLayout(layoutWidth ?? Bounds.Width);
+    }
+
+    private void ToggleInspectorPanel(double? layoutWidth = null)
+    {
+        if (!compactWorkspace) return;
+        inspectorDrawerOpen = !inspectorDrawerOpen;
+        moduleDrawerOpen = false;
+        UpdateResponsiveLayout(layoutWidth ?? Bounds.Width);
+    }
+
+    private void CloseCompactPanels()
+    {
+        if (!compactWorkspace || (!moduleDrawerOpen && !inspectorDrawerOpen)) return;
+        moduleDrawerOpen = false;
+        inspectorDrawerOpen = false;
+        UpdateResponsiveLayout(Bounds.Width);
+    }
+
+    private void ApplyCanvasTransform()
+    {
+        if (CanvasConnectionLayer is null || CanvasNodeLayer is null)
+        {
+            return;
+        }
+        var transform = new MatrixTransform(new Matrix(canvasZoom, 0.0, 0.0, canvasZoom, canvasPanX, canvasPanY));
+        CanvasConnectionLayer.RenderTransform = transform;
+        CanvasNodeLayer.RenderTransform = new MatrixTransform(transform.Matrix);
+        if (CanvasZoomText is not null)
+        {
+            CanvasZoomText.Text = $"{canvasZoom * 100:0}%";
+        }
+    }
+
+    private void SetCanvasViewport(double zoom, double panX, double panY)
+    {
+        canvasZoom = Math.Clamp(zoom, MinimumCanvasZoom, MaximumCanvasZoom);
+        canvasPanX = double.IsFinite(panX) ? panX : 0.0;
+        canvasPanY = double.IsFinite(panY) ? panY : 0.0;
+        ApplyCanvasTransform();
+    }
+
+    private void ResetCanvasViewport() => SetCanvasViewport(1.0, 0.0, 0.0);
+
+    private void ZoomCanvasAt(Point viewportPoint, double requestedZoom)
+    {
+        var nextZoom = Math.Clamp(requestedZoom, MinimumCanvasZoom, MaximumCanvasZoom);
+        if (Math.Abs(nextZoom - canvasZoom) < 0.00001)
+        {
+            return;
+        }
+        var worldX = (viewportPoint.X - canvasPanX) / canvasZoom;
+        var worldY = (viewportPoint.Y - canvasPanY) / canvasZoom;
+        canvasZoom = nextZoom;
+        canvasPanX = viewportPoint.X - worldX * canvasZoom;
+        canvasPanY = viewportPoint.Y - worldY * canvasZoom;
+        ApplyCanvasTransform();
+    }
+
+    private void PanCanvasBy(double deltaX, double deltaY)
+    {
+        canvasPanX += deltaX;
+        canvasPanY += deltaY;
+        ApplyCanvasTransform();
+    }
+
+    private void FitCanvasToNodes()
+    {
+        if (viewModel is null || viewModel.CanvasNodes.Count == 0 || EditorCanvas.Bounds.Width <= 0 ||
+            EditorCanvas.Bounds.Height <= 0)
+        {
+            ResetCanvasViewport();
+            return;
+        }
+        var minX = viewModel.CanvasNodes.Min(node => node.CanvasX);
+        var minY = viewModel.CanvasNodes.Min(node => node.CanvasY);
+        var maxX = viewModel.CanvasNodes.Max(node => node.CanvasX + node.Width);
+        var maxY = viewModel.CanvasNodes.Max(node => node.CanvasY + node.Height);
+        var contentWidth = Math.Max(maxX - minX, 1.0);
+        var contentHeight = Math.Max(maxY - minY, 1.0);
+        var availableWidth = Math.Max(EditorCanvas.Bounds.Width - 48.0, 1.0);
+        var availableHeight = Math.Max(EditorCanvas.Bounds.Height - 48.0, 1.0);
+        var zoom = Math.Clamp(Math.Min(availableWidth / contentWidth, availableHeight / contentHeight),
+            MinimumCanvasZoom, MaximumCanvasZoom);
+        var contentCenterX = (minX + maxX) * 0.5;
+        var contentCenterY = (minY + maxY) * 0.5;
+        canvasZoom = zoom;
+        canvasPanX = EditorCanvas.Bounds.Width * 0.5 - contentCenterX * zoom;
+        canvasPanY = EditorCanvas.Bounds.Height * 0.5 - contentCenterY * zoom;
+        ApplyCanvasTransform();
+    }
+
+    private void FocusSelectedCanvasNode()
+    {
+        var selected = viewModel?.CanvasNodes.FirstOrDefault(node => node.Selected);
+        if (selected is null || EditorCanvas.Bounds.Width <= 0 || EditorCanvas.Bounds.Height <= 0)
+        {
+            return;
+        }
+        var centerX = selected.CanvasX + selected.Width * 0.5;
+        var centerY = selected.CanvasY + selected.Height * 0.5;
+        canvasPanX = EditorCanvas.Bounds.Width * 0.5 - centerX * canvasZoom;
+        canvasPanY = EditorCanvas.Bounds.Height * 0.5 - centerY * canvasZoom;
+        ApplyCanvasTransform();
+    }
+
+    private void CanvasSurfaceKeyDown(object? sender, KeyEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control || !ReferenceEquals(args.Source, control))
+        {
+            return;
+        }
+
+        var handled = args.Key switch
+        {
+            Key.Left => SelectAdjacentCanvasNode(-1, focusNode: false),
+            Key.Right => SelectAdjacentCanvasNode(1, focusNode: false),
+            Key.Home => SelectCanvasNodeAtIndex(0, focusNode: false),
+            Key.End => SelectCanvasNodeAtIndex(viewModel.CanvasNodes.Count - 1, focusNode: false),
+            Key.Enter => FocusSelectedCanvasNodeControl(),
+            Key.Delete => viewModel.SelectedNode is { } selected && viewModel.DeleteNode(selected.InstanceId),
+            Key.Escape => ClearCanvasKeyboardState(),
+            _ => false,
+        };
+        args.Handled = handled;
+    }
+
+    private void CanvasNodeKeyDown(object? sender, KeyEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control || !ReferenceEquals(args.Source, control) ||
+            control.DataContext is not CanvasNodeSnapshot node)
+        {
+            return;
+        }
+
+        var step = (args.KeyModifiers & KeyModifiers.Shift) != 0 ? 1.0 : 8.0;
+        var handled = args.Key switch
+        {
+            Key.Enter or Key.Space => viewModel.SelectNode(node.InstanceId),
+            Key.Left => MoveCanvasNodeByKeyboard(node.InstanceId, -step, 0),
+            Key.Right => MoveCanvasNodeByKeyboard(node.InstanceId, step, 0),
+            Key.Up => MoveCanvasNodeByKeyboard(node.InstanceId, 0, -step),
+            Key.Down => MoveCanvasNodeByKeyboard(node.InstanceId, 0, step),
+            Key.PageUp => SelectAdjacentCanvasNode(-1, focusNode: true),
+            Key.PageDown => SelectAdjacentCanvasNode(1, focusNode: true),
+            Key.Delete => viewModel.DeleteNode(node.InstanceId),
+            Key.Escape => FocusCanvasSurface(),
+            _ => false,
+        };
+        args.Handled = handled;
+    }
+
+    private void ConnectionToolKeyDown(object? sender, KeyEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control || !ReferenceEquals(args.Source, control))
+        {
+            return;
+        }
+        var handled = args.Key switch
+        {
+            Key.Enter => viewModel.ConnectConnectionCandidate(),
+            Key.Delete => DisconnectSelectedConnectionFromKeyboard(),
+            Key.Escape => ClearConnectionCandidate(),
+            _ => false,
+        };
+        args.Handled = handled;
+    }
+
+    private bool SelectCanvasNodeAtIndex(int index, bool focusNode)
+    {
+        if (viewModel is null || index < 0 || index >= viewModel.CanvasNodes.Count)
+        {
+            return false;
+        }
+        var node = viewModel.CanvasNodes[index];
+        if (!viewModel.SelectNode(node.InstanceId))
+        {
+            return false;
+        }
+        FocusSelectedCanvasNode();
+        if (focusNode)
+        {
+            UpdateLayout();
+            FindCanvasNodeControl(node.InstanceId)?.Focus();
+        }
+        return true;
+    }
+
+    private bool FocusSelectedCanvasNodeControl()
+    {
+        var instanceId = viewModel?.SelectedNode?.InstanceId;
+        if (instanceId is null)
+        {
+            return SelectCanvasNodeAtIndex(0, focusNode: true);
+        }
+        FocusSelectedCanvasNode();
+        UpdateLayout();
+        return FindCanvasNodeControl(instanceId)?.Focus() == true;
+    }
+
+    private bool FocusCanvasSurface() => CanvasSurface.Focus();
+
+    private bool ClearCanvasKeyboardState()
+    {
+        CloseCompactPanels();
+        return viewModel?.ClearSelection() == true;
+    }
+
+    private bool ClearConnectionCandidate()
+    {
+        if (viewModel is null)
+        {
+            return false;
+        }
+        viewModel.ConnectionSourceNodeId = null;
+        viewModel.ConnectionDestinationNodeId = null;
+        return true;
+    }
+
+    private bool DisconnectSelectedConnectionFromKeyboard()
+    {
+        var connection = viewModel?.SelectedConnection;
+        return connection is not null &&
+               viewModel!.DisconnectNodes(connection.SourceInstanceId, connection.DestinationInstanceId);
+    }
+
     private void CanvasPointerPressed(object? sender, PointerPressedEventArgs args)
     {
         if (viewModel is null || sender is not Control source || !IsEditorCanvas(source))
         {
             return;
         }
-        var point = args.GetPosition(EditorCanvas);
+        CloseCompactPanels();
+        var viewportPoint = args.GetPosition(EditorCanvas);
+        if (args.GetCurrentPoint(EditorCanvas).Properties.IsMiddleButtonPressed)
+        {
+            panningCanvas = true;
+            canvasPanPointerStart = viewportPoint;
+            canvasPanOriginX = canvasPanX;
+            canvasPanOriginY = canvasPanY;
+            args.Pointer.Capture(EditorCanvas);
+            args.Handled = true;
+            return;
+        }
+        var point = CanvasViewportToWorld(viewportPoint);
         if (viewModel.BeginDrag(point.X, point.Y))
         {
             dragging = true;
@@ -1197,17 +2151,33 @@ public sealed partial class RigEditorView : UserControl
 
     private void CanvasPointerMoved(object? sender, PointerEventArgs args)
     {
+        if (panningCanvas && args.Pointer.Captured == EditorCanvas)
+        {
+            var panPoint = args.GetPosition(EditorCanvas);
+            canvasPanX = canvasPanOriginX + panPoint.X - canvasPanPointerStart.X;
+            canvasPanY = canvasPanOriginY + panPoint.Y - canvasPanPointerStart.Y;
+            ApplyCanvasTransform();
+            args.Handled = true;
+            return;
+        }
         if (!dragging || viewModel is null || args.Pointer.Captured != EditorCanvas)
         {
             return;
         }
-        var point = args.GetPosition(EditorCanvas);
-        viewModel.DragTo(point.X, point.Y, true);
+        var dragPoint = CanvasViewportToWorld(args.GetPosition(EditorCanvas));
+        viewModel.DragTo(dragPoint.X, dragPoint.Y, true);
         args.Handled = true;
     }
 
     private void CanvasPointerReleased(object? sender, PointerReleasedEventArgs args)
     {
+        if (panningCanvas)
+        {
+            panningCanvas = false;
+            args.Pointer.Capture(null);
+            args.Handled = true;
+            return;
+        }
         if (!dragging || viewModel is null)
         {
             return;
@@ -1217,6 +2187,26 @@ public sealed partial class RigEditorView : UserControl
         args.Pointer.Capture(null);
         args.Handled = true;
     }
+
+    private void CanvasPointerWheelChanged(object? sender, PointerWheelEventArgs args)
+    {
+        if ((args.KeyModifiers & KeyModifiers.Control) != 0)
+        {
+            var direction = Math.Sign(args.Delta.Y);
+            if (direction != 0)
+            {
+                ZoomCanvasAt(args.GetPosition(EditorCanvas), canvasZoom + direction * 0.1);
+            }
+        }
+        else
+        {
+            PanCanvasBy(args.Delta.X * 36.0, args.Delta.Y * 36.0);
+        }
+        args.Handled = true;
+    }
+
+    private Point CanvasViewportToWorld(Point point) =>
+        new((point.X - canvasPanX) / canvasZoom, (point.Y - canvasPanY) / canvasZoom);
 
     private void ModuleCatalogItemPointerPressed(object? sender, PointerPressedEventArgs args)
     {
@@ -1288,24 +2278,153 @@ public sealed partial class RigEditorView : UserControl
             canvasPoint.X >= 0 && canvasPoint.Y >= 0 &&
             canvasPoint.X <= EditorCanvas.Bounds.Width && canvasPoint.Y <= EditorCanvas.Bounds.Height)
         {
-            viewModel.AddModuleAtCanvasPoint(module.ModuleId, canvasPoint.X, canvasPoint.Y);
+            var worldPoint = CanvasViewportToWorld(canvasPoint);
+            viewModel.AddModuleAtCanvasPoint(module.ModuleId, worldPoint.X, worldPoint.Y);
         }
         args.Handled = true;
     }
 
     private bool IsEditorCanvas(Control source) => source == EditorCanvas || source is Border || source is ItemsControl;
 
+    private void ParameterGotFocus(object? sender, GotFocusEventArgs args)
+    {
+        if (sender is TextBox textBox && textBox.Tag is string target)
+        {
+            parameterEditBaselines[textBox] = viewModel?.SelectedParameters
+                .FirstOrDefault(item => item.Target == target)?.ValueText ?? textBox.Text ?? string.Empty;
+            textBox.Classes.Set("invalid", false);
+            textBox.SetValue(AutomationProperties.HelpTextProperty, null);
+        }
+    }
+
     private void ParameterLostFocus(object? sender, RoutedEventArgs args)
+    {
+        if (sender is TextBox textBox)
+        {
+            var baseline = parameterEditBaselines.GetValueOrDefault(textBox, textBox.Text ?? string.Empty);
+            if (!string.Equals(textBox.Text, baseline, StringComparison.Ordinal))
+            {
+                CommitParameterText(textBox, selectOnFailure: false);
+            }
+            parameterEditBaselines.Remove(textBox);
+        }
+    }
+
+    private void ParameterTextBoxKeyDown(object? sender, KeyEventArgs args)
     {
         if (viewModel is null || sender is not TextBox textBox || textBox.Tag is not string target)
         {
             return;
         }
-        if (!viewModel.SetParameterText(target, textBox.Text ?? string.Empty))
+        if (args.Key == Key.Enter)
         {
-            textBox.Text = viewModel.SelectedParameters.FirstOrDefault(item => item.Target == target)?.ValueText ?? textBox.Text;
+            CommitParameterText(textBox, selectOnFailure: true);
+            args.Handled = true;
+        }
+        else if (args.Key == Key.Escape)
+        {
+            RestoreParameterText(textBox, target);
+            textBox.SelectAll();
+            args.Handled = true;
+        }
+        else if (args.Key is Key.Up or Key.Down)
+        {
+            var direction = args.Key == Key.Up ? 1 : -1;
+            var fine = (args.KeyModifiers & KeyModifiers.Shift) != 0;
+            if (viewModel.NudgeParameter(target, direction, fine))
+            {
+                RestoreParameterText(textBox, target);
+                textBox.SelectAll();
+            }
+            args.Handled = true;
         }
     }
+
+    private bool CommitParameterText(TextBox textBox, bool selectOnFailure)
+    {
+        if (viewModel is null || textBox.Tag is not string target)
+        {
+            return false;
+        }
+        var valid = viewModel.SetParameterText(target, textBox.Text ?? string.Empty);
+        textBox.Classes.Set("invalid", !valid);
+        textBox.SetValue(AutomationProperties.HelpTextProperty, valid ? null : viewModel.Status);
+        if (valid)
+        {
+            RestoreParameterText(textBox, target);
+            parameterEditBaselines[textBox] = textBox.Text ?? string.Empty;
+        }
+        else if (selectOnFailure)
+        {
+            textBox.SelectAll();
+        }
+        return valid;
+    }
+
+    private void RestoreParameterText(TextBox textBox, string target)
+    {
+        var parameter = viewModel?.SelectedParameters.FirstOrDefault(item => item.Target == target);
+        if (parameter is not null)
+        {
+            textBox.Text = parameter.ValueText;
+        }
+        textBox.Classes.Set("invalid", false);
+        textBox.SetValue(AutomationProperties.HelpTextProperty, null);
+        parameterEditBaselines[textBox] = textBox.Text ?? string.Empty;
+    }
+
+    private void ParameterDecreaseClick(object? sender, RoutedEventArgs args) => NudgeParameterFromButton(sender, -1);
+
+    private void ParameterIncreaseClick(object? sender, RoutedEventArgs args) => NudgeParameterFromButton(sender, 1);
+
+    private void NudgeParameterFromButton(object? sender, int direction)
+    {
+        if (viewModel is not null && sender is Control control && control.Tag is string target)
+        {
+            viewModel.NudgeParameter(target, direction, fine: false);
+        }
+    }
+
+    private void NodeParameterChipClick(object? sender, RoutedEventArgs args)
+    {
+        if (sender is Control control && control.Tag is string target)
+        {
+            FocusParameterEditor(target);
+            args.Handled = true;
+        }
+    }
+
+    private bool FocusParameterEditor(string target)
+    {
+        if (viewModel is null)
+        {
+            return false;
+        }
+        var separator = target.LastIndexOf('.');
+        if (separator <= 0 || !viewModel.SelectNode(target[..separator]) || !viewModel.SelectInspectorTab("参数"))
+        {
+            return false;
+        }
+        if (compactWorkspace)
+        {
+            moduleDrawerOpen = false;
+            inspectorDrawerOpen = true;
+            UpdateResponsiveLayout(Bounds.Width);
+        }
+        UpdateLayout();
+        var textBox = FindParameterTextBox(target);
+        if (textBox is null)
+        {
+            return false;
+        }
+        textBox.Focus();
+        textBox.SelectAll();
+        return true;
+    }
+
+    private TextBox? FindParameterTextBox(string target) =>
+        ParameterControlsList.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(textBox =>
+            string.Equals(textBox.Tag as string, target, StringComparison.Ordinal));
 
     private void ParameterSliderChanged(object? sender, RangeBaseValueChangedEventArgs args)
     {
@@ -1340,6 +2459,14 @@ public sealed partial class RigEditorView : UserControl
     }
     private void LoadThemeClick(object? sender, RoutedEventArgs args) => _ = LoadThemeAsync();
     private void ImportResourceClick(object? sender, RoutedEventArgs args) => _ = ImportResourceAsync();
+    private void ZoomOutClick(object? sender, RoutedEventArgs args) =>
+        ZoomCanvasAt(new Point(EditorCanvas.Bounds.Width * 0.5, EditorCanvas.Bounds.Height * 0.5), canvasZoom - 0.1);
+    private void ZoomInClick(object? sender, RoutedEventArgs args) =>
+        ZoomCanvasAt(new Point(EditorCanvas.Bounds.Width * 0.5, EditorCanvas.Bounds.Height * 0.5), canvasZoom + 0.1);
+    private void FitCanvasClick(object? sender, RoutedEventArgs args) => FitCanvasToNodes();
+    private void FocusSelectedClick(object? sender, RoutedEventArgs args) => FocusSelectedCanvasNode();
+    private void ToggleModulePanelClick(object? sender, RoutedEventArgs args) => ToggleModulePanel();
+    private void ToggleInspectorPanelClick(object? sender, RoutedEventArgs args) => ToggleInspectorPanel();
 
     private void ModuleCatalogFilterClick(object? sender, RoutedEventArgs args)
     {
@@ -1348,6 +2475,28 @@ public sealed partial class RigEditorView : UserControl
             viewModel.SetModuleCatalogFilter(filter);
         }
     }
+
+    private void NodeNavigatorLocateClick(object? sender, RoutedEventArgs args)
+    {
+        if (viewModel is not null && sender is Control control && control.Tag is string instanceId &&
+            viewModel.SelectNode(instanceId))
+        {
+            FocusSelectedCanvasNode();
+            args.Handled = true;
+        }
+    }
+
+    private void NodeNavigatorSelectAllClick(object? sender, RoutedEventArgs args) =>
+        viewModel?.SelectAllFilteredNodes();
+
+    private void NodeNavigatorClearClick(object? sender, RoutedEventArgs args) =>
+        viewModel?.ClearBatchNodeSelection();
+
+    private void NodeNavigatorBypassClick(object? sender, RoutedEventArgs args) =>
+        viewModel?.SetBatchNodesBypassed(true);
+
+    private void NodeNavigatorEnableClick(object? sender, RoutedEventArgs args) =>
+        viewModel?.SetBatchNodesBypassed(false);
 
     private void InspectorTabClick(object? sender, RoutedEventArgs args)
     {
@@ -1386,15 +2535,24 @@ public sealed partial class RigEditorView : UserControl
     private void RefreshPresetLibraryClick(object? sender, RoutedEventArgs args) => viewModel?.RefreshPresetLibrary();
     private void LoadSelectedPresetLibraryClick(object? sender, RoutedEventArgs args) => _ = LoadSelectedPresetLibraryAsync();
 
-    private void NodeOutputEndpointPressed(object? sender, PointerPressedEventArgs args)
+    private void NodeOutputEndpointClick(object? sender, RoutedEventArgs args)
     {
         if (viewModel is null || sender is not Control control || control.Tag is not string nodeId)
         {
             return;
         }
-        pendingOutputNode = nodeId;
-        viewModel.ReportInteractionStatus($"已选择 {nodeId} 的输出端点，请点击目标效果器的输入端点");
+        SelectConnectionSource(nodeId);
         args.Handled = true;
+    }
+
+    private void SelectConnectionSource(string nodeId)
+    {
+        if (viewModel is null)
+        {
+            return;
+        }
+        viewModel.ConnectionSourceNodeId = nodeId;
+        viewModel.ReportInteractionStatus($"已选择 {nodeId} 的输出端点，请点击目标效果器的输入端点");
     }
 
     private void CanvasConnectionPressed(object? sender, PointerPressedEventArgs args)
@@ -1435,33 +2593,34 @@ public sealed partial class RigEditorView : UserControl
         moduleDragOverCanvas = false;
     }
 
-    private void NodeInputEndpointPressed(object? sender, PointerPressedEventArgs args)
+    private void NodeInputEndpointClick(object? sender, RoutedEventArgs args)
     {
         if (viewModel is null || sender is not Control control || control.Tag is not string nodeId)
         {
             return;
         }
-        if (pendingOutputNode is null)
+        SelectConnectionDestination(nodeId);
+        args.Handled = true;
+    }
+
+    private void SelectConnectionDestination(string nodeId)
+    {
+        if (viewModel is null)
+        {
+            return;
+        }
+        if (viewModel.ConnectionSourceNodeId is null)
         {
             viewModel.ReportInteractionStatus($"已点击 {nodeId} 的输入端点；请先点击来源效果器的输出端点");
         }
         else
         {
-            var sourceNode = pendingOutputNode;
-            pendingOutputNode = null;
-            if (sourceNode == nodeId)
-            {
-                viewModel.ReportInteractionStatus("不能连接效果器自身；请选择另一个输入端点");
-            }
-            else
-            {
-                viewModel.ConnectNodes(sourceNode, nodeId);
-            }
+            viewModel.ConnectionDestinationNodeId = nodeId;
+            viewModel.ConnectConnectionCandidate();
         }
-        args.Handled = true;
     }
 
-    private void FixedEndpointPressed(object? sender, PointerPressedEventArgs args)
+    private void FixedEndpointClick(object? sender, RoutedEventArgs args)
     {
         viewModel?.ReportInteractionStatus("INPUT / OUTPUT 是当前 ASIO 设备的固定物理端口，不能作为效果器节点移动");
         args.Handled = true;

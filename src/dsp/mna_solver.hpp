@@ -50,6 +50,8 @@ enum class MnaSolveError {
 struct MnaSolveResult {
     MnaSolveError error{MnaSolveError::None};
     double output_voltage{};
+    std::uint32_t iteration_count{};
+    std::uint32_t maximum_iteration_count{};
 
     [[nodiscard]] bool Succeeded() const noexcept {
         return error == MnaSolveError::None;

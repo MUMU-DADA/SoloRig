@@ -126,6 +126,40 @@ typedef struct SoloRigNodeView {
     const char* footswitch_image_path_utf8;
 } SoloRigNodeView;
 
+// Additive node inspection views. They are separate from SoloRigNodeView so
+// existing C ABI consumers retain their struct size and field offsets.
+typedef struct SoloRigNodePortView {
+    const char* port_id_utf8;
+    uint8_t direction;
+    uint32_t max_channels;
+} SoloRigNodePortView;
+
+typedef struct SoloRigNodeResourceView {
+    const char* kind_utf8;
+    const char* path_utf8;
+    const char* status_utf8;
+} SoloRigNodeResourceView;
+
+typedef struct SoloRigNodeSkinLayoutView {
+    double width;
+    double height;
+    const char* background_color_utf8;
+    const char* label_color_utf8;
+    uint8_t has_footswitch_position;
+    double footswitch_x;
+    double footswitch_y;
+} SoloRigNodeSkinLayoutView;
+
+typedef struct SoloRigNodeSkinParameterLayoutView {
+    const char* parameter_id_utf8;
+    double x;
+    double y;
+} SoloRigNodeSkinParameterLayoutView;
+
+typedef struct SoloRigNodeBatchEntry {
+    const char* instance_id_utf8;
+} SoloRigNodeBatchEntry;
+
 typedef struct SoloRigParameterView {
     const char* parameter_id_utf8;
     float value;
@@ -176,6 +210,68 @@ typedef struct SoloRigWhiteboxStatusView {
     const char* evidence_status_utf8;
     const char* diagnostic_utf8;
 } SoloRigWhiteboxStatusView;
+
+typedef struct SoloRigModuleAuditionView {
+    uint32_t sample_rate_hz;
+    uint32_t block_size;
+    uint32_t channel_count;
+    uint32_t declared_latency_samples;
+    double output_peak;
+    double output_rms;
+    double processing_cpu_percent;
+    uint8_t output_finite;
+} SoloRigModuleAuditionView;
+
+typedef struct SoloRigModuleAuditionConfigV2 {
+    uint32_t sample_rate_hz;
+    uint32_t block_size;
+    uint32_t channel_count;
+    uint32_t stimulus_kind; // 0=sine, 1=impulse, 2=log sweep, 3=caller waveform
+    const char* input_port_utf8;
+    const char* output_port_utf8;
+    double amplitude;
+    double start_frequency_hz;
+    double end_frequency_hz;
+} SoloRigModuleAuditionConfigV2;
+
+typedef struct SoloRigModuleAuditionAnalysisV2 {
+    uint32_t schema_version;
+    uint32_t sample_rate_hz;
+    uint32_t block_size;
+    uint32_t channel_count;
+    uint32_t declared_latency_samples;
+    uint32_t waveform_sample_count;
+    double input_peak;
+    double input_rms;
+    double input_dc;
+    double output_peak;
+    double output_rms;
+    double output_dc;
+    double processing_cpu_percent;
+    uint8_t output_finite;
+} SoloRigModuleAuditionAnalysisV2;
+
+typedef struct SoloRigModuleAuditionAnalysisV3 {
+    uint32_t schema_version;
+    uint32_t sample_rate_hz;
+    uint32_t block_size;
+    uint32_t channel_count;
+    uint32_t declared_latency_samples;
+    uint32_t waveform_sample_count;
+    double input_peak;
+    double input_rms;
+    double input_dc;
+    double output_peak;
+    double output_rms;
+    double output_dc;
+    double processing_cpu_percent;
+    uint8_t output_finite;
+    uint64_t solver_processed_sample_count;
+    uint64_t solver_total_iterations;
+    uint32_t solver_maximum_iterations;
+    uint32_t solver_failure_count;
+    uint32_t solver_last_error;
+} SoloRigModuleAuditionAnalysisV3;
 
 typedef struct SoloRigThemeInfoView {
     const char* id_utf8;
@@ -255,6 +351,32 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node(
     const SoloRigSnapshot* snapshot,
     uint32_t index,
     SoloRigNodeView* out_node);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_port_count(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t* out_count);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_port(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t port_index,
+    SoloRigNodePortView* out_port);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_resource(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    SoloRigNodeResourceView* out_resource);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_skin_layout(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    SoloRigNodeSkinLayoutView* out_layout);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_skin_parameter_layout_count(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t* out_count);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_skin_parameter_layout(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t layout_index,
+    SoloRigNodeSkinParameterLayoutView* out_layout);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_parameter(
     const SoloRigSnapshot* snapshot,
     uint32_t node_index,
@@ -283,6 +405,11 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_parameter_utf8_with_dirty
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_node_bypassed_utf8(
     SoloRigBackend* backend,
     const char* instance_id_utf8,
+    uint8_t bypassed);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_nodes_bypassed(
+    SoloRigBackend* backend,
+    const SoloRigNodeBatchEntry* nodes,
+    uint32_t node_count,
     uint8_t bypassed);
 // Control/UI-thread host bridge. Values must come from an actual stopped
 // runtime snapshot; this function does not perform audio processing.
@@ -394,6 +521,47 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_disconnect_utf8(
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_import_resource_utf8(
     SoloRigBackend* backend,
     const char* path_utf8);
+// Validates a package directory without importing it or changing editor state.
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_validate_module_package_utf8(
+    SoloRigBackend* backend,
+    const char* directory_path_utf8);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_audition_module_package_utf8(
+    SoloRigBackend* backend,
+    const char* directory_path_utf8,
+    SoloRigModuleAuditionView* out_audition);
+// Configurable offline audition. Waveform buffers are caller-owned and must
+// hold at least config.block_size floats. Port IDs select named Circuit v2
+// boundaries; empty strings select the first input/output for legacy modules.
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_audition_module_package_v2_utf8(
+    SoloRigBackend* backend,
+    const char* directory_path_utf8,
+    const SoloRigModuleAuditionConfigV2* config,
+    float* input_waveform,
+    float* output_waveform,
+    uint32_t waveform_capacity,
+    SoloRigModuleAuditionAnalysisV2* out_analysis);
+// Extends v2 with solver convergence diagnostics. Non-MNA modules report zero
+// solver counters while retaining the same waveform and signal analysis.
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_audition_module_package_v3_utf8(
+    SoloRigBackend* backend,
+    const char* directory_path_utf8,
+    const SoloRigModuleAuditionConfigV2* config,
+    float* input_waveform,
+    float* output_waveform,
+    uint32_t waveform_capacity,
+    SoloRigModuleAuditionAnalysisV3* out_analysis);
+// Parameterized offline audition used by sweep and A/B tools. The parameter
+// must be declared by the package and accepted by the prepared runtime.
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_audition_module_package_v4_utf8(
+    SoloRigBackend* backend,
+    const char* directory_path_utf8,
+    const SoloRigModuleAuditionConfigV2* config,
+    const char* parameter_id_utf8,
+    double parameter_value,
+    float* input_waveform,
+    float* output_waveform,
+    uint32_t waveform_capacity,
+    SoloRigModuleAuditionAnalysisV3* out_analysis);
 
 // Control-thread-only Standalone host bridge. `native_window` is the host
 // HWND used by ASIO driver dialogs/callback registration; it is never touched

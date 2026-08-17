@@ -5,11 +5,14 @@ using System.Windows.Input;
 
 namespace SoloRig.Ui;
 
-public sealed record NodeControlSnapshot(string Id, string Label, float Value, float Minimum, float Maximum, bool IsToggle,
-                                         string ImagePath = "")
+public sealed record NodeControlSnapshot(string Target, string Id, string Label, float Value, float Minimum, float Maximum, bool IsToggle,
+                                         string ImagePath = "", double X = 0.0, double Y = 0.0,
+                                         string LabelColor = "")
 {
     public bool IsKnob => !IsToggle;
     public bool HasImage => !string.IsNullOrWhiteSpace(ImagePath);
+    public double CanvasLeft => X - 24.0 - 11.0;
+    public double CanvasTop => Y - 34.0 - 11.0;
     public string ValueText => Value.ToString("0.##", CultureInfo.InvariantCulture);
     public string RangeText => $"{Minimum.ToString("0.##", CultureInfo.InvariantCulture)}..{Maximum.ToString("0.##", CultureInfo.InvariantCulture)}";
     public double KnobAngle
@@ -48,23 +51,39 @@ public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, dou
     public string NodeStateText => Unresolved ? "资源缺失" : Bypassed ? "旁路" : "已启用";
     public string FootswitchText => Unresolved ? "缺失" : Bypassed ? "旁路" : "启用";
     public double FootswitchOpacity => Unresolved ? 0.45 : Bypassed ? 0.72 : 1.0;
-    public IReadOnlyList<NodeControlSnapshot> Controls => Parameters
-        .Take(3)
-        .Select(parameter =>
+    public IReadOnlyList<NodeControlSnapshot> Controls
+    {
+        get
         {
-            var isToggle = IsToggleParameter(parameter.Id);
-            var imagePath = isToggle ? Skin.ToggleImagePath : Skin.KnobImagePath;
-            return new NodeControlSnapshot(parameter.Id, FormatParameterName(parameter.Id), parameter.Value,
-                parameter.Minimum, parameter.Maximum, isToggle, imagePath);
-        })
-        .ToArray();
+            var parameters = Parameters.Take(8).ToArray();
+            return parameters.Select((parameter, index) =>
+            {
+                var isToggle = IsToggleParameter(parameter.Id);
+                var imagePath = isToggle ? Skin.ToggleImagePath : Skin.KnobImagePath;
+                var placement = Skin.ParameterPlacements.FirstOrDefault(item =>
+                    string.Equals(item.ParameterId, parameter.Id, StringComparison.Ordinal));
+                var x = placement?.X ?? (index + 1.0) * Width / (parameters.Length + 1.0);
+                var y = placement?.Y ?? Math.Clamp(Height * 0.48, 56.0, Height - 58.0);
+                return new NodeControlSnapshot($"{InstanceId}.{parameter.Id}", parameter.Id,
+                    FormatParameterName(parameter.Id), parameter.Value, parameter.Minimum, parameter.Maximum,
+                    isToggle, imagePath, x, y, LabelForeground);
+            }).ToArray();
+        }
+    }
     public string FootswitchImagePath => Skin.FootswitchImagePath;
     public bool HasFootswitchImage => Skin.HasFootswitchImage;
-    public double Width => 196.0;
-    public double Height => 154.0;
-    public string CardBackground => Selected
-        ? (DarkTheme ? "#29463F" : "#D8F3E9")
-        : (DarkTheme ? "#232D37" : "#FFFFFF");
+    public bool HasCustomFootswitchPosition => Skin.HasFootswitchPosition;
+    public bool UseDefaultFootswitchPosition => !HasCustomFootswitchPosition;
+    public double FootswitchCanvasLeft => Skin.FootswitchX - 11.0;
+    public double FootswitchCanvasTop => Skin.FootswitchY - 11.0;
+    public double Width => Math.Clamp(Skin.Width, 160.0, 520.0);
+    public double Height => Math.Clamp(Skin.Height, 140.0, 520.0);
+    public string CardBackground => !string.IsNullOrWhiteSpace(Skin.BackgroundColor)
+        ? Skin.BackgroundColor
+        : Selected ? (DarkTheme ? "#29463F" : "#D8F3E9") : (DarkTheme ? "#232D37" : "#FFFFFF");
+    public string LabelForeground => !string.IsNullOrWhiteSpace(Skin.LabelColor)
+        ? Skin.LabelColor
+        : (DarkTheme ? "#EEF3F8" : "#172033");
     public string CardBorder => Selected
         ? (DarkTheme ? "#4DD6A4" : "#0F766E")
         : (DarkTheme ? "#4B5B6A" : "#B9C6D3");
@@ -110,9 +129,72 @@ public sealed record CanvasConnectionSnapshot(
 
 public sealed record ParameterEditorSnapshot(string Target, string Id, float Value, float Minimum, float Maximum)
 {
+    public string DisplayName => Id switch
+    {
+        "drive" => "增益",
+        "outputGain" => "输出",
+        "diodeThreshold" => "阈值",
+        "time" => "时间",
+        "feedback" => "反馈",
+        "mix" => "混合",
+        _ => Id
+    };
     public string ValueText => Value.ToString("0.###", CultureInfo.InvariantCulture);
     public string RangeText => $"{Minimum.ToString("0.###", CultureInfo.InvariantCulture)} .. {Maximum.ToString("0.###", CultureInfo.InvariantCulture)}";
     public bool IsValidRange => float.IsFinite(Minimum) && float.IsFinite(Maximum) && Maximum > Minimum;
+    public float NormalizedValue => IsValidRange ? Math.Clamp((Value - Minimum) / (Maximum - Minimum), 0.0F, 1.0F) : 0.0F;
+    public string NormalizedText => $"{NormalizedValue * 100.0F:0.#}%";
+    public float CoarseStep => IsValidRange ? CalculateNiceStep((Maximum - Minimum) / 100.0F) : 0.0F;
+    public float FineStep => CoarseStep / 10.0F;
+    public string StepText => $"步进 {CoarseStep.ToString("0.###", CultureInfo.InvariantCulture)}";
+
+    private static float CalculateNiceStep(float rawStep)
+    {
+        if (!float.IsFinite(rawStep) || rawStep <= 0.0F)
+        {
+            return 0.0F;
+        }
+        var magnitude = MathF.Pow(10.0F, MathF.Floor(MathF.Log10(rawStep)));
+        var normalized = rawStep / magnitude;
+        var nice = normalized <= 1.0F ? 1.0F : normalized <= 2.0F ? 2.0F : normalized <= 5.0F ? 5.0F : 10.0F;
+        return nice * magnitude;
+    }
+}
+
+public sealed class NodeNavigatorEntry : INotifyPropertyChanged
+{
+    private readonly Action<string, bool> selectionChanged;
+    private bool isBatchSelected;
+
+    public NodeNavigatorEntry(CanvasNodeSnapshot node, bool selected, Action<string, bool> selectionChanged)
+    {
+        Node = node;
+        isBatchSelected = selected;
+        this.selectionChanged = selectionChanged;
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    public CanvasNodeSnapshot Node { get; }
+    public string InstanceId => Node.InstanceId;
+    public string DisplayName => Node.DisplayName;
+    public string DetailText => $"{Node.InstanceId} · {(Node.Bypassed ? "旁路" : "启用")}";
+    public string SearchText => $"{DisplayName} {InstanceId} {Node.ModuleId} {Node.CategoryText}";
+    public string SelectionAutomationName => $"批量选择 {DisplayName} ({InstanceId})";
+    public string LocateAutomationName => $"在画布中定位 {DisplayName} ({InstanceId})";
+    public bool IsBatchSelected
+    {
+        get => isBatchSelected;
+        set
+        {
+            if (isBatchSelected == value)
+            {
+                return;
+            }
+            isBatchSelected = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsBatchSelected)));
+            selectionChanged(InstanceId, value);
+        }
+    }
 }
 
 public sealed record PresetLibraryEntry(string DisplayName, string SourcePath, bool IsValid, string StatusText)
@@ -240,8 +322,13 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     private IReadOnlyList<CanvasNodeSnapshot> canvasNodes = [];
     private IReadOnlyList<CanvasConnectionSnapshot> canvasConnections = [];
     private IReadOnlyList<CanvasNodeSnapshot> effectChainNodes = [];
+    private IReadOnlyList<NodeNavigatorEntry> nodeNavigatorEntries = [];
+    private readonly HashSet<string> batchSelectedNodeIds = new(StringComparer.Ordinal);
+    private string nodeNavigatorSearchText = string.Empty;
     private string? selectedConnectionSource;
     private string? selectedConnectionDestination;
+    private string? connectionSourceNodeId;
+    private string? connectionDestinationNodeId;
     private IReadOnlyList<ModuleCatalogSnapshot> moduleCatalog = [];
     private string moduleSearchText = string.Empty;
     private string moduleCatalogFilter = "全部";
@@ -331,11 +418,122 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public string ConnectionSelectionText => SelectedConnection is { } connection
         ? $"已选择连接：{connection.SourceInstanceId} → {connection.DestinationInstanceId}"
         : "未选择连接 · 点击连接线可针对该连接操作";
+    public IReadOnlyList<string> ConnectionNodeIds => snapshot.Nodes.Select(node => node.InstanceId).ToArray();
+    public string? ConnectionSourceNodeId
+    {
+        get => connectionSourceNodeId;
+        set => SetConnectionCandidate(ref connectionSourceNodeId, value, nameof(ConnectionSourceNodeId));
+    }
+    public string? ConnectionDestinationNodeId
+    {
+        get => connectionDestinationNodeId;
+        set => SetConnectionCandidate(ref connectionDestinationNodeId, value, nameof(ConnectionDestinationNodeId));
+    }
+    public string ConnectionCandidateStatusText
+    {
+        get
+        {
+            if (snapshot.Nodes.Count < 2) return "至少需要两个效果器节点";
+            if (string.IsNullOrWhiteSpace(ConnectionSourceNodeId) || string.IsNullOrWhiteSpace(ConnectionDestinationNodeId))
+                return "请选择来源和目标节点";
+            if (string.Equals(ConnectionSourceNodeId, ConnectionDestinationNodeId, StringComparison.Ordinal))
+                return "不能连接效果器自身";
+            if (snapshot.Connections.Any(connection =>
+                    string.Equals(connection.SourceInstanceId, ConnectionSourceNodeId, StringComparison.Ordinal) &&
+                    string.Equals(connection.DestinationInstanceId, ConnectionDestinationNodeId, StringComparison.Ordinal)))
+                return "该连接已存在";
+            if (ConnectionCandidateCreatesCycle()) return "该连接会形成环路";
+            return $"可创建：{ConnectionSourceNodeId} → {ConnectionDestinationNodeId}";
+        }
+    }
     // The chain projection is ordered from the first node through each serial
     // connection, then appends any disconnected nodes deterministically.  The
     // canvas remains the editing surface; this projection makes successful
     // insertion immediately visible as a member of the effect chain.
     public IReadOnlyList<CanvasNodeSnapshot> EffectChainNodes => effectChainNodes;
+    public IReadOnlyList<NodeNavigatorEntry> NodeNavigatorEntries => nodeNavigatorEntries;
+    public IReadOnlyList<NodeNavigatorEntry> FilteredNodeNavigatorEntries => nodeNavigatorEntries
+        .Where(entry => string.IsNullOrWhiteSpace(NodeNavigatorSearchText) ||
+                        entry.SearchText.Contains(NodeNavigatorSearchText, StringComparison.OrdinalIgnoreCase))
+        .ToArray();
+    public string NodeNavigatorSearchText
+    {
+        get => nodeNavigatorSearchText;
+        set
+        {
+            if (Set(ref nodeNavigatorSearchText, value))
+            {
+                OnPropertiesChanged(nameof(FilteredNodeNavigatorEntries), nameof(NodeNavigatorSummaryText));
+            }
+        }
+    }
+    public int BatchSelectedNodeCount => batchSelectedNodeIds.Count;
+    public bool CanBatchNodes => BatchSelectedNodeCount > 0;
+    public bool CanBatchBypassNodes => nodeNavigatorEntries.Any(entry =>
+        entry.IsBatchSelected && !entry.Node.Bypassed);
+    public bool CanBatchEnableNodes => nodeNavigatorEntries.Any(entry =>
+        entry.IsBatchSelected && entry.Node.Bypassed);
+    public string NodeNavigatorSummaryText =>
+        $"{FilteredNodeNavigatorEntries.Count}/{NodeNavigatorEntries.Count} 个节点 · 已选 {BatchSelectedNodeCount}";
+
+    public void SelectAllFilteredNodes()
+    {
+        var filtered = FilteredNodeNavigatorEntries;
+        if (filtered.Count == 0)
+        {
+            Status = "当前搜索没有可选择的工程节点";
+            return;
+        }
+        foreach (var entry in filtered)
+        {
+            entry.IsBatchSelected = true;
+        }
+        Status = $"已选择 {BatchSelectedNodeCount} 个工程节点";
+    }
+
+    public void ClearBatchNodeSelection()
+    {
+        if (batchSelectedNodeIds.Count == 0)
+        {
+            return;
+        }
+        batchSelectedNodeIds.Clear();
+        foreach (var entry in nodeNavigatorEntries)
+        {
+            entry.IsBatchSelected = false;
+        }
+        OnBatchNodeSelectionChanged();
+        Status = "已清空工程节点批量选择";
+    }
+
+    public bool SetBatchNodesBypassed(bool bypassed)
+    {
+        if (backend is null || !CanBatchNodes)
+        {
+            Status = "请先勾选需要批量操作的工程节点";
+            return false;
+        }
+        var instanceIds = nodeNavigatorEntries
+            .Where(entry => entry.IsBatchSelected)
+            .Select(entry => entry.InstanceId)
+            .ToArray();
+        try
+        {
+            backend.SetNodesBypassed(instanceIds, bypassed);
+            Refresh(reportStatus: false);
+            Status = bypassed
+                ? $"已旁路 {instanceIds.Length} 个工程节点"
+                : $"已启用 {instanceIds.Length} 个工程节点";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Refresh(reportStatus: false);
+            Status = exception.Message;
+            return false;
+        }
+    }
+
     public IReadOnlyList<ModuleCatalogSnapshot> ModuleCatalog => moduleCatalog;
     public IReadOnlyList<ModuleCatalogSnapshot> FilteredModuleCatalog => moduleCatalog
         .Where(module => string.IsNullOrWhiteSpace(ModuleSearchText) ||
@@ -393,9 +591,26 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             : SelectedNode.Parameters.Select(parameter =>
                 new ParameterEditorSnapshot($"{SelectedNode.InstanceId}.{parameter.Id}", parameter.Id, parameter.Value,
                     parameter.Minimum, parameter.Maximum)).ToArray();
+    public IReadOnlyList<NodePortSnapshot> SelectedPorts => SelectedNode?.Ports ?? [];
+    public string SelectedPortSummary => SelectedNode is null
+        ? "请选择画布中的效果器"
+        : SelectedPorts.Count == 0
+            ? "此模块未声明端口"
+            : $"已声明 {SelectedPorts.Count} 个端口";
+    public NodeResourceSnapshot? SelectedResource => SelectedNode?.Resource;
+    public string SelectedResourceKindText => SelectedResource?.KindText ?? "未选择模块";
+    public string SelectedResourcePathText => SelectedResource?.PathText ?? "-";
+    public string SelectedResourceStateText => SelectedResource?.StatusText ?? "-";
     public bool CanDuplicateSelected => SelectedNode is not null;
     public bool CanDeleteSelected => SelectedNode is not null;
-    public bool CanConnectNodes => snapshot.Nodes.Count >= 2;
+    public bool CanConnectNodes => snapshot.Nodes.Count >= 2 &&
+        !string.IsNullOrWhiteSpace(ConnectionSourceNodeId) &&
+        !string.IsNullOrWhiteSpace(ConnectionDestinationNodeId) &&
+        !string.Equals(ConnectionSourceNodeId, ConnectionDestinationNodeId, StringComparison.Ordinal) &&
+        !snapshot.Connections.Any(connection =>
+            string.Equals(connection.SourceInstanceId, ConnectionSourceNodeId, StringComparison.Ordinal) &&
+            string.Equals(connection.DestinationInstanceId, ConnectionDestinationNodeId, StringComparison.Ordinal)) &&
+        !ConnectionCandidateCreatesCycle();
     public bool CanDisconnectNodes => snapshot.Connections.Count > 0;
     public bool CanUndo => backend is not null && backend.CanUndo;
     public bool CanRedo => backend is not null && backend.CanRedo;
@@ -729,6 +944,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 ? null
                 : moduleCatalog.FirstOrDefault(module => module.ModuleId == selectedCatalogModuleId);
             snapshot = nextSnapshot;
+            NormalizeConnectionCandidate();
             selectedPresetLibraryIndex = FindPresetLibraryIndex(snapshot.SourcePath);
             foreach (var route in asioInputRoutes.Concat(asioOutputRoutes))
             {
@@ -758,7 +974,13 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 Status = $"Backend probe OK | schema {snapshot.SchemaVersion} | theme {(snapshot.DarkTheme ? "dark" : "light")}";
             }
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections), nameof(SelectedConnection), nameof(ConnectionSelectionText), nameof(EffectChainNodes),
-                nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme),
+                nameof(NodeNavigatorEntries), nameof(FilteredNodeNavigatorEntries), nameof(NodeNavigatorSummaryText),
+                nameof(BatchSelectedNodeCount), nameof(CanBatchNodes), nameof(CanBatchBypassNodes), nameof(CanBatchEnableNodes),
+                nameof(ConnectionNodeIds), nameof(ConnectionSourceNodeId), nameof(ConnectionDestinationNodeId),
+                nameof(ConnectionCandidateStatusText),
+                nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(SelectedPorts),
+                nameof(SelectedPortSummary), nameof(SelectedResource), nameof(SelectedResourceKindText),
+                nameof(SelectedResourcePathText), nameof(SelectedResourceStateText), nameof(IsDirty), nameof(DarkTheme),
                 nameof(CanDuplicateSelected), nameof(CanDeleteSelected), nameof(CanConnectNodes), nameof(CanDisconnectNodes),
                 nameof(CanUndo), nameof(CanRedo),
                 nameof(Theme), nameof(ThemeDisplayName),
@@ -831,7 +1053,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(CanvasConnections), nameof(SelectedConnection), nameof(ConnectionSelectionText), nameof(EffectChainNodes),
-                nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(IsDirty), nameof(DarkTheme), nameof(WindowTitle),
+                nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(SelectedPorts),
+                nameof(SelectedPortSummary), nameof(SelectedResource), nameof(SelectedResourceKindText),
+                nameof(SelectedResourcePathText), nameof(SelectedResourceStateText), nameof(IsDirty), nameof(DarkTheme), nameof(WindowTitle),
                 nameof(FileStatus), nameof(CanDuplicateSelected), nameof(CanDeleteSelected), nameof(CanConnectNodes), nameof(CanDisconnectNodes));
         }
         catch (Exception exception)
@@ -1006,8 +1230,72 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     public bool SetParameterText(string target, string text)
     {
-        return float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) &&
-               SetParameter(target, value);
+        var parameter = FindParameterEditor(target);
+        if (parameter is null)
+        {
+            Status = "参数目标不存在";
+            return false;
+        }
+        var trimmed = text.Trim();
+        float value;
+        if (trimmed.EndsWith('%'))
+        {
+            var percentText = trimmed[..^1].Trim();
+            if (!parameter.IsValidRange ||
+                !float.TryParse(percentText, NumberStyles.Float, CultureInfo.InvariantCulture, out var percent) ||
+                !float.IsFinite(percent) || percent is < 0.0F or > 100.0F)
+            {
+                Status = $"参数 {parameter.Id} 的百分比必须在 0% 到 100% 之间";
+                return false;
+            }
+            value = parameter.Minimum + (parameter.Maximum - parameter.Minimum) * percent / 100.0F;
+        }
+        else if (!float.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out value) &&
+                 !float.TryParse(trimmed, NumberStyles.Float, CultureInfo.CurrentCulture, out value))
+        {
+            Status = $"参数 {parameter.Id} 需要有效数值或百分比";
+            return false;
+        }
+        return SetParameter(target, value);
+    }
+
+    public bool NudgeParameter(string target, int direction, bool fine)
+    {
+        var parameter = FindParameterEditor(target);
+        if (parameter is null || direction == 0 || !parameter.IsValidRange)
+        {
+            Status = "参数步进目标无效";
+            return false;
+        }
+        var step = fine ? parameter.FineStep : parameter.CoarseStep;
+        var candidate = Math.Clamp(parameter.Value + Math.Sign(direction) * step, parameter.Minimum, parameter.Maximum);
+        if (Math.Abs(candidate - parameter.Value) < 0.000001F)
+        {
+            Status = $"参数 {parameter.Id} 已到范围边界";
+            return false;
+        }
+        var updated = SetParameter(target, candidate);
+        if (updated)
+        {
+            Status = $"参数 {parameter.Id}: {candidate.ToString("0.###", CultureInfo.InvariantCulture)}";
+        }
+        return updated;
+    }
+
+    private ParameterEditorSnapshot? FindParameterEditor(string target)
+    {
+        var separator = target.LastIndexOf('.');
+        if (separator <= 0 || separator >= target.Length - 1)
+        {
+            return null;
+        }
+        var instanceId = target[..separator];
+        var parameterId = target[(separator + 1)..];
+        var parameter = snapshot.Nodes.FirstOrDefault(node => node.InstanceId == instanceId)?.Parameters
+            .FirstOrDefault(candidate => candidate.Id == parameterId);
+        return parameter is null
+            ? null
+            : new ParameterEditorSnapshot(target, parameter.Id, parameter.Value, parameter.Minimum, parameter.Maximum);
     }
 
     public bool ToggleNodeBypass(string instanceId)
@@ -1092,7 +1380,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode),
-                nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(CanDuplicateSelected), nameof(CanDeleteSelected));
+                nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(SelectedPorts),
+                nameof(SelectedPortSummary), nameof(SelectedResource), nameof(SelectedResourceKindText),
+                nameof(SelectedResourcePathText), nameof(SelectedResourceStateText), nameof(CanDuplicateSelected), nameof(CanDeleteSelected));
             return true;
         }
         catch (Exception exception)
@@ -1125,7 +1415,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode),
-                nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(CanDuplicateSelected), nameof(CanDeleteSelected));
+                nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(SelectedPorts),
+                nameof(SelectedPortSummary), nameof(SelectedResource), nameof(SelectedResourceKindText),
+                nameof(SelectedResourcePathText), nameof(SelectedResourceStateText), nameof(CanDuplicateSelected), nameof(CanDeleteSelected));
             return true;
         }
         catch (Exception exception)
@@ -1147,7 +1439,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode),
-                nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(CanDuplicateSelected), nameof(CanDeleteSelected));
+                nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(SelectedPorts),
+                nameof(SelectedPortSummary), nameof(SelectedResource), nameof(SelectedResourceKindText),
+                nameof(SelectedResourcePathText), nameof(SelectedResourceStateText), nameof(CanDuplicateSelected), nameof(CanDeleteSelected));
             return true;
         }
         catch (Exception exception)
@@ -1169,7 +1463,9 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             snapshot = backend.ReadSnapshot();
             RebuildCanvasProjections();
             OnPropertiesChanged(nameof(Snapshot), nameof(Nodes), nameof(CanvasNodes), nameof(SelectedNode),
-                nameof(SelectedNodeDisplayName), nameof(SelectedParameters),
+                nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(SelectedPorts),
+                nameof(SelectedPortSummary), nameof(SelectedResource), nameof(SelectedResourceKindText),
+                nameof(SelectedResourcePathText), nameof(SelectedResourceStateText),
                 nameof(IsDirty), nameof(WindowTitle), nameof(FileStatus), nameof(CanDuplicateSelected), nameof(CanDeleteSelected),
                 nameof(CanConnectNodes), nameof(CanDisconnectNodes));
             return true;
@@ -1259,14 +1555,42 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public bool ConnectNodes(string sourceInstanceId, string destinationInstanceId)
     {
         if (backend is null) return false;
-        try { backend.Connect(sourceInstanceId, destinationInstanceId); Refresh(); Status = "Connection updated"; return true; }
+        try
+        {
+            backend.Connect(sourceInstanceId, destinationInstanceId);
+            Refresh();
+            selectedConnectionSource = sourceInstanceId;
+            selectedConnectionDestination = destinationInstanceId;
+            RebuildCanvasProjections();
+            OnPropertiesChanged(nameof(SelectedConnection), nameof(CanvasConnections), nameof(ConnectionSelectionText));
+            Status = $"已创建连接：{sourceInstanceId} → {destinationInstanceId}";
+            return true;
+        }
         catch (Exception exception) { Status = exception.Message; Refresh(); return false; }
+    }
+
+    public bool ConnectConnectionCandidate()
+    {
+        if (!CanConnectNodes)
+        {
+            Status = ConnectionCandidateStatusText;
+            return false;
+        }
+        return ConnectNodes(ConnectionSourceNodeId!, ConnectionDestinationNodeId!);
     }
 
     public bool DisconnectNodes(string sourceInstanceId, string destinationInstanceId)
     {
         if (backend is null) return false;
-        try { backend.Disconnect(sourceInstanceId, destinationInstanceId); Refresh(); Status = "Connection removed"; return true; }
+        try
+        {
+            backend.Disconnect(sourceInstanceId, destinationInstanceId);
+            Refresh();
+            ConnectionSourceNodeId = sourceInstanceId;
+            ConnectionDestinationNodeId = destinationInstanceId;
+            Status = $"已断开连接：{sourceInstanceId} → {destinationInstanceId}";
+            return true;
+        }
         catch (Exception exception) { Status = exception.Message; Refresh(); return false; }
     }
 
@@ -1285,8 +1609,12 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         selectedConnectionSource = sourceInstanceId;
         selectedConnectionDestination = destinationInstanceId;
+        connectionSourceNodeId = sourceInstanceId;
+        connectionDestinationNodeId = destinationInstanceId;
         RebuildCanvasProjections();
-        OnPropertiesChanged(nameof(CanvasConnections), nameof(SelectedConnection), nameof(ConnectionSelectionText));
+        OnPropertiesChanged(nameof(CanvasConnections), nameof(SelectedConnection), nameof(ConnectionSelectionText),
+            nameof(ConnectionSourceNodeId), nameof(ConnectionDestinationNodeId), nameof(CanConnectNodes),
+            nameof(ConnectionCandidateStatusText));
         Status = $"已选择连接：{sourceInstanceId} → {destinationInstanceId}";
         return true;
     }
@@ -1302,6 +1630,62 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         RebuildCanvasProjections();
         OnPropertiesChanged(nameof(CanvasConnections), nameof(SelectedConnection), nameof(ConnectionSelectionText));
         return true;
+    }
+
+    private void SetConnectionCandidate(ref string? field, string? value, string propertyName)
+    {
+        if (value is not null && !snapshot.Nodes.Any(node =>
+                string.Equals(node.InstanceId, value, StringComparison.Ordinal)))
+        {
+            value = null;
+        }
+        if (string.Equals(field, value, StringComparison.Ordinal))
+        {
+            return;
+        }
+        field = value;
+        OnPropertiesChanged(propertyName, nameof(CanConnectNodes), nameof(ConnectionCandidateStatusText));
+    }
+
+    private void NormalizeConnectionCandidate()
+    {
+        if (connectionSourceNodeId is not null && !snapshot.Nodes.Any(node =>
+                string.Equals(node.InstanceId, connectionSourceNodeId, StringComparison.Ordinal)))
+        {
+            connectionSourceNodeId = null;
+        }
+        if (connectionDestinationNodeId is not null && !snapshot.Nodes.Any(node =>
+                string.Equals(node.InstanceId, connectionDestinationNodeId, StringComparison.Ordinal)))
+        {
+            connectionDestinationNodeId = null;
+        }
+    }
+
+    private bool ConnectionCandidateCreatesCycle()
+    {
+        if (string.IsNullOrWhiteSpace(ConnectionSourceNodeId) || string.IsNullOrWhiteSpace(ConnectionDestinationNodeId))
+        {
+            return false;
+        }
+        var successors = snapshot.Connections
+            .GroupBy(connection => connection.SourceInstanceId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key,
+                group => group.Select(connection => connection.DestinationInstanceId).ToArray(),
+                StringComparer.Ordinal);
+        var pending = new Stack<string>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        pending.Push(ConnectionDestinationNodeId);
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            if (!visited.Add(current)) continue;
+            if (string.Equals(current, ConnectionSourceNodeId, StringComparison.Ordinal)) return true;
+            if (successors.TryGetValue(current, out var next))
+            {
+                foreach (var destination in next) pending.Push(destination);
+            }
+        }
+        return false;
     }
 
     public bool ImportResource(string path)
@@ -1895,7 +2279,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
 
     private void ConnectSelectedNodes()
     {
-        if (snapshot.Nodes.Count >= 2) ConnectNodes(snapshot.Nodes[0].InstanceId, snapshot.Nodes[^1].InstanceId);
+        ConnectConnectionCandidate();
     }
 
     private void DisconnectSelectedNodes()
@@ -2028,7 +2412,34 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
         ordered.AddRange(projectedNodes.Where(node => !visited.Contains(node.InstanceId)));
         effectChainNodes = ordered;
+
+        var currentNodeIds = projectedNodes.Select(node => node.InstanceId).ToHashSet(StringComparer.Ordinal);
+        batchSelectedNodeIds.RemoveWhere(instanceId => !currentNodeIds.Contains(instanceId));
+        nodeNavigatorEntries = projectedNodes
+            .Select(node => new NodeNavigatorEntry(node, batchSelectedNodeIds.Contains(node.InstanceId),
+                BatchNodeSelectionChanged))
+            .ToArray();
+        OnPropertiesChanged(nameof(NodeNavigatorEntries), nameof(FilteredNodeNavigatorEntries),
+            nameof(NodeNavigatorSummaryText), nameof(BatchSelectedNodeCount), nameof(CanBatchNodes),
+            nameof(CanBatchBypassNodes), nameof(CanBatchEnableNodes));
     }
+
+    private void BatchNodeSelectionChanged(string instanceId, bool selected)
+    {
+        if (selected)
+        {
+            batchSelectedNodeIds.Add(instanceId);
+        }
+        else
+        {
+            batchSelectedNodeIds.Remove(instanceId);
+        }
+        OnBatchNodeSelectionChanged();
+    }
+
+    private void OnBatchNodeSelectionChanged() =>
+        OnPropertiesChanged(nameof(BatchSelectedNodeCount), nameof(CanBatchNodes),
+            nameof(CanBatchBypassNodes), nameof(CanBatchEnableNodes), nameof(NodeNavigatorSummaryText));
 
     private int FindPresetLibraryIndex(string sourcePath)
     {

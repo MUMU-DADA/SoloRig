@@ -1075,6 +1075,8 @@ MnaSolveResult MnaPreparedCircuit::Solve(std::span<const double> input_voltages)
         });
         bool converged = !has_nonlinearity;
         for (std::uint32_t iteration = 0; iteration < max_iterations_; ++iteration) {
+            ++result.iteration_count;
+            result.maximum_iteration_count = std::max(result.maximum_iteration_count, iteration + 1U);
             std::copy(solution_.begin(), solution_.end(), newton_previous_.begin());
             std::fill(matrix_.begin(), matrix_.end(), 0.0);
             std::fill(rhs_.begin(), rhs_.end(), 0.0);
@@ -1414,7 +1416,8 @@ MnaSolveResult MnaPreparedCircuit::Solve(std::span<const double> input_voltages)
             }
         }
         if (!converged) {
-            return {.error = MnaSolveError::NonConvergent};
+            result.error = MnaSolveError::NonConvergent;
+            return result;
         }
         for (const auto& element : elements_) {
             if (element.history_index != kNoIndex) {

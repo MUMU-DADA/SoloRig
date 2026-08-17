@@ -1,0 +1,1183 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="using:SoloRig.Ui"
+             x:Class="SoloRig.Ui.Avalonia.PedalWorkshopView"
+             x:Name="WorkshopRoot"
+             MinWidth="760"
+             MinHeight="480"
+             SizeChanged="WorkshopSizeChanged"
+             PointerMoved="CircuitRootPointerMoved"
+             PointerReleased="CircuitRootPointerReleased">
+  <UserControl.Resources>
+    <SolidColorBrush x:Key="WorkshopWindowBrush" Color="#11151B" />
+    <SolidColorBrush x:Key="WorkshopTopbarBrush" Color="#161B22" />
+    <SolidColorBrush x:Key="WorkshopPanelBrush" Color="#191F27" />
+    <SolidColorBrush x:Key="WorkshopCanvasBrush" Color="#10151A" />
+    <SolidColorBrush x:Key="WorkshopControlBrush" Color="#222A34" />
+    <SolidColorBrush x:Key="WorkshopControlHoverBrush" Color="#2A3440" />
+    <SolidColorBrush x:Key="WorkshopBorderBrush" Color="#394655" />
+    <SolidColorBrush x:Key="WorkshopTextBrush" Color="#EEF3F8" />
+    <SolidColorBrush x:Key="WorkshopMutedBrush" Color="#9AA8B8" />
+    <SolidColorBrush x:Key="WorkshopAccentBrush" Color="#4DD6A4" />
+    <SolidColorBrush x:Key="WorkshopAccentTextBrush" Color="#10261F" />
+    <SolidColorBrush x:Key="WorkshopErrorBrush" Color="#FF7B72" />
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <Style Selector="TextBlock.workshop-text">
+      <Setter Property="Foreground" Value="{DynamicResource WorkshopTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.workshop-muted">
+      <Setter Property="Foreground" Value="{DynamicResource WorkshopMutedBrush}" />
+    </Style>
+    <Style Selector="TextBlock.workshop-label">
+      <Setter Property="Foreground" Value="{DynamicResource WorkshopMutedBrush}" />
+      <Setter Property="FontSize" Value="11" />
+    </Style>
+    <Style Selector="Button.workshop-button">
+      <Setter Property="Background" Value="{DynamicResource WorkshopControlBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource WorkshopBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource WorkshopTextBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="11,7" />
+      <Setter Property="MinHeight" Value="34" />
+    </Style>
+    <Style Selector="Button.workshop-button:pointerover">
+      <Setter Property="Background" Value="{DynamicResource WorkshopControlHoverBrush}" />
+    </Style>
+    <Style Selector="Button.workshop-button:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource WorkshopAccentBrush}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <Style Selector="Button.workshop-button.primary">
+      <Setter Property="Background" Value="{DynamicResource WorkshopAccentBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource WorkshopAccentBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource WorkshopAccentTextBrush}" />
+    </Style>
+    <Style Selector="Button.workshop-icon">
+      <Setter Property="Width" Value="34" />
+      <Setter Property="Height" Value="34" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="FontSize" Value="17" />
+    </Style>
+    <Style Selector="TextBox.workshop-input, ComboBox.workshop-input, NumericUpDown.workshop-input">
+      <Setter Property="Background" Value="{DynamicResource WorkshopWindowBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource WorkshopBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource WorkshopTextBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="MinHeight" Value="36" />
+    </Style>
+    <Style Selector="TextBox.workshop-input">
+      <Setter Property="Padding" Value="9,7" />
+    </Style>
+    <Style Selector="TextBox.workshop-input:focus-visible, ComboBox.workshop-input:focus-visible, NumericUpDown.workshop-input:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource WorkshopAccentBrush}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <Style Selector="TabControl.workshop-tabs">
+      <Setter Property="Background" Value="{DynamicResource WorkshopWindowBrush}" />
+    </Style>
+    <Style Selector="TabItem.workshop-tab">
+      <Setter Property="Foreground" Value="{DynamicResource WorkshopMutedBrush}" />
+      <Setter Property="Padding" Value="14,10" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="TabItem.workshop-tab:selected">
+      <Setter Property="Foreground" Value="{DynamicResource WorkshopAccentBrush}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+  </UserControl.Styles>
+
+  <Border Background="{DynamicResource WorkshopWindowBrush}"
+          BorderBrush="{DynamicResource WorkshopBorderBrush}"
+          BorderThickness="1"
+          CornerRadius="8"
+          ClipToBounds="True">
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+      <Border Grid.Row="0" Background="{DynamicResource WorkshopTopbarBrush}"
+              BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="0,0,0,1"
+              Padding="18,12">
+        <Grid x:Name="WorkshopTopbarGrid" ColumnDefinitions="*,Auto">
+          <StackPanel x:Name="WorkshopTitlePanel" Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+            <TextBlock Text="效果器工坊" Classes="workshop-text" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding FileStatus}" Classes="workshop-muted" FontSize="10"
+                       TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+          <WrapPanel x:Name="WorkshopActions" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+                     HorizontalAlignment="Right">
+            <ComboBox x:Name="TemplateSelector" Classes="workshop-input" Width="150" Margin="0,0,8,0"
+                      AutomationProperties.Name="新建模块模板">
+              <ComboBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding DisplayName}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button Classes="workshop-button" Content="新建" Margin="0,0,6,0" Click="NewProjectClick"
+                    AutomationProperties.Name="新建效果器项目" />
+            <Button Classes="workshop-button" Content="打开" Margin="0,0,6,0" Click="OpenProjectClick"
+                    AutomationProperties.Name="打开效果器项目" />
+            <Button Classes="workshop-button" Content="另存为" Margin="0,0,6,0" Click="SaveProjectAsClick"
+                    AutomationProperties.Name="效果器项目另存为" />
+            <Button Classes="workshop-button" Content="复制" Margin="0,0,6,0" Click="CopyProjectClick"
+                    AutomationProperties.Name="复制效果器项目" />
+            <Button Classes="workshop-button" Content="导出包" Margin="0,0,6,0" Click="ExportProjectClick"
+                    AutomationProperties.Name="导出效果器模块包" />
+            <Button Classes="workshop-button primary" Content="保存" Margin="0,0,6,0" Click="SaveProjectClick"
+                    AutomationProperties.Name="保存效果器项目" />
+            <Button Classes="workshop-button" Content="撤销" Margin="0,0,6,0" IsEnabled="{Binding CanUndo}"
+                    ToolTip.Tip="撤销（Ctrl+Z）" AutomationProperties.Name="撤销工坊修改" Click="UndoClick" />
+            <Button Classes="workshop-button" Content="重做" Margin="0,0,6,0" IsEnabled="{Binding CanRedo}"
+                    ToolTip.Tip="重做（Ctrl+Y / Ctrl+Shift+Z）" AutomationProperties.Name="重做工坊修改" Click="RedoClick" />
+            <Button Classes="workshop-button" Content="安装到模块库" Click="InstallProjectClick"
+                    AutomationProperties.Name="安装效果器到模块库" />
+          </WrapPanel>
+        </Grid>
+      </Border>
+
+      <Border Grid.Row="1" x:Name="WorkshopStatusBand" Background="{DynamicResource WorkshopPanelBrush}"
+              BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="0,0,0,1"
+              Padding="18,9">
+        <Grid x:Name="WorkshopStatusGrid" ColumnDefinitions="Auto,*,180,220,Auto,Auto">
+          <Border x:Name="WorkshopKindBadge" Grid.Column="0" Background="{DynamicResource WorkshopControlBrush}" CornerRadius="4" Padding="8,4">
+            <TextBlock Text="{Binding KindDisplayName}" Classes="workshop-text" FontSize="11" FontWeight="SemiBold" />
+          </Border>
+          <TextBlock x:Name="WorkshopStatusText" Grid.Column="1" Text="{Binding Status}" Classes="workshop-muted" FontSize="11"
+                     Margin="12,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          <TextBox Grid.Column="2" x:Name="RecentProjectSearchBox" Classes="workshop-input" Margin="0,0,6,0"
+                   Watermark="搜索项目" TextChanged="RecentProjectSearchChanged"
+                   AutomationProperties.Name="搜索最近效果器项目" />
+          <ComboBox Grid.Column="3" x:Name="RecentProjectSelector" Classes="workshop-input" Margin="0,0,6,0"
+                    AutomationProperties.Name="最近的效果器项目">
+            <ComboBox.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <Button x:Name="OpenRecentProjectButton" Grid.Column="4" Classes="workshop-button" Content="打开最近" Margin="0,0,6,0"
+                  Click="OpenRecentProjectClick" AutomationProperties.Name="打开最近效果器项目" />
+          <Button x:Name="ValidateProjectButton" Grid.Column="5" Classes="workshop-button" Content="校验项目" Click="ValidateProjectClick"
+                  AutomationProperties.Name="校验效果器项目" />
+        </Grid>
+      </Border>
+
+      <TabControl Grid.Row="2" x:Name="WorkshopTabs" Classes="workshop-tabs"
+                  AutomationProperties.Name="效果器工坊编辑页面">
+        <TabItem Header="基础信息" Classes="workshop-tab">
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <Grid Margin="24" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+              <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,12,16" Spacing="6">
+                <TextBlock Text="模块 ID" Classes="workshop-label" />
+                <TextBox x:Name="ModuleIdEditor" Classes="workshop-input" Text="{Binding ModuleId, Mode=TwoWay}"
+                         AutomationProperties.Name="模块 ID" />
+              </StackPanel>
+              <StackPanel Grid.Row="0" Grid.Column="1" Margin="12,0,0,16" Spacing="6">
+                <TextBlock Text="显示名称" Classes="workshop-label" />
+                <TextBox Classes="workshop-input" Text="{Binding DisplayName, Mode=TwoWay}"
+                         AutomationProperties.Name="模块显示名称" />
+              </StackPanel>
+              <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,12,16" Spacing="6">
+                <TextBlock Text="版本" Classes="workshop-label" />
+                <TextBox Classes="workshop-input" Text="{Binding PackageVersion, Mode=TwoWay}"
+                         AutomationProperties.Name="模块版本" />
+              </StackPanel>
+              <StackPanel Grid.Row="1" Grid.Column="1" Margin="12,0,0,16" Spacing="6">
+                <TextBlock Text="作者" Classes="workshop-label" />
+                <TextBox Classes="workshop-input" Text="{Binding Author, Mode=TwoWay}"
+                         AutomationProperties.Name="模块作者" />
+              </StackPanel>
+              <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,0,16" Spacing="6">
+                <TextBlock Text="说明" Classes="workshop-label" />
+                <TextBox Classes="workshop-input" Text="{Binding Description, Mode=TwoWay}" AcceptsReturn="True"
+                         TextWrapping="Wrap" MinHeight="92" AutomationProperties.Name="模块说明" />
+              </StackPanel>
+              <StackPanel Grid.Row="3" Grid.Column="0" Margin="0,0,12,16" Spacing="6">
+                <TextBlock Text="声明延迟（采样）" Classes="workshop-label" />
+                <NumericUpDown Classes="workshop-input" Value="{Binding DeclaredLatencySamples, Mode=TwoWay}"
+                               Minimum="0" Maximum="10000000" Increment="1"
+                               AutomationProperties.Name="声明延迟采样数" />
+              </StackPanel>
+              <StackPanel Grid.Row="3" Grid.Column="1" Margin="12,0,0,16" Spacing="6">
+                <TextBlock Text="逻辑文件" Classes="workshop-label" />
+                <TextBox Classes="workshop-input" Text="{Binding LogicFile}" IsReadOnly="True"
+                         AutomationProperties.Name="逻辑文件路径" />
+              </StackPanel>
+            </Grid>
+          </ScrollViewer>
+        </TabItem>
+
+        <TabItem Header="端口与参数" Classes="workshop-tab">
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="24" Spacing="24">
+              <Grid RowDefinitions="Auto,Auto">
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,10">
+                  <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Text="音频端口" Classes="workshop-text" FontSize="14" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Ports.Count, StringFormat='{}{0} 个端口'}" Classes="workshop-muted" FontSize="10" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Classes="workshop-button" Content="添加输入" Margin="0,0,6,0" Click="AddInputPortClick"
+                          AutomationProperties.Name="添加模块输入端口" />
+                  <Button Grid.Column="2" Classes="workshop-button" Content="添加输出" Click="AddOutputPortClick"
+                          AutomationProperties.Name="添加模块输出端口" />
+                </Grid>
+                <ItemsControl Grid.Row="1" x:Name="PortList" ItemsSource="{Binding Ports}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid ColumnDefinitions="2*,*,120,42" Margin="0,0,0,8">
+                        <TextBox Grid.Column="0" Classes="workshop-input" Text="{Binding Id, Mode=TwoWay}"
+                                 Margin="0,0,8,0" Watermark="端口 ID" />
+                        <ComboBox Grid.Column="1" Classes="workshop-input" ItemsSource="{x:Static ui:ModuleAuthoringDocument.PortDirections}"
+                                  SelectedItem="{Binding Direction, Mode=TwoWay}" Margin="0,0,8,0" />
+                        <NumericUpDown Grid.Column="2" Classes="workshop-input" Value="{Binding MaxChannels, Mode=TwoWay}"
+                                       Minimum="1" Maximum="64" Increment="1" Margin="0,0,8,0" />
+                        <Button Grid.Column="3" Classes="workshop-button workshop-icon" Content="×" Tag="{Binding}"
+                                ToolTip.Tip="删除端口" AutomationProperties.Name="删除端口" Click="RemovePortClick" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Grid>
+
+              <Grid RowDefinitions="Auto,Auto">
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+                  <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Text="公开参数" Classes="workshop-text" FontSize="14" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Parameters.Count, StringFormat='{}{0} 个参数'}" Classes="workshop-muted" FontSize="10" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Classes="workshop-button" Content="添加参数" Click="AddParameterClick"
+                          AutomationProperties.Name="添加模块公开参数" />
+                </Grid>
+                <ItemsControl Grid.Row="1" x:Name="ParameterList" ItemsSource="{Binding Parameters}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid ColumnDefinitions="1.1*,1.2*,70,90,90,90,110,42" Margin="0,0,0,8">
+                        <TextBox Grid.Column="0" Classes="workshop-input" Text="{Binding Id, Mode=TwoWay}" Margin="0,0,8,0" Watermark="参数 ID" />
+                        <TextBox Grid.Column="1" Classes="workshop-input" Text="{Binding DisplayName, Mode=TwoWay}" Margin="0,0,8,0" Watermark="名称" />
+                        <TextBox Grid.Column="2" Classes="workshop-input" Text="{Binding Unit, Mode=TwoWay}" Margin="0,0,8,0" Watermark="单位" />
+                        <NumericUpDown Grid.Column="3" Classes="workshop-input" Value="{Binding Minimum, Mode=TwoWay}" Margin="0,0,8,0" />
+                        <NumericUpDown Grid.Column="4" Classes="workshop-input" Value="{Binding Maximum, Mode=TwoWay}" Margin="0,0,8,0" />
+                        <NumericUpDown Grid.Column="5" Classes="workshop-input" Value="{Binding DefaultValue, Mode=TwoWay}" Margin="0,0,8,0" />
+                        <ComboBox Grid.Column="6" Classes="workshop-input" ItemsSource="{x:Static ui:ModuleAuthoringDocument.ControlKinds}"
+                                  SelectedItem="{Binding ControlKind, Mode=TwoWay}" Margin="0,0,8,0" />
+                        <Button Grid.Column="7" Classes="workshop-button workshop-icon" Content="×" Tag="{Binding}"
+                                ToolTip.Tip="删除参数" AutomationProperties.Name="删除参数" Click="RemoveParameterClick" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Grid>
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <TabItem Header="功能逻辑" Classes="workshop-tab">
+          <Grid Margin="24" RowDefinitions="Auto,Auto,*">
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,10">
+              <StackPanel Grid.Column="0" Spacing="2">
+                <TextBlock Text="{Binding KindDisplayName}" Classes="workshop-text" FontSize="14" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding LogicFile}" Classes="workshop-muted" FontSize="10" />
+              </StackPanel>
+              <Button Grid.Column="1" Classes="workshop-button" Content="{Binding AnalogEditorModeText}"
+                      IsVisible="{Binding IsAnalogLogic}" Margin="0,0,6,0" Click="ToggleAnalogEditorModeClick"
+                      AutomationProperties.Name="切换模拟电路结构化和高级编辑模式" />
+              <Button Grid.Column="2" x:Name="SelectAssetButton" Classes="workshop-button" Content="选择资源文件"
+                      IsVisible="{Binding UsesExternalAsset}" Click="SelectSourceAssetClick"
+                      AutomationProperties.Name="选择模块源资源文件" />
+            </Grid>
+            <TextBox Grid.Row="1" x:Name="LogicEditor" Classes="workshop-input" Text="{Binding LogicSource, Mode=TwoWay}"
+                     IsVisible="{Binding UsesTextLogic}" AcceptsReturn="True" TextWrapping="NoWrap"
+                     FontFamily="Consolas" FontSize="12" ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="模块逻辑 JSON" />
+            <Border Grid.Row="1" IsVisible="{Binding UsesStructuredDigitalLogic}"
+                    Background="{DynamicResource WorkshopPanelBrush}" BorderBrush="{DynamicResource WorkshopBorderBrush}"
+                    BorderThickness="1" CornerRadius="6" Padding="16">
+              <Grid RowDefinitions="Auto,Auto,Auto,*">
+                <StackPanel Grid.Row="0" Spacing="6" Margin="0,0,0,14">
+                  <TextBlock Text="算法 ID" Classes="workshop-label" />
+                  <TextBox Classes="workshop-input" Text="{Binding AlgorithmId, Mode=TwoWay}"
+                           AutomationProperties.Name="数字算法 ID" />
+                </StackPanel>
+                <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+                  <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Text="处理操作" Classes="workshop-text" FontSize="13" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding DigitalOperations.Count, StringFormat='{}{0} 个操作'}"
+                               Classes="workshop-muted" FontSize="10" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Classes="workshop-button" Content="添加操作" Click="AddDigitalOperationClick"
+                          AutomationProperties.Name="添加数字处理操作" />
+                </Grid>
+                <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled">
+                  <ItemsControl x:Name="DigitalOperationList" ItemsSource="{Binding DigitalOperations}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Grid ColumnDefinitions="180,*,42" Margin="0,0,0,8">
+                          <ComboBox Grid.Column="0" Classes="workshop-input"
+                                    ItemsSource="{x:Static ui:ModuleAuthoringDocument.DigitalOperationTypes}"
+                                    SelectedItem="{Binding Type, Mode=TwoWay}" Margin="0,0,8,0" />
+                          <TextBox Grid.Column="1" Classes="workshop-input" Text="{Binding ParameterId, Mode=TwoWay}"
+                                   Watermark="可选参数 ID" Margin="0,0,8,0" />
+                          <Button Grid.Column="2" Classes="workshop-button workshop-icon" Content="×" Tag="{Binding}"
+                                  ToolTip.Tip="删除操作" AutomationProperties.Name="删除数字操作"
+                                  Click="RemoveDigitalOperationClick" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </Grid>
+            </Border>
+            <Border Grid.Row="1" IsVisible="{Binding UsesStructuredAnalogLogic}"
+                    Background="{DynamicResource WorkshopPanelBrush}" BorderBrush="{DynamicResource WorkshopBorderBrush}"
+                    BorderThickness="1" CornerRadius="6" Padding="16">
+              <Grid RowDefinitions="Auto,Auto,*">
+                <Grid Grid.Row="0" ColumnDefinitions="*,*,*,120" Margin="0,0,0,14">
+                  <StackPanel Grid.Column="0" Spacing="5" Margin="0,0,8,0">
+                    <TextBlock Text="参考地" Classes="workshop-label" />
+                    <TextBox Classes="workshop-input" Text="{Binding AnalogCircuit.ReferenceGround, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="5" Margin="0,0,8,0">
+                    <TextBlock Text="输入节点" Classes="workshop-label" />
+                    <TextBox Classes="workshop-input" Text="{Binding AnalogCircuit.InputNode, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2" Spacing="5" Margin="0,0,8,0">
+                    <TextBlock Text="输出节点" Classes="workshop-label" />
+                    <TextBox Classes="workshop-input" Text="{Binding AnalogCircuit.OutputNode, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="3" Spacing="5">
+                    <TextBlock Text="过采样" Classes="workshop-label" />
+                    <NumericUpDown Classes="workshop-input" Value="{Binding AnalogCircuit.Oversampling, Mode=TwoWay}"
+                                   Minimum="1" Maximum="16" Increment="1" />
+                  </StackPanel>
+                </Grid>
+                <TabControl Grid.Row="1" x:Name="AnalogConfigurationTabs" Height="230" Margin="0,0,0,12"
+                            AutomationProperties.Name="模拟电路配置页面">
+                  <TabItem Header="端口">
+                    <Grid Margin="10" RowDefinitions="Auto,*">
+                      <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8">
+                        <TextBlock Text="电路端口" Classes="workshop-text" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Classes="workshop-button" Content="添加输入" Margin="0,0,6,0"
+                                Click="AddAnalogInputPortClick" AutomationProperties.Name="添加模拟电路输入端口" />
+                        <Button Grid.Column="2" Classes="workshop-button" Content="添加输出"
+                                Click="AddAnalogOutputPortClick" AutomationProperties.Name="添加模拟电路输出端口" />
+                      </Grid>
+                      <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="AnalogPortList" ItemsSource="{Binding AnalogCircuit.Ports}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Grid ColumnDefinitions="*,150,*,42" Margin="0,0,0,7" MinWidth="620">
+                                <TextBox Classes="workshop-input" Text="{Binding Id, Mode=TwoWay}"
+                                         Watermark="端口 ID" Margin="0,0,8,0" />
+                                <ComboBox Grid.Column="1" Classes="workshop-input"
+                                          ItemsSource="{x:Static ui:ModuleAuthoringDocument.PortDirections}"
+                                          SelectedItem="{Binding Direction, Mode=TwoWay}" Margin="0,0,8,0" />
+                                <TextBox Grid.Column="2" Classes="workshop-input" Text="{Binding Node, Mode=TwoWay}"
+                                         Watermark="节点 ID" Margin="0,0,8,0" />
+                                <Button Grid.Column="3" Classes="workshop-button workshop-icon" Content="×" Tag="{Binding}"
+                                        ToolTip.Tip="删除电路端口" AutomationProperties.Name="删除模拟电路端口"
+                                        Click="RemoveAnalogPortClick" />
+                              </Grid>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </ScrollViewer>
+                    </Grid>
+                  </TabItem>
+                  <TabItem Header="供电">
+                    <Grid Margin="10" RowDefinitions="Auto,*">
+                      <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                        <TextBlock Text="电源轨" Classes="workshop-text" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Classes="workshop-button" Content="添加电源"
+                                Click="AddAnalogSupplyClick" AutomationProperties.Name="添加模拟电路电源轨" />
+                      </Grid>
+                      <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="AnalogSupplyList" ItemsSource="{Binding AnalogCircuit.Supplies}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Border BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="0,0,0,1"
+                                      Padding="0,0,0,8" Margin="0,0,0,8" MinWidth="720">
+                                <StackPanel Spacing="6">
+                                  <Grid ColumnDefinitions="*,*,*,130,42">
+                                    <TextBox Classes="workshop-input" Text="{Binding Id, Mode=TwoWay}"
+                                             Watermark="电源 ID" Margin="0,0,8,0" />
+                                    <TextBox Grid.Column="1" Classes="workshop-input" Text="{Binding PositiveNode, Mode=TwoWay}"
+                                             Watermark="正节点" Margin="0,0,8,0" />
+                                    <TextBox Grid.Column="2" Classes="workshop-input" Text="{Binding NegativeNode, Mode=TwoWay}"
+                                             Watermark="负节点" Margin="0,0,8,0" />
+                                    <NumericUpDown Grid.Column="3" Classes="workshop-input" Value="{Binding Voltage, Mode=TwoWay}"
+                                                   Increment="0.1" Margin="0,0,8,0" />
+                                    <Button Grid.Column="4" Classes="workshop-button workshop-icon" Content="×" Tag="{Binding}"
+                                            ToolTip.Tip="删除电源" AutomationProperties.Name="删除模拟电路电源轨"
+                                            Click="RemoveAnalogSupplyClick" />
+                                  </Grid>
+                                  <ItemsControl ItemsSource="{Binding Properties}">
+                                    <ItemsControl.ItemTemplate>
+                                      <DataTemplate>
+                                        <Grid ColumnDefinitions="150,*" Margin="0,0,0,4">
+                                          <TextBlock Text="{Binding Id}" Classes="workshop-label" VerticalAlignment="Center" />
+                                          <TextBox Grid.Column="1" Classes="workshop-input" FontFamily="Consolas"
+                                                   Text="{Binding JsonValue, Mode=TwoWay}" />
+                                        </Grid>
+                                      </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                  </ItemsControl>
+                                </StackPanel>
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </ScrollViewer>
+                    </Grid>
+                  </TabItem>
+                  <TabItem Header="参数绑定">
+                    <Grid Margin="10" RowDefinitions="Auto,*">
+                      <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                        <TextBlock Text="公开参数到电路属性" Classes="workshop-text" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Classes="workshop-button" Content="添加绑定"
+                                Click="AddAnalogBindingClick" AutomationProperties.Name="添加公开参数到电路属性绑定" />
+                      </Grid>
+                      <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="AnalogBindingList" ItemsSource="{Binding AnalogCircuit.ParameterBindings}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Grid ColumnDefinitions="80,*,*,210,130,42" Margin="0,0,0,7" MinWidth="760">
+                                <NumericUpDown Classes="workshop-input" Value="{Binding ModelVersion, Mode=TwoWay}"
+                                               Minimum="1" Maximum="1" Increment="1" Margin="0,0,8,0" />
+                                <TextBox Grid.Column="1" Classes="workshop-input" Text="{Binding ParameterId, Mode=TwoWay}"
+                                         Watermark="参数 ID" Margin="0,0,8,0" />
+                                <TextBox Grid.Column="2" Classes="workshop-input" Text="{Binding TargetId, Mode=TwoWay}"
+                                         Watermark="目标 ID" Margin="0,0,8,0" />
+                                <ComboBox Grid.Column="3" Classes="workshop-input"
+                                          ItemsSource="{x:Static ui:ModuleAuthoringDocument.AnalogBindingProperties}"
+                                          SelectedItem="{Binding Property, Mode=TwoWay}" Margin="0,0,8,0" />
+                                <NumericUpDown Grid.Column="4" Classes="workshop-input"
+                                               Value="{Binding SmoothingSeconds, Mode=TwoWay}"
+                                               Minimum="0" Increment="0.001" Margin="0,0,8,0" />
+                                <Button Grid.Column="5" Classes="workshop-button workshop-icon" Content="×" Tag="{Binding}"
+                                        ToolTip.Tip="删除参数绑定" AutomationProperties.Name="删除模拟电路参数绑定"
+                                        Click="RemoveAnalogBindingClick" />
+                              </Grid>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </ScrollViewer>
+                    </Grid>
+                  </TabItem>
+                  <TabItem Header="求解器">
+                    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                      <Grid Margin="10" ColumnDefinitions="*,*,*,*" RowDefinitions="Auto,Auto">
+                        <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,10">
+                          <TextBlock Text="过采样" Classes="workshop-label" />
+                          <NumericUpDown Classes="workshop-input" Value="{Binding AnalogCircuit.Oversampling, Mode=TwoWay}"
+                                         Minimum="1" Maximum="16" Increment="1" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="4" Margin="0,0,8,10">
+                          <TextBlock Text="最大迭代" Classes="workshop-label" />
+                          <NumericUpDown Classes="workshop-input" Value="{Binding AnalogCircuit.MaxIterations, Mode=TwoWay}"
+                                         Minimum="1" Maximum="1024" Increment="1" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="4" Margin="0,0,8,10">
+                          <TextBlock Text="绝对容差" Classes="workshop-label" />
+                          <NumericUpDown Classes="workshop-input" Value="{Binding AnalogCircuit.AbsoluteTolerance, Mode=TwoWay}"
+                                         Minimum="0.000000000001" Increment="0.000000001" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="3" Spacing="4" Margin="0,0,0,10">
+                          <TextBlock Text="相对容差" Classes="workshop-label" />
+                          <NumericUpDown Classes="workshop-input" Value="{Binding AnalogCircuit.RelativeTolerance, Mode=TwoWay}"
+                                         Minimum="0.000000000001" Increment="0.000001" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.ColumnSpan="4" Spacing="4">
+                          <TextBlock Text="根级扩展字段（高级 JSON 属性）" Classes="workshop-label" />
+                          <ItemsControl ItemsSource="{Binding AnalogCircuit.RootProperties}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                <Grid ColumnDefinitions="180,*" Margin="0,0,0,4">
+                                  <TextBlock Text="{Binding Id}" Classes="workshop-label" VerticalAlignment="Center" />
+                                  <TextBox Grid.Column="1" Classes="workshop-input" FontFamily="Consolas"
+                                           Text="{Binding JsonValue, Mode=TwoWay}" />
+                                </Grid>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
+                      </Grid>
+                    </ScrollViewer>
+                  </TabItem>
+                </TabControl>
+                <Grid Grid.Row="2" ColumnDefinitions="*,210,Auto,36,36,58" Margin="0,0,0,10">
+                  <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Text="电路元件" Classes="workshop-text" FontSize="13" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding AnalogCircuit.Components.Count, StringFormat='{}{0} 个元件'}"
+                               Classes="workshop-muted" FontSize="10" />
+                    <TextBlock x:Name="CircuitSelectionText" Text="未选择" Classes="workshop-muted" FontSize="9" />
+                  </StackPanel>
+                  <ComboBox Grid.Column="1" x:Name="AnalogAddTypeSelector" Classes="workshop-input"
+                            ItemsSource="{x:Static ui:ModuleAuthoringDocument.AnalogComponentTypes}"
+                            SelectedIndex="0" Margin="0,0,8,0"
+                            AutomationProperties.Name="待添加模拟元件类型" />
+                  <Button Grid.Column="2" Classes="workshop-button" Content="添加元件" Click="AddAnalogComponentClick"
+                          AutomationProperties.Name="添加选中的模拟元件" />
+                  <Button Grid.Column="3" Classes="workshop-button workshop-icon" Content="−" Margin="6,0,0,0"
+                          ToolTip.Tip="缩小原理图" AutomationProperties.Name="缩小模拟电路原理图" Click="CircuitZoomOutClick" />
+                  <Button Grid.Column="4" Classes="workshop-button workshop-icon" Content="+" Margin="6,0,0,0"
+                          ToolTip.Tip="放大原理图" AutomationProperties.Name="放大模拟电路原理图" Click="CircuitZoomInClick" />
+                  <Button Grid.Column="5" x:Name="CircuitZoomText" Classes="workshop-button" Content="100%"
+                          Margin="6,0,0,0" ToolTip.Tip="适应全部元件" AutomationProperties.Name="适应全部模拟元件"
+                          Click="CircuitFitClick" />
+                </Grid>
+                <Grid Grid.Row="3" ColumnDefinitions="170,1.35*,*">
+                  <Border Grid.Column="0" Background="{DynamicResource WorkshopPanelBrush}"
+                          BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
+                          CornerRadius="4" Padding="8" Margin="0,0,12,0">
+                    <Grid RowDefinitions="Auto,*">
+                      <TextBlock Text="元件库" Classes="workshop-label" Margin="2,0,0,8" />
+                      <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl x:Name="CircuitComponentPalette"
+                                      ItemsSource="{x:Static ui:AnalogComponentCatalog.Components}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Border Tag="{Binding}" Background="{DynamicResource WorkshopControlBrush}"
+                                      BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
+                                      CornerRadius="3" Padding="8,6" Margin="0,0,0,6" Cursor="Hand"
+                                      PointerPressed="CircuitPaletteItemPointerPressed"
+                                      AutomationProperties.Name="{Binding DisplayName}">
+                                <StackPanel Spacing="1">
+                                  <TextBlock Text="{Binding DisplayName}" Classes="workshop-text" FontSize="11"
+                                             TextTrimming="CharacterEllipsis" />
+                                  <TextBlock Text="{Binding Category}" Classes="workshop-muted" FontSize="9"
+                                             TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </ScrollViewer>
+                    </Grid>
+                  </Border>
+                  <Border x:Name="CircuitCanvasSurface" Grid.Column="1"
+                          Background="{DynamicResource WorkshopCanvasBrush}" BorderBrush="{DynamicResource WorkshopBorderBrush}"
+                          BorderThickness="1" CornerRadius="4" ClipToBounds="True"
+                          Focusable="True" AutomationProperties.Name="模拟电路原理图画布"
+                          KeyDown="CircuitCanvasKeyDown"
+                          PointerPressed="CircuitCanvasPointerPressed"
+                          PointerMoved="CircuitCanvasPointerMoved"
+                          PointerReleased="CircuitCanvasPointerReleased"
+                          PointerWheelChanged="CircuitCanvasPointerWheelChanged">
+                    <Grid ClipToBounds="True">
+                      <Canvas x:Name="CircuitGridLayer" Width="2400" Height="1600" IsHitTestVisible="False" />
+                      <Canvas x:Name="CircuitWireLayer" Width="2400" Height="1600" />
+                      <ItemsControl x:Name="CircuitNodeLayer" Width="2400" Height="1600"
+                                    ItemsSource="{Binding AnalogCircuit.Components}">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.Styles>
+                          <Style Selector="ContentPresenter">
+                            <Setter Property="Canvas.Left" Value="{Binding CanvasX}" />
+                            <Setter Property="Canvas.Top" Value="{Binding CanvasY}" />
+                          </Style>
+                        </ItemsControl.Styles>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Border Width="190" Height="140" Tag="{Binding}"
+                                    Background="{DynamicResource WorkshopControlBrush}"
+                                    BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
+                                    CornerRadius="4" Padding="10" PointerPressed="CircuitComponentPointerPressed">
+                              <Grid RowDefinitions="Auto,Auto,*">
+                                <TextBlock Text="{Binding Id}" Classes="workshop-text" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Row="1" Text="{Binding Descriptor.DisplayName}" Classes="workshop-muted"
+                                           FontSize="10" Margin="0,1,0,7" />
+                                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                                  <ItemsControl ItemsSource="{Binding Pins}">
+                                    <ItemsControl.ItemTemplate>
+                                      <DataTemplate>
+                                        <Grid ColumnDefinitions="10,64,*" Margin="0,0,0,4">
+                                          <Ellipse Width="10" Height="10" Tag="{Binding}"
+                                                   Fill="{DynamicResource WorkshopAccentBrush}"
+                                                   Stroke="{DynamicResource WorkshopBorderBrush}" StrokeThickness="1"
+                                                   VerticalAlignment="Center" Cursor="Hand"
+                                                   ToolTip.Tip="连接或断开此引脚"
+                                                   PointerPressed="CircuitPinPointerPressed" />
+                                          <TextBlock Grid.Column="1" Text="{Binding DisplayName}" Classes="workshop-muted"
+                                                     FontSize="9" TextTrimming="CharacterEllipsis" />
+                                          <TextBlock Grid.Column="2" Text="{Binding Node}" Classes="workshop-text"
+                                                     FontSize="9" TextTrimming="CharacterEllipsis" />
+                                        </Grid>
+                                      </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                  </ItemsControl>
+                                </ScrollViewer>
+                              </Grid>
+                            </Border>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                      <Canvas x:Name="CircuitOverlayLayer" IsHitTestVisible="False">
+                        <Rectangle x:Name="CircuitSelectionRectangle" IsVisible="False"
+                                   Fill="#244DD6A4" Stroke="{DynamicResource WorkshopAccentBrush}"
+                                   StrokeThickness="1" />
+                        <Line x:Name="CircuitWirePreview" IsVisible="False"
+                              Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="2"
+                              StrokeDashArray="5,3" />
+                        <Border x:Name="CircuitPaletteDragPreview" IsVisible="False"
+                                Width="150" Height="54" IsHitTestVisible="False"
+                                Background="{DynamicResource WorkshopControlBrush}"
+                                BorderBrush="{DynamicResource WorkshopAccentBrush}" BorderThickness="2"
+                                CornerRadius="4" Opacity="0.9" Padding="8">
+                          <TextBlock x:Name="CircuitPaletteDragPreviewText" Classes="workshop-text"
+                                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        </Border>
+                      </Canvas>
+                    </Grid>
+                  </Border>
+                  <ScrollViewer Grid.Column="2" HorizontalScrollBarVisibility="Auto" Margin="12,0,0,0">
+                  <ItemsControl x:Name="AnalogComponentList" ItemsSource="{Binding AnalogCircuit.Components}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Background="{DynamicResource WorkshopControlBrush}"
+                                BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
+                                CornerRadius="4" Padding="12" Margin="0,0,0,10" MinWidth="760">
+                          <StackPanel Spacing="10">
+                            <Grid ColumnDefinitions="*,220,42">
+                              <TextBox Grid.Column="0" Classes="workshop-input" Text="{Binding Id, Mode=TwoWay}"
+                                       Watermark="元件 ID" Margin="0,0,8,0" />
+                              <ComboBox Grid.Column="1" Classes="workshop-input"
+                                        ItemsSource="{x:Static ui:ModuleAuthoringDocument.AnalogComponentTypes}"
+                                        SelectedItem="{Binding Type, Mode=TwoWay}" Margin="0,0,8,0" />
+                              <Button Grid.Column="2" Classes="workshop-button workshop-icon" Content="×" Tag="{Binding}"
+                                      ToolTip.Tip="删除模拟元件" AutomationProperties.Name="删除模拟元件"
+                                      Click="RemoveAnalogComponentClick" />
+                            </Grid>
+                            <ItemsControl ItemsSource="{Binding Pins}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                  <Grid ColumnDefinitions="150,*" Margin="0,0,0,6">
+                                    <TextBlock Text="{Binding DisplayName}" Classes="workshop-label"
+                                               VerticalAlignment="Center" />
+                                    <TextBox Grid.Column="1" Classes="workshop-input" Text="{Binding Node, Mode=TwoWay}"
+                                             Watermark="节点 ID" AutomationProperties.Name="模拟元件引脚节点" />
+                                  </Grid>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <ItemsControl ItemsSource="{Binding Properties}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                  <Grid ColumnDefinitions="150,*" Margin="0,0,0,6">
+                                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                      <TextBlock Text="{Binding DisplayName}" Classes="workshop-label" />
+                                      <TextBlock Text="{Binding Unit}" Classes="workshop-muted" FontSize="9" />
+                                    </StackPanel>
+                                    <NumericUpDown Grid.Column="1" Classes="workshop-input"
+                                                   IsVisible="{Binding IsNumber}"
+                                                   Value="{Binding NumberValue, Mode=TwoWay}"
+                                                   Minimum="{Binding NumberMinimum}" Maximum="{Binding NumberMaximum}"
+                                                   Increment="{Binding NumberIncrement}"
+                                                   AutomationProperties.Name="模拟元件数值属性" />
+                                    <TextBox Grid.Column="1" Classes="workshop-input" IsVisible="{Binding IsText}"
+                                             Text="{Binding TextValue, Mode=TwoWay}"
+                                             AutomationProperties.Name="模拟元件文本属性" />
+                                    <Grid Grid.Column="1" ColumnDefinitions="*,*" IsVisible="{Binding IsModel}">
+                                      <ComboBox Classes="workshop-input" ItemsSource="{Binding Options}"
+                                                SelectedItem="{Binding TextValue, Mode=TwoWay}" Margin="0,0,6,0"
+                                                ToolTip.Tip="选择已登记的审计模型 ID"
+                                                AutomationProperties.Name="模拟元件审计模型选择" />
+                                      <TextBox Grid.Column="1" Classes="workshop-input"
+                                               Text="{Binding TextValue, Mode=TwoWay}"
+                                               ToolTip.Tip="审计模型引用需要运行时模型数据库授权"
+                                               AutomationProperties.Name="模拟元件模型 ID" />
+                                    </Grid>
+                                    <CheckBox Grid.Column="1" IsVisible="{Binding IsBoolean}"
+                                              IsChecked="{Binding BooleanValue, Mode=TwoWay}"
+                                              Foreground="{DynamicResource WorkshopTextBrush}"
+                                              AutomationProperties.Name="模拟元件布尔属性" />
+                                    <StackPanel Grid.Column="1" IsVisible="{Binding IsJson}" Spacing="5">
+                                      <ItemsControl ItemsSource="{Binding JsonFields}">
+                                        <ItemsControl.ItemTemplate>
+                                          <DataTemplate>
+                                            <Grid ColumnDefinitions="150,*" Margin="0,0,0,4">
+                                              <TextBlock Text="{Binding Name}" Classes="workshop-muted" FontSize="9"
+                                                         VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                              <NumericUpDown Grid.Column="1" Classes="workshop-input"
+                                                             IsVisible="{Binding IsNumber}"
+                                                             Value="{Binding NumberValue, Mode=TwoWay}"
+                                                             Minimum="-1000000000000" Maximum="1000000000000"
+                                                             Increment="0.01" />
+                                              <TextBox Grid.Column="1" Classes="workshop-input" IsVisible="{Binding IsText}"
+                                                       Text="{Binding TextValue, Mode=TwoWay}" />
+                                              <CheckBox Grid.Column="1" IsVisible="{Binding IsBoolean}"
+                                                        IsChecked="{Binding BooleanValue, Mode=TwoWay}"
+                                                        Foreground="{DynamicResource WorkshopTextBrush}" />
+                                              <TextBox Grid.Column="1" Classes="workshop-input" IsVisible="{Binding IsJson}"
+                                                       Text="{Binding JsonValue, Mode=TwoWay}" FontFamily="Consolas" />
+                                            </Grid>
+                                          </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                      </ItemsControl>
+                                      <Expander Header="高级 JSON" IsExpanded="False"
+                                                Foreground="{DynamicResource WorkshopMutedBrush}">
+                                        <TextBox Classes="workshop-input" Text="{Binding JsonValue, Mode=TwoWay}"
+                                                 FontFamily="Consolas" AcceptsReturn="True" TextWrapping="Wrap"
+                                                 MinHeight="54" AutomationProperties.Name="模拟元件高级 JSON 属性" />
+                                      </Expander>
+                                    </StackPanel>
+                                  </Grid>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+                </Grid>
+              </Grid>
+            </Border>
+            <Border Grid.Row="1" IsVisible="{Binding UsesExternalAsset}" Background="{DynamicResource WorkshopPanelBrush}"
+                    BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="18">
+              <StackPanel Spacing="8" VerticalAlignment="Center">
+                <TextBlock Text="资源文件" Classes="workshop-label" />
+                <TextBox Classes="workshop-input" Text="{Binding SourceAssetPath}" IsReadOnly="True"
+                         Watermark="尚未选择资源" AutomationProperties.Name="模块源资源路径" />
+              </StackPanel>
+            </Border>
+          </Grid>
+        </TabItem>
+
+        <TabItem Header="外观" Classes="workshop-tab">
+          <Grid x:Name="SkinWorkspaceGrid" Margin="24" ColumnDefinitions="1.35*,*" RowDefinitions="*">
+            <ScrollViewer x:Name="SkinEditorScroll" Grid.Column="0" HorizontalScrollBarVisibility="Disabled" Margin="0,0,18,0">
+              <StackPanel Spacing="12">
+                <CheckBox Content="使用自定义踏板外观" IsChecked="{Binding CustomSkinEnabled, Mode=TwoWay}"
+                          Foreground="{DynamicResource WorkshopTextBrush}"
+                          AutomationProperties.Name="启用自定义踏板外观" />
+                <StackPanel Spacing="6" IsEnabled="{Binding CustomSkinEnabled}">
+                  <TextBlock Text="皮肤 ID" Classes="workshop-label" />
+                  <TextBox Classes="workshop-input" Text="{Binding Skin.Id, Mode=TwoWay}"
+                           AutomationProperties.Name="踏板皮肤 ID" />
+                </StackPanel>
+                <Border Background="{DynamicResource WorkshopPanelBrush}" BorderBrush="{DynamicResource WorkshopBorderBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="12" IsEnabled="{Binding CustomSkinEnabled}">
+                  <StackPanel Spacing="9">
+                    <TextBlock Text="画布布局" Classes="workshop-text" FontWeight="SemiBold" />
+                    <Grid ColumnDefinitions="*,*,*,*">
+                      <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
+                        <TextBlock Text="宽度" Classes="workshop-label" />
+                        <NumericUpDown Classes="workshop-input" Minimum="160" Maximum="520" Increment="1"
+                                       Value="{Binding Skin.Width, Mode=TwoWay}"
+                                       AutomationProperties.Name="踏板宽度" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Spacing="4" Margin="0,0,8,0">
+                        <TextBlock Text="高度" Classes="workshop-label" />
+                        <NumericUpDown Classes="workshop-input" Minimum="140" Maximum="520" Increment="1"
+                                       Value="{Binding Skin.Height, Mode=TwoWay}"
+                                       AutomationProperties.Name="踏板高度" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="2" Spacing="4" Margin="0,0,8,0">
+                        <TextBlock Text="背景色" Classes="workshop-label" />
+                        <TextBox Classes="workshop-input" Text="{Binding Skin.Background, Mode=TwoWay}"
+                                 Watermark="#26313C" AutomationProperties.Name="踏板背景色" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="3" Spacing="4">
+                        <TextBlock Text="标签色" Classes="workshop-label" />
+                        <TextBox Classes="workshop-input" Text="{Binding Skin.LabelColor, Mode=TwoWay}"
+                                 Watermark="#EEF3F8" AutomationProperties.Name="踏板标签色" />
+                      </StackPanel>
+                    </Grid>
+                    <CheckBox Content="自定义踩钉坐标" IsChecked="{Binding Skin.UseCustomFootswitchPosition, Mode=TwoWay}"
+                              Foreground="{DynamicResource WorkshopTextBrush}"
+                              AutomationProperties.Name="启用自定义踩钉坐标" />
+                    <Grid ColumnDefinitions="*,*" IsEnabled="{Binding Skin.UseCustomFootswitchPosition}">
+                      <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
+                        <TextBlock Text="踩钉 X" Classes="workshop-label" />
+                        <NumericUpDown Classes="workshop-input" Minimum="0" Maximum="520" Increment="1"
+                                       Value="{Binding Skin.FootswitchX, Mode=TwoWay}"
+                                       AutomationProperties.Name="踩钉横坐标" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Spacing="4">
+                        <TextBlock Text="踩钉 Y" Classes="workshop-label" />
+                        <NumericUpDown Classes="workshop-input" Minimum="0" Maximum="520" Increment="1"
+                                       Value="{Binding Skin.FootswitchY, Mode=TwoWay}"
+                                       AutomationProperties.Name="踩钉纵坐标" />
+                      </StackPanel>
+                    </Grid>
+                  </StackPanel>
+                </Border>
+                <Grid ColumnDefinitions="95,*,*,88" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                      IsEnabled="{Binding CustomSkinEnabled}">
+                  <TextBlock Grid.Row="0" Grid.Column="1" Text="控件 ID" Classes="workshop-label" Margin="0,0,8,5" />
+                  <TextBlock Grid.Row="0" Grid.Column="2" Text="项目内图像路径" Classes="workshop-label" Margin="0,0,0,5" />
+                  <TextBlock Grid.Row="1" Grid.Column="0" Text="旋钮" Classes="workshop-text" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="1" Grid.Column="1" Classes="workshop-input" Text="{Binding Skin.KnobId, Mode=TwoWay}" Margin="0,0,8,8"
+                           AutomationProperties.Name="旋钮外观控件 ID" />
+                  <TextBox Grid.Row="1" Grid.Column="2" Classes="workshop-input" Text="{Binding Skin.KnobImage, Mode=TwoWay}" Margin="0,0,0,8" Watermark="images/knob.png"
+                           AutomationProperties.Name="旋钮外观图像路径" />
+                  <Button Grid.Row="1" Grid.Column="3" Classes="workshop-button" Content="导入" Margin="8,0,0,8"
+                          Tag="knob" Click="ImportSkinImageClick" AutomationProperties.Name="导入旋钮外观图像" />
+                  <TextBlock Grid.Row="2" Grid.Column="0" Text="拨档" Classes="workshop-text" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="2" Grid.Column="1" Classes="workshop-input" Text="{Binding Skin.ToggleId, Mode=TwoWay}" Margin="0,0,8,8"
+                           AutomationProperties.Name="拨档外观控件 ID" />
+                  <TextBox Grid.Row="2" Grid.Column="2" Classes="workshop-input" Text="{Binding Skin.ToggleImage, Mode=TwoWay}" Margin="0,0,0,8" Watermark="images/toggle.png"
+                           AutomationProperties.Name="拨档外观图像路径" />
+                  <Button Grid.Row="2" Grid.Column="3" Classes="workshop-button" Content="导入" Margin="8,0,0,8"
+                          Tag="toggle" Click="ImportSkinImageClick" AutomationProperties.Name="导入拨档外观图像" />
+                  <TextBlock Grid.Row="3" Grid.Column="0" Text="按钮" Classes="workshop-text" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="3" Grid.Column="1" Classes="workshop-input" Text="{Binding Skin.ButtonId, Mode=TwoWay}" Margin="0,0,8,8"
+                           AutomationProperties.Name="按钮外观控件 ID" />
+                  <TextBox Grid.Row="3" Grid.Column="2" Classes="workshop-input" Text="{Binding Skin.ButtonImage, Mode=TwoWay}" Margin="0,0,0,8" Watermark="images/button.png"
+                           AutomationProperties.Name="按钮外观图像路径" />
+                  <Button Grid.Row="3" Grid.Column="3" Classes="workshop-button" Content="导入" Margin="8,0,0,8"
+                          Tag="button" Click="ImportSkinImageClick" AutomationProperties.Name="导入按钮外观图像" />
+                  <TextBlock Grid.Row="4" Grid.Column="0" Text="踩钉" Classes="workshop-text" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="4" Grid.Column="1" Classes="workshop-input" Text="{Binding Skin.FootswitchId, Mode=TwoWay}" Margin="0,0,8,0"
+                           AutomationProperties.Name="踩钉外观控件 ID" />
+                  <TextBox Grid.Row="4" Grid.Column="2" Classes="workshop-input" Text="{Binding Skin.FootswitchImage, Mode=TwoWay}" Watermark="images/footswitch.png"
+                           AutomationProperties.Name="踩钉外观图像路径" />
+                  <Button Grid.Row="4" Grid.Column="3" Classes="workshop-button" Content="导入" Margin="8,0,0,0"
+                          Tag="footswitch" Click="ImportSkinImageClick" AutomationProperties.Name="导入踩钉外观图像" />
+                </Grid>
+                <Border Background="{DynamicResource WorkshopPanelBrush}" BorderBrush="{DynamicResource WorkshopBorderBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="12" IsEnabled="{Binding CustomSkinEnabled}">
+                  <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="参数控件坐标" Classes="workshop-text" FontWeight="SemiBold" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Classes="workshop-button" Content="添加绑定控件"
+                              Click="AddSkinParameterPlacementClick"
+                              AutomationProperties.Name="添加参数控件坐标" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,90,90,42">
+                      <TextBlock Text="参数 ID" Classes="workshop-label" />
+                      <TextBlock Grid.Column="1" Text="X" Classes="workshop-label" Margin="8,0,0,0" />
+                      <TextBlock Grid.Column="2" Text="Y" Classes="workshop-label" Margin="8,0,0,0" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding Skin.ParameterPlacements}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Grid ColumnDefinitions="*,90,90,42" Margin="0,0,0,7">
+                            <TextBox Classes="workshop-input" Text="{Binding ParameterId, Mode=TwoWay}"
+                                     AutomationProperties.Name="布局参数 ID" />
+                            <NumericUpDown Grid.Column="1" Classes="workshop-input" Margin="8,0,0,0"
+                                           Minimum="0" Maximum="520" Increment="1" Value="{Binding X, Mode=TwoWay}"
+                                           AutomationProperties.Name="参数横坐标" />
+                            <NumericUpDown Grid.Column="2" Classes="workshop-input" Margin="8,0,0,0"
+                                           Minimum="0" Maximum="520" Increment="1" Value="{Binding Y, Mode=TwoWay}"
+                                           AutomationProperties.Name="参数纵坐标" />
+                            <Button Grid.Column="3" Classes="workshop-button workshop-icon" Content="×" Tag="{Binding}"
+                                    ToolTip.Tip="删除参数坐标" AutomationProperties.Name="删除参数控件坐标"
+                                    Click="RemoveSkinParameterPlacementClick" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+                <TextBlock Text="{Binding SkinFile, FallbackValue=ui/pedal.json}" Classes="workshop-muted" FontSize="10" />
+              </StackPanel>
+            </ScrollViewer>
+            <Border x:Name="SkinPreviewPanel" Grid.Column="1" MinHeight="280" Background="{DynamicResource WorkshopPanelBrush}"
+                    BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1" CornerRadius="6">
+              <Grid RowDefinitions="Auto,Auto,*" Margin="14">
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="踏板画布" Classes="workshop-label" />
+                    <TextBlock x:Name="SkinSelectionText" Text="未选择控件" Classes="workshop-muted" FontSize="10" />
+                  </StackPanel>
+                  <CheckBox Grid.Column="1" x:Name="SkinSnapToggle" Content="8 px 吸附" IsChecked="True"
+                            Foreground="{DynamicResource WorkshopTextBrush}" VerticalAlignment="Center"
+                            AutomationProperties.Name="踏板画布网格吸附" />
+                </Grid>
+                <WrapPanel Grid.Row="1" Margin="0,10,0,2">
+                  <Button Classes="workshop-button" Content="复制" Margin="0,0,6,6"
+                          Click="DuplicateSkinPlacementClick" ToolTip.Tip="复制选中的参数控件"
+                          AutomationProperties.Name="复制选中的踏板参数控件" />
+                  <Button Classes="workshop-button" Content="删除" Margin="0,0,6,6"
+                          Click="DeleteSelectedSkinElementClick" ToolTip.Tip="删除选中的参数控件"
+                          AutomationProperties.Name="删除选中的踏板控件" />
+                  <Button Classes="workshop-button" Content="左对齐" Margin="0,0,6,6"
+                          Click="AlignSkinLeftClick" ToolTip.Tip="将选中控件与踏板左边缘对齐"
+                          AutomationProperties.Name="踏板控件左对齐" />
+                  <Button Classes="workshop-button" Content="水平居中" Margin="0,0,6,6"
+                          Click="AlignSkinCenterClick" ToolTip.Tip="将选中控件在踏板中水平居中"
+                          AutomationProperties.Name="踏板控件水平居中" />
+                  <Button Classes="workshop-button" Content="顶部" Margin="0,0,6,6"
+                          Click="AlignSkinTopClick" ToolTip.Tip="将选中控件与踏板顶部对齐"
+                          AutomationProperties.Name="踏板控件顶部对齐" />
+                  <Button Classes="workshop-button" Content="置顶" Margin="0,0,0,6"
+                          Click="BringSkinPlacementFrontClick" ToolTip.Tip="将选中控件移动到最上层"
+                          AutomationProperties.Name="将踏板控件置于最上层" />
+                </WrapPanel>
+                <Viewbox Grid.Row="2" Stretch="Uniform" Margin="8" IsEnabled="{Binding CustomSkinEnabled}">
+                  <Border Width="{Binding Skin.Width}" Height="{Binding Skin.Height}"
+                          Background="{Binding Skin.PreviewBackground}" BorderBrush="{DynamicResource WorkshopBorderBrush}"
+                          BorderThickness="1" CornerRadius="6">
+                    <Canvas x:Name="SkinDesignCanvas" Width="{Binding Skin.Width}" Height="{Binding Skin.Height}"
+                            ClipToBounds="True" PointerPressed="SkinCanvasPointerPressed"
+                            PointerMoved="SkinCanvasPointerMoved" PointerReleased="SkinCanvasPointerReleased"
+                            Focusable="True" AutomationProperties.Name="踏板外观设计画布">
+                      <TextBlock Canvas.Left="14" Canvas.Top="12" MaxWidth="170" Text="{Binding DisplayName}"
+                                 Foreground="{Binding Skin.PreviewLabelColor}" FontSize="13" FontWeight="SemiBold"
+                                 TextTrimming="CharacterEllipsis" />
+                      <ItemsControl x:Name="SkinPlacementLayer" Width="{Binding Skin.Width}" Height="{Binding Skin.Height}"
+                                    ItemsSource="{Binding Skin.ParameterPlacements}"
+                                    Foreground="{Binding Skin.PreviewLabelColor}" ZIndex="2">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.Styles>
+                          <Style Selector="ContentPresenter">
+                            <Setter Property="Canvas.Left" Value="{Binding PreviewLeft}" />
+                            <Setter Property="Canvas.Top" Value="{Binding PreviewTop}" />
+                          </Style>
+                        </ItemsControl.Styles>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Border Width="52" Height="52" Tag="{Binding}" Background="Transparent"
+                                    PointerPressed="SkinPlacementPointerPressed">
+                              <Grid>
+                                <Border IsVisible="{Binding IsSelected}" BorderBrush="{DynamicResource WorkshopAccentBrush}"
+                                        BorderThickness="1" CornerRadius="3" Margin="1" />
+                                <Ellipse Width="34" Height="34" Fill="#10151A"
+                                         Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="2"
+                                         HorizontalAlignment="Center" VerticalAlignment="Top" IsVisible="{Binding IsKnob}" />
+                                <Border Width="18" Height="32" Background="#10151A"
+                                        BorderBrush="{DynamicResource WorkshopAccentBrush}" BorderThickness="2"
+                                        CornerRadius="3" HorizontalAlignment="Center" VerticalAlignment="Top"
+                                        IsVisible="{Binding IsToggle}" />
+                                <Ellipse Width="25" Height="25" Fill="#25384A"
+                                         Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="2"
+                                         HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,5,0,0"
+                                         IsVisible="{Binding IsButton}" />
+                                <Ellipse Width="34" Height="34" Fill="#1D2A38"
+                                         Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="3"
+                                         HorizontalAlignment="Center" VerticalAlignment="Top"
+                                         IsVisible="{Binding IsFootswitch}" />
+                                <TextBlock Text="{Binding ParameterId}" VerticalAlignment="Bottom"
+                                           FontSize="8" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                              </Grid>
+                            </Border>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                      <Border x:Name="SkinFootswitchVisual" Width="34" Height="34"
+                              Canvas.Left="{Binding Skin.PreviewFootswitchLeft}"
+                              Canvas.Top="{Binding Skin.PreviewFootswitchTop}" Background="Transparent"
+                              PointerPressed="SkinFootswitchPointerPressed" ZIndex="3">
+                        <Ellipse Width="34" Height="34" Fill="#1D2A38"
+                                 Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="3" />
+                      </Border>
+                    </Canvas>
+                  </Border>
+                </Viewbox>
+              </Grid>
+            </Border>
+          </Grid>
+        </TabItem>
+
+        <TabItem Header="校验" Classes="workshop-tab">
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Margin="24" Spacing="12">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Grid.Column="0" Spacing="2">
+                <TextBlock Text="{Binding ValidationSummary}" Classes="workshop-text" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding FileStatus}" Classes="workshop-muted" FontSize="10" />
+              </StackPanel>
+              <Button Grid.Column="1" Classes="workshop-button primary" Content="重新校验" Click="ValidateProjectClick" />
+            </Grid>
+            <Border Background="{DynamicResource WorkshopPanelBrush}"
+                    BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1" CornerRadius="6"
+                    Padding="14">
+              <StackPanel Spacing="12">
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Grid.Column="0" Spacing="3">
+                    <TextBlock Text="{Binding AuditionSummary}" Classes="workshop-text" FontSize="13" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding AuditionDetails}" Classes="workshop-muted" FontSize="10" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Classes="workshop-button primary" Content="运行离线试听"
+                          Click="AuditionProjectClick" AutomationProperties.Name="运行工坊离线试听" />
+                </Grid>
+
+                <WrapPanel Orientation="Horizontal">
+                  <StackPanel Width="124" Margin="0,0,8,0" Spacing="4">
+                    <TextBlock Text="激励" Classes="workshop-label" />
+                    <ComboBox Classes="workshop-input" ItemsSource="{Binding AuditionStimulusOptions}"
+                              SelectedIndex="{Binding AuditionStimulusIndex, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Width="132" Margin="0,0,8,0" Spacing="4">
+                    <TextBlock Text="输入端口" Classes="workshop-label" />
+                    <ComboBox Classes="workshop-input" ItemsSource="{Binding AuditionInputPortOptions}"
+                              SelectedItem="{Binding AuditionInputPortId, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Width="132" Margin="0,0,8,0" Spacing="4">
+                    <TextBlock Text="输出端口" Classes="workshop-label" />
+                    <ComboBox Classes="workshop-input" ItemsSource="{Binding AuditionOutputPortOptions}"
+                              SelectedItem="{Binding AuditionOutputPortId, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Width="104" Margin="0,0,8,0" Spacing="4">
+                    <TextBlock Text="幅度" Classes="workshop-label" />
+                    <NumericUpDown Classes="workshop-input" Minimum="0" Maximum="10" Increment="0.05"
+                                   FormatString="0.00" Value="{Binding AuditionAmplitude, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Width="112" Margin="0,0,8,0" Spacing="4">
+                    <TextBlock Text="起始频率 Hz" Classes="workshop-label" />
+                    <NumericUpDown Classes="workshop-input" Minimum="1" Maximum="190000" Increment="10"
+                                   Value="{Binding AuditionStartFrequencyHz, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Width="112" Margin="0,0,8,0" Spacing="4">
+                    <TextBlock Text="终止频率 Hz" Classes="workshop-label" />
+                    <NumericUpDown Classes="workshop-input" Minimum="1" Maximum="190000" Increment="100"
+                                   Value="{Binding AuditionEndFrequencyHz, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Width="112" Margin="0,0,8,0" Spacing="4">
+                    <TextBlock Text="采样率" Classes="workshop-label" />
+                    <NumericUpDown Classes="workshop-input" Minimum="8000" Maximum="384000" Increment="1000"
+                                   Value="{Binding AuditionSampleRateHz, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Width="104" Spacing="4">
+                    <TextBlock Text="采样数" Classes="workshop-label" />
+                    <NumericUpDown Classes="workshop-input" Minimum="16" Maximum="8192" Increment="16"
+                                   Value="{Binding AuditionBlockSize, Mode=TwoWay}" />
+                  </StackPanel>
+                </WrapPanel>
+
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Text="文件试听" Classes="workshop-label" />
+                    <TextBlock Text="{Binding AuditionFileSummary}" Classes="workshop-muted" FontSize="10"
+                               TextWrapping="Wrap" AutomationProperties.Name="文件试听状态" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Classes="workshop-button" Content="选择 WAV"
+                          Click="SelectAuditionFileClick" AutomationProperties.Name="选择试听 WAV 文件" />
+                </Grid>
+
+                <Grid ColumnDefinitions="*,*">
+                  <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,6,0">
+                    <TextBlock Text="输入波形" Classes="workshop-label" />
+                    <Border Background="{DynamicResource WorkshopWindowBrush}"
+                            BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1" CornerRadius="4">
+                      <Canvas x:Name="AuditionInputWaveform" Height="112" MinWidth="260"
+                              ClipToBounds="True" SizeChanged="AuditionWaveformSizeChanged" />
+                    </Border>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="4" Margin="6,0,0,0">
+                    <TextBlock Text="输出波形" Classes="workshop-label" />
+                    <Border Background="{DynamicResource WorkshopWindowBrush}"
+                            BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1" CornerRadius="4">
+                      <Canvas x:Name="AuditionOutputWaveform" Height="112" MinWidth="260"
+                              ClipToBounds="True" SizeChanged="AuditionWaveformSizeChanged" />
+                    </Border>
+                  </StackPanel>
+                </Grid>
+
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Text="频率响应" Classes="workshop-text" FontSize="12" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding FrequencyResponseSummary}" Classes="workshop-muted"
+                               FontSize="10" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Classes="workshop-button" Content="测量频响"
+                          Click="MeasureFrequencyResponseClick" AutomationProperties.Name="测量模块频率响应" />
+                </Grid>
+                <Grid ColumnDefinitions="*,*">
+                  <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,6,0">
+                    <TextBlock Text="幅频 · dB" Classes="workshop-label" />
+                    <Border Background="{DynamicResource WorkshopWindowBrush}"
+                            BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1" CornerRadius="4">
+                      <Canvas x:Name="FrequencyMagnitudePlot" Height="132" MinWidth="260"
+                              ClipToBounds="True" SizeChanged="FrequencyResponseSizeChanged" />
+                    </Border>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="4" Margin="6,0,0,0">
+                    <TextBlock Text="相频 · °" Classes="workshop-label" />
+                    <Border Background="{DynamicResource WorkshopWindowBrush}"
+                            BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1" CornerRadius="4">
+                      <Canvas x:Name="FrequencyPhasePlot" Height="132" MinWidth="260"
+                              ClipToBounds="True" SizeChanged="FrequencyResponseSizeChanged" />
+                    </Border>
+                  </StackPanel>
+                </Grid>
+
+                <Grid ColumnDefinitions="*,120,120,Auto,Auto">
+                  <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
+                    <TextBlock Text="扫动参数" Classes="workshop-label" />
+                    <ComboBox Classes="workshop-input" ItemsSource="{Binding AuditionParameterOptions}"
+                              SelectedItem="{Binding AuditionParameterId, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="4" Margin="0,0,8,0">
+                    <TextBlock Text="A 值" Classes="workshop-label" />
+                    <NumericUpDown Classes="workshop-input" Value="{Binding AuditionParameterValueA, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2" Spacing="4" Margin="0,0,8,0">
+                    <TextBlock Text="B 值" Classes="workshop-label" />
+                    <NumericUpDown Classes="workshop-input" Value="{Binding AuditionParameterValueB, Mode=TwoWay}" />
+                  </StackPanel>
+                  <Button Grid.Column="3" Classes="workshop-button" Content="参数扫动" Margin="0,19,8,0"
+                          IsEnabled="{Binding HasAuditionParameterOptions}"
+                          Click="MeasureParameterSweepClick" AutomationProperties.Name="运行模块参数扫动" />
+                  <Button Grid.Column="4" Classes="workshop-button" Content="A/B 对比" Margin="0,19,0,0"
+                          IsEnabled="{Binding HasAuditionParameterOptions}"
+                          Click="CompareAuditionParameterClick" AutomationProperties.Name="运行模块参数 A B 对比" />
+                </Grid>
+                <Grid ColumnDefinitions="*,*">
+                  <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,6,0">
+                    <TextBlock Text="{Binding ParameterSweepSummary}" Classes="workshop-muted" FontSize="10"
+                               TextWrapping="Wrap" />
+                    <Border Background="{DynamicResource WorkshopWindowBrush}"
+                            BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1" CornerRadius="4">
+                      <Canvas x:Name="ParameterSweepPlot" Height="132" MinWidth="260"
+                              ClipToBounds="True" SizeChanged="ParameterAnalysisSizeChanged" />
+                    </Border>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="4" Margin="6,0,0,0">
+                    <TextBlock Text="{Binding AuditionComparisonSummary}" Classes="workshop-muted" FontSize="10"
+                               TextWrapping="Wrap" />
+                    <Border Background="{DynamicResource WorkshopWindowBrush}"
+                            BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1" CornerRadius="4">
+                      <Canvas x:Name="AuditionComparisonPlot" Height="132" MinWidth="260"
+                              ClipToBounds="True" SizeChanged="ParameterAnalysisSizeChanged" />
+                    </Border>
+                  </StackPanel>
+                </Grid>
+              </StackPanel>
+            </Border>
+            <ListBox x:Name="ValidationList" ItemsSource="{Binding ValidationIssues}"
+                     Background="Transparent" BorderThickness="0"
+                     SelectionChanged="ValidationIssueSelected"
+                     AutomationProperties.Name="工坊问题列表">
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <Border BorderBrush="{DynamicResource WorkshopErrorBrush}" BorderThickness="3,0,0,0"
+                          Background="{DynamicResource WorkshopPanelBrush}" Padding="12,9" Margin="0,0,0,6">
+                    <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*">
+                      <TextBlock Text="{Binding SeverityText}" Foreground="{DynamicResource WorkshopErrorBrush}"
+                                 FontSize="9" FontWeight="Bold" Margin="0,0,8,3" />
+                      <TextBlock Grid.Column="1" Text="{Binding LocationText}" Classes="workshop-muted"
+                                 FontSize="9" Margin="0,0,0,3" />
+                      <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Message}"
+                                 Foreground="{DynamicResource WorkshopErrorBrush}" TextWrapping="Wrap" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+      </TabControl>
+
+      <Border Grid.Row="3" Background="{DynamicResource WorkshopTopbarBrush}"
+              BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="0,1,0,0" Padding="18,8">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Grid.Column="0" Text="{Binding ValidationSummary}" Classes="workshop-muted" FontSize="10" />
+          <TextBlock Grid.Column="1" Text="M26 · MODULE AUTHORING" Classes="workshop-muted" FontSize="9" />
+        </Grid>
+      </Border>
+    </Grid>
+  </Border>
+</UserControl>

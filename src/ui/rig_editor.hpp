@@ -33,6 +33,12 @@ struct EditorRect {
 };
 
 struct PedalSkinDefinition {
+    struct ParameterPlacement {
+        std::string parameter_id;
+        double x{};
+        double y{};
+    };
+
     std::string id;
     std::string knob;
     std::string toggle;
@@ -44,6 +50,12 @@ struct PedalSkinDefinition {
     std::optional<std::filesystem::path> toggle_image;
     std::optional<std::filesystem::path> button_image;
     std::optional<std::filesystem::path> footswitch_image;
+    double width{196.0};
+    double height{154.0};
+    std::string background_color;
+    std::string label_color;
+    std::vector<ParameterPlacement> parameter_placements;
+    std::optional<EditorPoint> footswitch_position;
 };
 
 [[nodiscard]] const PedalSkinDefinition& DefaultPedalSkin();
@@ -80,6 +92,10 @@ struct ModuleCatalogEntry {
     std::vector<EffectParameter> parameter_descriptors;
     uint32_t latency_samples{};
     double estimated_cpu_percent{};
+    std::vector<EffectPort> ports;
+    std::string resource_kind;
+    std::string resource_path;
+    std::string resource_status;
 };
 
 struct RigEditorPerformance {
@@ -147,6 +163,7 @@ public:
                                          float value,
                                          bool mark_dirty = true);
     [[nodiscard]] bool SetNodeBypassed(std::string_view instance_id, bool bypassed);
+    [[nodiscard]] bool SetNodesBypassed(const std::vector<std::string>& instance_ids, bool bypassed);
     // Control-thread host bridge for measurements captured by a stopped
     // RigRuntime. These diagnostics never become part of the saved preset.
     [[nodiscard]] bool SetMeasuredPerformance(std::string_view instance_id,

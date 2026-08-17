@@ -35,6 +35,18 @@ std::optional<std::string> StringField(const JsonValue::Object& object, std::str
     return value != nullptr && value->AsString() != nullptr ? std::optional<std::string>(*value->AsString()) : std::nullopt;
 }
 
+std::optional<double> NumberField(const JsonValue::Object& object, std::string_view key) {
+    const auto* value = Find(object, key);
+    return value != nullptr && value->AsNumber() != nullptr && std::isfinite(*value->AsNumber())
+        ? std::optional<double>(*value->AsNumber())
+        : std::nullopt;
+}
+
+bool IsSkinColor(std::string_view value) {
+    return value.size() == 7U && value.front() == '#' &&
+        std::ranges::all_of(value.substr(1), [](unsigned char character) { return std::isxdigit(character) != 0; });
+}
+
 constexpr std::uintmax_t kMaximumSkinImageBytes = 16U * 1024U * 1024U;
 
 struct SkinControlDefinition {
@@ -127,7 +139,7 @@ std::optional<PedalSkinDefinition> ReadPedalSkinFile(const std::filesystem::path
         !footswitch_definition.has_value()) {
         return std::nullopt;
     }
-    return PedalSkinDefinition{
+    PedalSkinDefinition result{
         .id = *id,
         .knob = knob_definition->id,
         .toggle = toggle_definition->id,
@@ -138,6 +150,56 @@ std::optional<PedalSkinDefinition> ReadPedalSkinFile(const std::filesystem::path
         .button_image = button_definition->image,
         .footswitch_image = footswitch_definition->image,
     };
+    if (const auto* layout = Find(object, "layout"); layout != nullptr) {
+        const auto* layout_object = layout->AsObject();
+        if (layout_object == nullptr) return std::nullopt;
+        const auto width = NumberField(*layout_object, "width");
+        const auto height = NumberField(*layout_object, "height");
+        if (!width.has_value() || !height.has_value() || *width < 160.0 || *width > 520.0 ||
+            *height < 140.0 || *height > 520.0) {
+            return std::nullopt;
+        }
+        result.width = *width;
+        result.height = *height;
+        if (const auto background = StringField(*layout_object, "background"); background.has_value()) {
+            if (!IsSkinColor(*background)) return std::nullopt;
+            result.background_color = *background;
+        }
+        if (const auto label = StringField(*layout_object, "labelColor"); label.has_value()) {
+            if (!IsSkinColor(*label)) return std::nullopt;
+            result.label_color = *label;
+        }
+        if (const auto* parameters = Find(*layout_object, "parameters"); parameters != nullptr) {
+            const auto* array = parameters->AsArray();
+            if (array == nullptr || array->size() > 64U) return std::nullopt;
+            std::set<std::string, std::less<>> ids;
+            for (const auto& value : *array) {
+                const auto* placement = value.AsObject();
+                if (placement == nullptr) return std::nullopt;
+                const auto parameter_id = StringField(*placement, "id");
+                const auto x = NumberField(*placement, "x");
+                const auto y = NumberField(*placement, "y");
+                if (!parameter_id.has_value() || parameter_id->empty() || !ids.insert(*parameter_id).second ||
+                    !x.has_value() || !y.has_value() || *x < 0.0 || *x > result.width ||
+                    *y < 0.0 || *y > result.height) {
+                    return std::nullopt;
+                }
+                result.parameter_placements.push_back({.parameter_id = *parameter_id, .x = *x, .y = *y});
+            }
+        }
+        if (const auto* footswitch_value = Find(*layout_object, "footswitch"); footswitch_value != nullptr) {
+            const auto* footswitch_layout = footswitch_value->AsObject();
+            if (footswitch_layout == nullptr) return std::nullopt;
+            const auto x = NumberField(*footswitch_layout, "x");
+            const auto y = NumberField(*footswitch_layout, "y");
+            if (!x.has_value() || !y.has_value() || *x < 0.0 || *x > result.width ||
+                *y < 0.0 || *y > result.height) {
+                return std::nullopt;
+            }
+            result.footswitch_position = EditorPoint{.x = *x, .y = *y};
+        }
+    }
+    return result;
 }
 
 std::vector<ModuleCatalogEntry> BuiltinCatalog() {
@@ -151,7 +213,12 @@ std::vector<ModuleCatalogEntry> BuiltinCatalog() {
                                    {.id = "outputGain", .minimum = 0.0F, .maximum = 2.0F, .default_value = 1.0F},
                                    {.id = "diodeThreshold", .minimum = 0.01F, .maximum = 1.0F, .default_value = 0.35F}},
          .latency_samples = 0U,
-         .estimated_cpu_percent = 1.5},
+         .estimated_cpu_percent = 1.5,
+         .ports = {{.id = "input", .direction = PortDirection::Input, .max_channels = 2U},
+                   {.id = "output", .direction = PortDirection::Output, .max_channels = 2U}},
+         .resource_kind = "Built-in module",
+         .resource_path = "Embedded runtime",
+         .resource_status = "Ready"},
         {.module_id = "org.mumu-dada.solorig.digital-delay",
          .display_name = "Delay",
          .category = "Digital",
@@ -161,8 +228,25 @@ std::vector<ModuleCatalogEntry> BuiltinCatalog() {
                                    {.id = "feedback", .minimum = -0.99F, .maximum = 0.99F, .default_value = 0.35F},
                                    {.id = "mix", .minimum = 0.0F, .maximum = 1.0F, .default_value = 0.25F}},
          .latency_samples = 96U,
-         .estimated_cpu_percent = 2.5},
+         .estimated_cpu_percent = 2.5,
+         .ports = {{.id = "input", .direction = PortDirection::Input, .max_channels = 2U},
+                   {.id = "output", .direction = PortDirection::Output, .max_channels = 2U}},
+         .resource_kind = "Built-in module",
+         .resource_path = "Embedded runtime",
+         .resource_status = "Ready"},
     };
+}
+
+std::string ResourceKind(const ModulePackage& package) {
+    if (std::holds_alternative<NeuralAmpModelLogic>(package.logic)) return "NAM";
+    if (std::holds_alternative<ImpulseResponseLogic>(package.logic)) return "IR";
+    if (std::holds_alternative<CircuitNetlist>(package.logic)) return "Circuit";
+    return "External package";
+}
+
+std::string Utf8Path(const std::filesystem::path& path) {
+    const auto text = path.u8string();
+    return {reinterpret_cast<const char*>(text.data()), text.size()};
 }
 
 std::string CategoryName(EffectCategory category) {
@@ -431,6 +515,32 @@ bool RigEditorViewModel::SetNodeBypassed(std::string_view instance_id, bool bypa
     return true;
 }
 
+bool RigEditorViewModel::SetNodesBypassed(const std::vector<std::string>& instance_ids, bool bypassed) {
+    if (instance_ids.empty()) {
+        return false;
+    }
+    const std::set<std::string, std::less<>> requested(instance_ids.begin(), instance_ids.end());
+    if (requested.size() != instance_ids.size() || requested.contains("")) {
+        return false;
+    }
+    auto candidate = preset_;
+    std::size_t matched = 0U;
+    for (auto& node : candidate.nodes) {
+        if (requested.contains(node.instance_id)) {
+            node.bypassed = bypassed;
+            ++matched;
+        }
+    }
+    if (matched != requested.size() || !ValidatePreset(candidate).empty() || HasInvalidTopology(candidate)) {
+        return false;
+    }
+    preset_ = std::move(candidate);
+    dirty_ = true;
+    SetFileStatus(bypassed ? "Selected nodes bypassed" : "Selected nodes enabled");
+    RebuildScene();
+    return true;
+}
+
 bool RigEditorViewModel::SetMeasuredPerformance(std::string_view instance_id,
                                                 uint32_t declared_latency_samples,
                                                 double measured_cpu_percent,
@@ -555,6 +665,10 @@ void RigEditorViewModel::RebuildCatalog() {
             .description = "External module package: " + package.descriptor.logic_entry_point,
             .latency_samples = package.descriptor.declared_latency_samples,
             .estimated_cpu_percent = package.descriptor.category == EffectCategory::AnalogCircuit ? 4.0 : 2.0,
+            .ports = package.descriptor.ports,
+            .resource_kind = ResourceKind(package),
+            .resource_path = Utf8Path(package.logic_path),
+            .resource_status = "Ready",
         };
         entry.default_parameters.reserve(package.descriptor.parameters.size());
         entry.parameter_descriptors = package.descriptor.parameters;
@@ -984,11 +1098,6 @@ void RigEditorViewModel::RebuildScene() {
     scene_.dirty = dirty_;
     scene_.nodes.clear();
     scene_.connections.clear();
-    // Keep the shared C# Avalonia card geometry and native hit-test/connection
-    // geometry in lockstep.  The first-design workbench uses taller cards so
-    // the compact control row and the endpoint sockets have clear separation.
-    constexpr double kNodeWidth = 196.0;
-    constexpr double kNodeHeight = 154.0;
     for (const auto& node : preset_.nodes) {
         const auto position = layout_.Find(node.instance_id).value_or(PedalPosition{});
         const auto* entry = FindCatalogEntry(node.module_id);
@@ -1000,8 +1109,8 @@ void RigEditorViewModel::RebuildScene() {
                                 .skin = node_skin,
                                 .bounds = {.x = position.x * dpi_scale_,
                                            .y = position.y * dpi_scale_,
-                                           .width = kNodeWidth * dpi_scale_,
-                                           .height = kNodeHeight * dpi_scale_},
+                                           .width = node_skin.width * dpi_scale_,
+                                           .height = node_skin.height * dpi_scale_},
                                 .selected = node.instance_id == dragging_instance_id_,
                                 .unresolved = !IsKnownModule(node.module_id),
                                 .bypassed = node.bypassed,

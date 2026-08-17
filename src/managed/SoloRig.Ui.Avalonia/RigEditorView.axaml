@@ -2,7 +2,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="using:SoloRig.Ui.Avalonia"
              x:Class="SoloRig.Ui.Avalonia.RigEditorView"
-             PointerMoved="RootPointerMoved" PointerReleased="RootPointerReleased">
+             PointerMoved="RootPointerMoved" PointerReleased="RootPointerReleased"
+             SizeChanged="RigEditorSizeChanged">
   <UserControl.Resources>
     <local:SkinImageConverter x:Key="SkinImageConverter" />
   </UserControl.Resources>
@@ -59,6 +60,31 @@
       <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentHoverBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource SrgAccentHoverBrush}" />
     </Style>
+    <Style Selector="Button.srg-button:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentBrush}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <Style Selector="Button.srg-endpoint">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="CornerRadius" Value="99" />
+    </Style>
+    <Style Selector="Button.srg-endpoint:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentTextBrush}" />
+      <Setter Property="BorderThickness" Value="3" />
+    </Style>
+    <Style Selector="Button.srg-parameter-chip">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="3" />
+      <Setter Property="CornerRadius" Value="5" />
+    </Style>
+    <Style Selector="Button.srg-parameter-chip:pointerover">
+      <Setter Property="Background" Value="{DynamicResource SrgControlHoverBrush}" />
+    </Style>
+    <Style Selector="Button.srg-parameter-chip:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentBrush}" />
+    </Style>
     <Style Selector="Button.srg-footswitch">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
@@ -76,11 +102,23 @@
       <Setter Property="CornerRadius" Value="6" />
       <Setter Property="Padding" Value="9,7" />
     </Style>
+    <Style Selector="TextBox.srg-input:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentBrush}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <Style Selector="TextBox.srg-input.invalid">
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgErrorBrush}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
     <Style Selector="ComboBox.srg-input">
       <Setter Property="Background" Value="{DynamicResource SrgControlBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource SrgBorderBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource SrgTextBrush}" />
       <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ComboBox.srg-input:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentBrush}" />
+      <Setter Property="BorderThickness" Value="2" />
     </Style>
     <Style Selector="Slider.srg-slider">
       <Setter Property="Background" Value="{DynamicResource SrgTrackBrush}" />
@@ -101,12 +139,27 @@
     <Style Selector="ListBox.srg-list ListBoxItem:selected /template/ ContentPresenter">
       <Setter Property="Background" Value="Transparent" />
     </Style>
+    <Style Selector="ListBox.srg-list:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentBrush}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <Style Selector="Border.srg-focus-surface:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentBrush}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <Style Selector="Grid.srg-canvas-node:focus-visible > Border">
+      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentBrush}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
     <Style Selector="Expander.srg-expander">
       <Setter Property="Background" Value="{DynamicResource SrgPanelBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource SrgBorderBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="8" />
       <Setter Property="Padding" Value="10" />
+    </Style>
+    <Style Selector="WrapPanel#TopbarActions > Button">
+      <Setter Property="Margin" Value="0,0,6,4" />
     </Style>
   </UserControl.Styles>
 
@@ -115,8 +168,14 @@
     <Grid RowDefinitions="Auto,*,Auto">
       <Border Grid.Row="0" Background="{DynamicResource SrgTopbarBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="0,0,0,1"
               Padding="18,12">
-        <Grid ColumnDefinitions="Auto,*,Auto,Auto">
-          <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+        <Grid x:Name="TopbarGrid">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <StackPanel x:Name="BrandPanel" Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
             <Border Width="30" Height="30" CornerRadius="9" Background="{DynamicResource SrgAccentBrush}">
               <TextBlock Text="S" Foreground="{DynamicResource SrgAccentTextBrush}" FontSize="17" FontWeight="Bold"
                          HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -138,9 +197,14 @@
           <ComboBox Grid.Column="2" x:Name="PresetSelector" Classes="srg-input" Width="178"
                     ItemsSource="{Binding PresetNames}" SelectedItem="{Binding SelectedPresetName, Mode=OneWay}"
                     SelectionChanged="PresetSelectionChanged"
+                    AutomationProperties.Name="当前预设"
                     VerticalAlignment="Center" />
 
-          <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <WrapPanel x:Name="TopbarActions" Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+            <Button x:Name="ModulePanelToggleButton" IsVisible="False" Classes="srg-button ghost" Content="模块"
+                    Click="ToggleModulePanelClick" />
+            <Button x:Name="InspectorPanelToggleButton" IsVisible="False" Classes="srg-button ghost" Content="检查器"
+                    Click="ToggleInspectorPanelClick" />
             <Button Classes="srg-button ghost" Content="新建" Click="NewPresetClick" />
             <Button Classes="srg-button ghost" Content="默认" Click="DefaultPresetClick" />
             <Button Classes="srg-button ghost" Content="打开" Click="OpenClick" />
@@ -151,13 +215,19 @@
             <Button x:Name="RedoButton" Classes="srg-button ghost" Content="重做"
                     IsEnabled="{Binding CanRedo}" ToolTip.Tip="重做（Ctrl+Y / Ctrl+Shift+Z）" Click="RedoClick" />
             <Button Classes="srg-button ghost" Content="主题" ToolTip.Tip="加载主题 JSON" Click="LoadThemeClick" />
-            <Button Classes="srg-button" Content="◐" ToolTip.Tip="切换主题" Command="{Binding ToggleThemeCommand}" />
-          </StackPanel>
+            <Button Classes="srg-button" Content="◐" ToolTip.Tip="切换主题"
+                    AutomationProperties.Name="切换深浅主题" Command="{Binding ToggleThemeCommand}" />
+          </WrapPanel>
         </Grid>
       </Border>
 
-      <Grid Grid.Row="1" ColumnDefinitions="226,*,286" MinHeight="500">
-        <Border Grid.Column="0" Background="{DynamicResource SrgPanelBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="0,0,1,0"
+      <Grid x:Name="WorkspaceGrid" Grid.Row="1" MinHeight="500">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="226" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="286" />
+        </Grid.ColumnDefinitions>
+        <Border x:Name="ModuleLibraryPanel" Grid.Column="0" Background="{DynamicResource SrgPanelBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="0,0,1,0"
                 Padding="15">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="11">
@@ -165,7 +235,8 @@
                 <TextBlock Text="模块库" Classes="srg-text" FontSize="13" FontWeight="SemiBold" />
                 <TextBlock Grid.Column="1" Text="{Binding ModuleCatalogSummaryText}" Classes="srg-small" />
               </Grid>
-              <TextBox Classes="srg-input" Watermark="搜索模块" Text="{Binding ModuleSearchText}" />
+              <TextBox Classes="srg-input" Watermark="搜索模块" Text="{Binding ModuleSearchText}"
+                       AutomationProperties.Name="搜索模块" />
               <Grid ColumnDefinitions="*,*,*">
                 <Button x:Name="AnalogFilterButton" Grid.Column="0" Classes="srg-button ghost" Content="模拟" Tag="模拟"
                         Click="ModuleCatalogFilterClick" HorizontalContentAlignment="Center" />
@@ -175,6 +246,7 @@
                         Click="ModuleCatalogFilterClick" HorizontalContentAlignment="Center" />
               </Grid>
               <ListBox x:Name="ModuleCatalogList" Classes="srg-list" Height="205"
+                       AutomationProperties.Name="模块目录"
                        ItemsSource="{Binding FilteredModuleCatalog}" SelectedItem="{Binding SelectedCatalogModule}">
                 <ListBox.ItemTemplate>
                   <DataTemplate>
@@ -209,9 +281,60 @@
               </StackPanel>
               <Border BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="0,1,0,0" Padding="0,12,0,0">
                 <StackPanel Spacing="8">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="工程节点" Classes="srg-eyebrow" />
+                    <TextBlock Grid.Column="1" Text="{Binding NodeNavigatorSummaryText}" Classes="srg-small" />
+                  </Grid>
+                  <TextBox x:Name="NodeNavigatorSearchBox" Classes="srg-input" Watermark="搜索名称或节点 ID"
+                           Text="{Binding NodeNavigatorSearchText}"
+                           AutomationProperties.Name="搜索工程节点" />
+                  <Grid ColumnDefinitions="*,6,*">
+                    <Button x:Name="NodeNavigatorSelectAllButton" Grid.Column="0" Classes="srg-button ghost"
+                            Content="全选结果" Click="NodeNavigatorSelectAllClick" />
+                    <Button x:Name="NodeNavigatorClearButton" Grid.Column="2" Classes="srg-button ghost"
+                            Content="清空" IsEnabled="{Binding CanBatchNodes}" Click="NodeNavigatorClearClick" />
+                  </Grid>
+                  <Grid ColumnDefinitions="*,6,*">
+                    <Button x:Name="NodeNavigatorBypassButton" Grid.Column="0" Classes="srg-button"
+                            Content="旁路" IsEnabled="{Binding CanBatchBypassNodes}" Click="NodeNavigatorBypassClick" />
+                    <Button x:Name="NodeNavigatorEnableButton" Grid.Column="2" Classes="srg-button"
+                            Content="启用" IsEnabled="{Binding CanBatchEnableNodes}" Click="NodeNavigatorEnableClick" />
+                  </Grid>
+                  <ListBox x:Name="NodeNavigatorList" Classes="srg-list" Height="168"
+                           AutomationProperties.Name="工程节点列表"
+                           ItemsSource="{Binding FilteredNodeNavigatorEntries}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate>
+                        <Grid ColumnDefinitions="Auto,*" Margin="1,2">
+                          <CheckBox Grid.Column="0" Margin="0,0,5,0" VerticalAlignment="Center"
+                                    IsChecked="{Binding IsBatchSelected, Mode=TwoWay}"
+                                    AutomationProperties.Name="{Binding SelectionAutomationName}" />
+                          <Button Grid.Column="1" Classes="srg-button ghost" Padding="7,5"
+                                  HorizontalContentAlignment="Stretch" Tag="{Binding InstanceId}"
+                                  Click="NodeNavigatorLocateClick" ToolTip.Tip="在画布中定位节点"
+                                  AutomationProperties.Name="{Binding LocateAutomationName}">
+                            <Grid ColumnDefinitions="*,Auto">
+                              <StackPanel Spacing="1">
+                                <TextBlock Text="{Binding DisplayName}" Classes="srg-text" FontSize="11"
+                                           FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding InstanceId}" Classes="srg-muted" FontSize="9"
+                                           TextTrimming="CharacterEllipsis" />
+                              </StackPanel>
+                              <TextBlock Grid.Column="1" Text="{Binding Node.FootswitchText}" Classes="srg-small"
+                                         VerticalAlignment="Center" Margin="6,0,0,0" />
+                            </Grid>
+                          </Button>
+                        </Grid>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                </StackPanel>
+              </Border>
+              <Border BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="0,1,0,0" Padding="0,12,0,0">
+                <StackPanel Spacing="8">
                   <TextBlock Text="资源" Classes="srg-eyebrow" />
                   <TextBlock Text="{Binding ResourceStatus}" Classes="srg-muted" FontSize="11" TextWrapping="Wrap" />
-                  <Button Classes="srg-button" Content="导入 NAM / A2 / IR / Circuit" Click="ImportResourceClick" />
+                  <Button Classes="srg-button" Content="导入模块资源" Click="ImportResourceClick" />
                   <TextBlock Text="点击添加，或把模块卡片拖到画布中；画布卡片可继续拖动。"
                              Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
                 </StackPanel>
@@ -220,13 +343,16 @@
           </ScrollViewer>
         </Border>
 
-        <Border Grid.Column="1" Background="{DynamicResource SrgCanvasBrush}">
-            <Border Margin="16,14" BorderBrush="{DynamicResource SrgStrongBorderBrush}" BorderThickness="1"
-                    CornerRadius="8" ClipToBounds="True">
+        <Border x:Name="CanvasPanel" Grid.Column="1" Background="{DynamicResource SrgCanvasBrush}">
+            <Border x:Name="CanvasSurface" Classes="srg-focus-surface" Margin="16,14"
+                    BorderBrush="{DynamicResource SrgStrongBorderBrush}" BorderThickness="1"
+                    CornerRadius="8" ClipToBounds="True" Focusable="True" KeyDown="CanvasSurfaceKeyDown"
+                    AutomationProperties.Name="效果器画布"
+                    AutomationProperties.HelpText="左右方向键选择节点，Enter 定位节点，Delete 删除节点">
               <Border.Background>
                 <DynamicResource ResourceKey="SrgCanvasBackgroundBrush" />
               </Border.Background>
-              <Canvas x:Name="EditorCanvas" ClipToBounds="True"
+              <Canvas x:Name="EditorCanvas" ClipToBounds="True" PointerWheelChanged="CanvasPointerWheelChanged"
                       PointerPressed="CanvasPointerPressed" PointerMoved="CanvasPointerMoved"
                       PointerReleased="CanvasPointerReleased" SizeChanged="CanvasSizeChanged">
                 <Border Canvas.Left="18" Canvas.Top="174" Width="132" Height="124" Padding="10"
@@ -242,9 +368,9 @@
                       <Border Height="5" Background="{DynamicResource SrgTrackBrush}" CornerRadius="3" VerticalAlignment="Center">
                         <Border Width="48" HorizontalAlignment="Left" Background="{DynamicResource SrgInputBrush}" CornerRadius="3" />
                       </Border>
-                      <Ellipse Grid.Column="1" Width="11" Height="11" Margin="8,0,-16,0"
-                               Fill="{DynamicResource SrgInputBrush}" Stroke="{DynamicResource SrgInputOutlineBrush}" StrokeThickness="2"
-                               Tag="fixed-input" PointerPressed="FixedEndpointPressed" />
+                      <Button Grid.Column="1" Classes="srg-endpoint" Width="13" Height="13" Margin="8,0,-16,0"
+                              Background="{DynamicResource SrgInputBrush}" BorderBrush="{DynamicResource SrgInputOutlineBrush}" BorderThickness="2"
+                              Tag="fixed-input" AutomationProperties.Name="固定物理输入端点" Click="FixedEndpointClick" />
                     </Grid>
                   </Grid>
                 </Border>
@@ -259,9 +385,9 @@
                     <TextBlock Grid.Row="1" Text="{Binding FixedOutputPortText}" Classes="srg-muted" FontSize="10"
                                TextWrapping="Wrap" VerticalAlignment="Center" />
                     <Grid Grid.Row="2" ColumnDefinitions="Auto,*" Margin="0,9,0,0">
-                      <Ellipse Width="11" Height="11" Margin="-16,0,8,0"
-                               Fill="{DynamicResource SrgOutputBrush}" Stroke="{DynamicResource SrgOutputOutlineBrush}" StrokeThickness="2"
-                               Tag="fixed-output" PointerPressed="FixedEndpointPressed" />
+                      <Button Classes="srg-endpoint" Width="13" Height="13" Margin="-16,0,8,0"
+                              Background="{DynamicResource SrgOutputBrush}" BorderBrush="{DynamicResource SrgOutputOutlineBrush}" BorderThickness="2"
+                              Tag="fixed-output" AutomationProperties.Name="固定物理输出端点" Click="FixedEndpointClick" />
                       <Border Grid.Column="1" Height="5" Background="{DynamicResource SrgTrackBrush}" CornerRadius="3" VerticalAlignment="Center">
                         <Border Width="72" HorizontalAlignment="Left" Background="{DynamicResource SrgOutputBrush}" CornerRadius="3" />
                       </Border>
@@ -272,6 +398,7 @@
                 <Line StartPoint="150,236" EndPoint="1000,236"
                       Stroke="{DynamicResource SrgGridBrush}" StrokeThickness="1" Opacity="0.6" />
                 <ItemsControl x:Name="CanvasConnectionLayer" Canvas.Left="0" Canvas.Top="0" ZIndex="4"
+                              RenderTransformOrigin="0%,0%"
                               Width="{Binding Bounds.Width, ElementName=EditorCanvas}"
                               Height="{Binding Bounds.Height, ElementName=EditorCanvas}"
                               ItemsSource="{Binding CanvasConnections}">
@@ -288,6 +415,7 @@
                 </ItemsControl>
 
                 <ItemsControl x:Name="CanvasNodeLayer" Canvas.Left="0" Canvas.Top="0" ZIndex="8"
+                              RenderTransformOrigin="0%,0%"
                               Width="{Binding Bounds.Width, ElementName=EditorCanvas}"
                               Height="{Binding Bounds.Height, ElementName=EditorCanvas}"
                               ItemsSource="{Binding CanvasNodes}">
@@ -302,27 +430,39 @@
                   </ItemsControl.Styles>
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <Grid Width="{Binding Width}" Height="{Binding Height}">
+                      <Grid Classes="srg-canvas-node" Width="{Binding Width}" Height="{Binding Height}"
+                            Focusable="True" KeyDown="CanvasNodeKeyDown"
+                            AutomationProperties.Name="{Binding DisplayName}"
+                            AutomationProperties.HelpText="Enter 选择，方向键移动，Shift 加方向键微调，Delete 删除">
                         <Border Padding="11" Background="{Binding CardBackground}" BorderBrush="{Binding CardBorder}"
                                 BorderThickness="1" CornerRadius="10">
                           <Grid RowDefinitions="Auto,*,Auto">
-                            <Grid ColumnDefinitions="*,Auto">
+                            <Grid ColumnDefinitions="*,Auto" Panel.ZIndex="2">
                               <StackPanel Spacing="2">
-                                <TextBlock Text="{Binding DisplayName}" Classes="srg-text" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding DisplayName}" Foreground="{Binding LabelForeground}" FontSize="13" FontWeight="SemiBold" />
                                 <TextBlock Text="{Binding CategoryText}" Classes="srg-muted" FontSize="10" />
                               </StackPanel>
                               <TextBlock Grid.Column="1" Text="•••" Classes="srg-muted" FontSize="12" />
                             </Grid>
-                            <ItemsControl Grid.Row="1" ItemsSource="{Binding Controls}" HorizontalAlignment="Center"
-                                          VerticalAlignment="Center">
+                            <ItemsControl Grid.RowSpan="3" ItemsSource="{Binding Controls}" HorizontalAlignment="Stretch"
+                                          VerticalAlignment="Stretch" ZIndex="1">
                               <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                  <StackPanel Orientation="Horizontal" Spacing="9" />
+                                  <Canvas />
                                 </ItemsPanelTemplate>
                               </ItemsControl.ItemsPanel>
+                              <ItemsControl.Styles>
+                                <Style Selector="ContentPresenter">
+                                  <Setter Property="Canvas.Left" Value="{Binding CanvasLeft}" />
+                                  <Setter Property="Canvas.Top" Value="{Binding CanvasTop}" />
+                                </Style>
+                              </ItemsControl.Styles>
                               <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                  <StackPanel Width="48" Spacing="2" HorizontalAlignment="Center">
+                                  <Button Classes="srg-parameter-chip" Width="48" Tag="{Binding Target}"
+                                          Click="NodeParameterChipClick" AutomationProperties.Name="{Binding Label}"
+                                          AutomationProperties.HelpText="在检查器中编辑此参数">
+                                    <StackPanel Spacing="2" HorizontalAlignment="Center">
                                     <Grid Width="32" Height="32">
                                       <Ellipse Width="29" Height="29" Fill="{DynamicResource SrgKnobBrush}"
                                                Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="2" />
@@ -344,16 +484,18 @@
                                              Source="{Binding ImagePath, Converter={StaticResource SkinImageConverter}}"
                                              Stretch="Uniform" />
                                     </Grid>
-                                    <TextBlock Text="{Binding Label}" Classes="srg-muted" FontSize="9"
+                                    <TextBlock Text="{Binding Label}" Foreground="{Binding LabelColor}" FontSize="9"
                                                HorizontalAlignment="Center" />
                                     <TextBlock Text="{Binding ValueText}" Classes="srg-muted" FontSize="8"
                                                HorizontalAlignment="Center" />
-                                  </StackPanel>
+                                    </StackPanel>
+                                  </Button>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                             </ItemsControl>
                             <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,5,0,0">
                               <Button Classes="srg-footswitch" Tag="{Binding InstanceId}" Click="NodeFootswitchClick"
+                                      IsVisible="{Binding UseDefaultFootswitchPosition}"
                                       ToolTip.Tip="切换旁路 / 启用">
                                 <StackPanel Orientation="Horizontal" Spacing="4">
                                   <Border Width="22" Height="14" Background="{DynamicResource SrgControlBrush}"
@@ -370,29 +512,68 @@
                               </Button>
                               <TextBlock Grid.Column="1" Text="{Binding LatencyText}" Classes="srg-muted" FontSize="9" />
                             </Grid>
+                            <Canvas Grid.RowSpan="3" IsVisible="{Binding HasCustomFootswitchPosition}" Panel.ZIndex="3">
+                              <Button Classes="srg-footswitch" Tag="{Binding InstanceId}" Click="NodeFootswitchClick"
+                                      Canvas.Left="{Binding FootswitchCanvasLeft}" Canvas.Top="{Binding FootswitchCanvasTop}"
+                                      ToolTip.Tip="切换旁路 / 启用">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                  <Border Width="22" Height="14" Background="{DynamicResource SrgControlBrush}"
+                                          BorderBrush="{DynamicResource SrgAccentBrush}" BorderThickness="1"
+                                          CornerRadius="5" Opacity="{Binding FootswitchOpacity}">
+                                    <Ellipse Width="7" Height="7" Fill="{DynamicResource SrgAccentBrush}"
+                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                  </Border>
+                                  <Image IsVisible="{Binding HasFootswitchImage}" Width="22" Height="14"
+                                         Source="{Binding FootswitchImagePath, Converter={StaticResource SkinImageConverter}}"
+                                         Stretch="Uniform" Opacity="{Binding FootswitchOpacity}" />
+                                </StackPanel>
+                              </Button>
+                            </Canvas>
                           </Grid>
                         </Border>
-                        <Ellipse Width="13" Height="13" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                 Margin="-7,0,0,0" Fill="{DynamicResource SrgAccentBrush}" Stroke="{DynamicResource SrgAccentOutlineBrush}" StrokeThickness="2"
-                                 Tag="{Binding InstanceId}" PointerPressed="NodeInputEndpointPressed" />
-                        <Ellipse Width="13" Height="13" HorizontalAlignment="Right" VerticalAlignment="Center"
-                                 Margin="0,0,-7,0" Fill="{DynamicResource SrgOutputBrush}" Stroke="{DynamicResource SrgOutputOutlineBrush}" StrokeThickness="2"
-                                 Tag="{Binding InstanceId}" PointerPressed="NodeOutputEndpointPressed" />
+                        <Button Classes="srg-endpoint" Width="15" Height="15" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                Margin="-8,0,0,0" Background="{DynamicResource SrgAccentBrush}"
+                                BorderBrush="{DynamicResource SrgAccentOutlineBrush}" BorderThickness="2"
+                                Tag="{Binding InstanceId}" AutomationProperties.Name="{Binding InstanceId}"
+                                AutomationProperties.HelpText="选择为连接目标" Click="NodeInputEndpointClick" />
+                        <Button Classes="srg-endpoint" Width="15" Height="15" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                Margin="0,0,-8,0" Background="{DynamicResource SrgOutputBrush}"
+                                BorderBrush="{DynamicResource SrgOutputOutlineBrush}" BorderThickness="2"
+                                Tag="{Binding InstanceId}" AutomationProperties.Name="{Binding InstanceId}"
+                                AutomationProperties.HelpText="选择为连接来源" Click="NodeOutputEndpointClick" />
                       </Grid>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <Border Canvas.Right="14" Canvas.Top="12" ZIndex="16"
+                <Border x:Name="ConnectionToolPanel" Classes="srg-focus-surface" Canvas.Right="14" Canvas.Top="12" ZIndex="16"
                         Background="{DynamicResource SrgOverlayBrush}" BorderBrush="{DynamicResource SrgToolBorderBrush}"
-                        BorderThickness="1" CornerRadius="7" Padding="9,7">
-                  <StackPanel Spacing="5">
+                        BorderThickness="1" CornerRadius="7" Padding="9,7" Width="360" Focusable="True"
+                        KeyDown="ConnectionToolKeyDown" AutomationProperties.Name="拓扑连接工具"
+                        AutomationProperties.HelpText="Enter 创建连接，Delete 断开选中连接">
+                  <StackPanel Spacing="6">
                     <TextBlock Text="{Binding ConnectionSelectionText}" Classes="srg-muted" FontSize="9"
-                               MaxWidth="280" TextTrimming="CharacterEllipsis" />
+                               TextTrimming="CharacterEllipsis" />
+                    <Grid ColumnDefinitions="*,Auto,*">
+                      <ComboBox x:Name="ConnectionSourceSelector" Classes="srg-input"
+                                ItemsSource="{Binding ConnectionNodeIds}"
+                                SelectedItem="{Binding ConnectionSourceNodeId, Mode=TwoWay}"
+                                AutomationProperties.Name="连接来源节点"
+                                PlaceholderText="来源节点" FontSize="10" />
+                      <TextBlock Grid.Column="1" Text="→" Classes="srg-muted" FontSize="13"
+                                 Margin="7,0" VerticalAlignment="Center" />
+                      <ComboBox x:Name="ConnectionDestinationSelector" Grid.Column="2" Classes="srg-input"
+                                ItemsSource="{Binding ConnectionNodeIds}"
+                                SelectedItem="{Binding ConnectionDestinationNodeId, Mode=TwoWay}"
+                                AutomationProperties.Name="连接目标节点"
+                                PlaceholderText="目标节点" FontSize="10" />
+                    </Grid>
+                    <TextBlock x:Name="ConnectionCandidateStatusText" Text="{Binding ConnectionCandidateStatusText}"
+                               Classes="srg-muted" FontSize="9" TextWrapping="Wrap" />
                     <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
-                      <Button x:Name="CanvasConnectButton" Classes="srg-button ghost" Content="连接首尾"
+                      <Button x:Name="CanvasConnectButton" Classes="srg-button ghost" Content="创建连接"
                               Command="{Binding ConnectSelectedCommand}" IsEnabled="{Binding CanConnectNodes}" />
-                      <Button x:Name="CanvasDisconnectButton" Classes="srg-button ghost" Content="断开连接"
+                      <Button x:Name="CanvasDisconnectButton" Classes="srg-button ghost" Content="断开选中"
                               Command="{Binding DisconnectSelectedCommand}" IsEnabled="{Binding CanDisconnectNodes}" />
                     </StackPanel>
                   </StackPanel>
@@ -412,14 +593,22 @@
                 </Border>
                 <Border Canvas.Right="14" Canvas.Bottom="9" Background="{DynamicResource SrgOverlayBrush}" BorderBrush="{DynamicResource SrgToolBorderBrush}"
                         BorderThickness="1" CornerRadius="7" Padding="9,6">
-                  <Button x:Name="CanvasAddModuleButton" Classes="srg-button ghost" Content="＋ 添加模块"
-                          Command="{Binding AddModuleCommand}" IsEnabled="{Binding CanAddModule}" />
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <Button Classes="srg-button ghost" Content="−" Click="ZoomOutClick" ToolTip.Tip="缩小画布" />
+                    <TextBlock x:Name="CanvasZoomText" Text="100%" Classes="srg-muted" FontSize="10"
+                               VerticalAlignment="Center" MinWidth="38" TextAlignment="Center" />
+                    <Button Classes="srg-button ghost" Content="＋" Click="ZoomInClick" ToolTip.Tip="放大画布" />
+                    <Button Classes="srg-button ghost" Content="适配" Click="FitCanvasClick" ToolTip.Tip="适配全部节点" />
+                    <Button Classes="srg-button ghost" Content="定位" Click="FocusSelectedClick" ToolTip.Tip="定位选中节点" />
+                    <Button x:Name="CanvasAddModuleButton" Classes="srg-button ghost" Content="＋ 添加模块"
+                            Command="{Binding AddModuleCommand}" IsEnabled="{Binding CanAddModule}" />
+                  </StackPanel>
                 </Border>
               </Canvas>
             </Border>
         </Border>
 
-        <Border Grid.Column="2" Background="{DynamicResource SrgPanelBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1,0,0,0"
+        <Border x:Name="InspectorPanel" Grid.Column="2" Background="{DynamicResource SrgPanelBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1,0,0,0"
                 Padding="15">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="12">
@@ -461,10 +650,20 @@
                 <StackPanel Spacing="7">
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="连接端口" Classes="srg-muted" FontSize="10" />
-                    <TextBlock Text="点击端点操作" Foreground="{DynamicResource SrgAccentBrush}" FontSize="10" />
+                    <TextBlock Text="{Binding SelectedPortSummary}" Foreground="{DynamicResource SrgAccentBrush}" FontSize="10" />
                   </Grid>
-                  <TextBlock Text="输入 · audio / 2ch" Classes="srg-text" FontSize="11" />
-                  <TextBlock Text="输出 · audio / 2ch" Classes="srg-text" FontSize="11" />
+                  <ItemsControl x:Name="PortInspectorList" ItemsSource="{Binding SelectedPorts}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Grid ColumnDefinitions="10,*" Margin="0,2">
+                          <Ellipse Width="6" Height="6" Fill="{DynamicResource SrgAccentBrush}"
+                                   HorizontalAlignment="Left" VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="1" Text="{Binding DisplayText}" Classes="srg-text" FontSize="11"
+                                     TextWrapping="Wrap" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
                 </StackPanel>
               </Border>
               <ItemsControl x:Name="ParameterControlsList" IsVisible="{Binding IsParameterInspectorVisible}"
@@ -475,14 +674,32 @@
                             BorderThickness="1" CornerRadius="7" Padding="7" Margin="0,3">
                       <Grid RowDefinitions="Auto,Auto">
                         <Grid ColumnDefinitions="*,Auto">
-                          <TextBlock Text="{Binding Id}" Classes="srg-text" FontSize="11" />
-                          <TextBlock Grid.Column="1" Text="{Binding RangeText}" Classes="srg-muted" FontSize="9" />
+                          <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Text="{Binding DisplayName}" Classes="srg-text" FontSize="11" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Id}" Classes="srg-muted" FontSize="9" VerticalAlignment="Center" />
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="5">
+                            <TextBlock Text="{Binding NormalizedText}" Foreground="{DynamicResource SrgAccentBrush}" FontSize="9" />
+                            <TextBlock Text="{Binding RangeText}" Classes="srg-muted" FontSize="9" />
+                          </StackPanel>
                         </Grid>
-                        <Grid Grid.Row="1" ColumnDefinitions="*,74" Margin="0,5,0,0">
-                          <Slider Classes="srg-slider" Minimum="{Binding Minimum}" Maximum="{Binding Maximum}"
-                                  Value="{Binding Value}" Tag="{Binding Target}" ValueChanged="ParameterSliderChanged" />
-                          <TextBox Grid.Column="1" Classes="srg-input" Margin="7,0,0,0" Tag="{Binding Target}" Text="{Binding ValueText}"
-                                   LostFocus="ParameterLostFocus" HorizontalContentAlignment="Right" FontSize="11" />
+                        <Grid Grid.Row="1" ColumnDefinitions="28,*,28,68" Margin="0,5,0,0">
+                          <Button Classes="srg-button ghost" Width="28" Height="28" Padding="0" Content="−"
+                                  Tag="{Binding Target}" Click="ParameterDecreaseClick"
+                                  ToolTip.Tip="减小参数" AutomationProperties.Name="减小参数" />
+                          <Slider Grid.Column="1" Classes="srg-slider" MinWidth="48" Margin="5,0"
+                                  Minimum="{Binding Minimum}" Maximum="{Binding Maximum}"
+                                  SmallChange="{Binding FineStep}" LargeChange="{Binding CoarseStep}"
+                                  Value="{Binding Value}" Tag="{Binding Target}" ValueChanged="ParameterSliderChanged"
+                                  AutomationProperties.Name="{Binding DisplayName}" />
+                          <Button Grid.Column="2" Classes="srg-button ghost" Width="28" Height="28" Padding="0" Content="+"
+                                  Tag="{Binding Target}" Click="ParameterIncreaseClick"
+                                  ToolTip.Tip="增大参数" AutomationProperties.Name="增大参数" />
+                          <TextBox Grid.Column="3" Classes="srg-input" Margin="5,0,0,0" Tag="{Binding Target}"
+                                   Text="{Binding ValueText, Mode=OneWay}" KeyDown="ParameterTextBoxKeyDown"
+                                   GotFocus="ParameterGotFocus" LostFocus="ParameterLostFocus" ToolTip.Tip="{Binding StepText}"
+                                   AutomationProperties.Name="{Binding DisplayName}"
+                                   HorizontalContentAlignment="Right" FontSize="11" />
                         </Grid>
                       </Grid>
                     </Border>
@@ -496,8 +713,23 @@
                         Command="{Binding DeleteSelectedCommand}" IsEnabled="{Binding CanDeleteSelected}" HorizontalAlignment="Stretch" />
               </StackPanel>
               <Border IsVisible="{Binding IsResourceInspectorVisible}" Background="{DynamicResource SrgControlBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1" CornerRadius="7" Padding="9">
-                <StackPanel Spacing="5">
-                  <TextBlock Text="{Binding ResourceStatus}" Classes="srg-muted" FontSize="10" TextWrapping="Wrap" />
+                <StackPanel Spacing="7">
+                  <Grid ColumnDefinitions="52,*">
+                    <TextBlock Text="来源" Classes="srg-muted" FontSize="10" />
+                    <TextBlock x:Name="ResourceKindText" Grid.Column="1" Text="{Binding SelectedResourceKindText}"
+                               Classes="srg-text" FontSize="10" TextWrapping="Wrap" />
+                  </Grid>
+                  <Grid ColumnDefinitions="52,*">
+                    <TextBlock Text="路径" Classes="srg-muted" FontSize="10" />
+                    <TextBlock x:Name="ResourcePathText" Grid.Column="1" Text="{Binding SelectedResourcePathText}"
+                               Classes="srg-text" FontSize="10" TextWrapping="Wrap" />
+                  </Grid>
+                  <Grid ColumnDefinitions="52,*">
+                    <TextBlock Text="状态" Classes="srg-muted" FontSize="10" />
+                    <TextBlock x:Name="ResourceStateText" Grid.Column="1" Text="{Binding SelectedResourceStateText}"
+                               Foreground="{DynamicResource SrgAccentBrush}" FontSize="10" TextWrapping="Wrap" />
+                  </Grid>
+                  <TextBlock Text="{Binding ResourceStatus}" Classes="srg-muted" FontSize="9" TextWrapping="Wrap" />
                   <Button Classes="srg-button" Content="导入模块资源" Click="ImportResourceClick" />
                 </StackPanel>
               </Border>

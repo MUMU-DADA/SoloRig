@@ -1,7 +1,10 @@
 #include "interop/solorig_backend.h"
 
+#include "content/module_package.hpp"
+#include "content/module_runtime.hpp"
 #include "content/preset.hpp"
 #include "core/realtime_contract.hpp"
+#include "dsp/mna_solver.hpp"
 #include "standalone/asio_host.hpp"
 #include "standalone/midi_control_session.hpp"
 #include "standalone/standalone_audio_engine.hpp"
@@ -11,13 +14,16 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <new>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -44,11 +50,23 @@ struct SoloRigBackend {
 };
 
 struct SoloRigSnapshot {
+    struct NodePort {
+        std::string id;
+        std::uint8_t direction{};
+        std::uint32_t max_channels{};
+    };
+    struct NodeResource {
+        std::string kind;
+        std::string path;
+        std::string status;
+    };
     solo_rig::RigPreset preset;
     solo_rig::RigEditorScene scene;
     std::string midi_status;
     std::vector<std::vector<std::pair<float, float>>> parameter_ranges;
     std::vector<std::array<std::string, 4>> node_skin_images_utf8;
+    std::vector<std::vector<NodePort>> node_ports;
+    std::vector<NodeResource> node_resources;
     bool audio_open{};
     bool audio_running{};
     bool audio_reset_requested{};
@@ -189,6 +207,133 @@ void PushEditorHistory(std::vector<EditorHistoryState>& history, EditorHistorySt
         history.erase(history.begin());
     }
     history.push_back(std::move(state));
+}
+
+std::string_view ModulePackageErrorText(solo_rig::ModulePackageLoadError error) {
+    using enum solo_rig::ModulePackageLoadError;
+    switch (error) {
+    case MissingManifest: return "manifest.json is missing";
+    case CannotReadManifest: return "manifest.json cannot be read";
+    case InvalidJson: return "manifest.json is not valid JSON";
+    case InvalidSchema: return "module package schema is unsupported";
+    case MissingRequiredField: return "module package is missing a required field";
+    case InvalidField: return "module package contains an invalid field";
+    case UnsafeAssetPath: return "module package contains an unsafe asset path";
+    case DescriptorInvalid: return "module metadata, ports, parameters, or latency are invalid";
+    case MissingLogicFile: return "module logic file is missing";
+    case CannotReadLogicFile: return "module logic file cannot be read";
+    case InvalidLogicJson: return "module logic file is not valid JSON";
+    case InvalidLogicSchema: return "module logic schema is unsupported";
+    case LogicCategoryMismatch: return "module category and logic kind do not match";
+    case InvalidLogicDefinition: return "module logic definition is invalid or unsupported";
+    case LogicParameterUnknown: return "module logic references an undeclared parameter";
+    case ExternalAssetInvalid: return "external module asset is invalid";
+    }
+    return "module package validation failed";
+}
+
+std::string_view ModuleRuntimeErrorText(solo_rig::ModuleRuntimeError error) {
+    using enum solo_rig::ModuleRuntimeError;
+    switch (error) {
+    case MissingLogic: return "module runtime logic is missing";
+    case LogicCategoryMismatch: return "module runtime category does not match its logic";
+    case UnsupportedCategory: return "module runtime category is unsupported";
+    case UnsupportedAnalogTopology: return "analog topology is unsupported by the runtime";
+    case UnsupportedDigitalOperation: return "digital operation is unsupported by the runtime";
+    case InvalidDigitalTopology: return "digital operation topology is invalid";
+    case InvalidInitialParameterValue: return "initial parameter value is invalid";
+    case UnsupportedPortLayout: return "module port layout is unsupported by the audition runtime";
+    case UnsupportedCircuit: return "circuit cannot be prepared by the runtime";
+    case ExternalAssetLoadFailed: return "external model or impulse response could not be loaded";
+    }
+    return "module runtime creation failed";
+}
+
+std::string_view MnaCompileErrorText(solo_rig::MnaCompileError error) {
+    using enum solo_rig::MnaCompileError;
+    switch (error) {
+    case InvalidTopology: return "circuit topology is invalid";
+    case UnsupportedComponent: return "circuit contains an unsupported component";
+    case InvalidValue: return "circuit contains an invalid component value";
+    case InvalidSolver: return "circuit solver settings are invalid";
+    case InvalidModel: return "circuit component model is invalid";
+    case MissingModelAuthorization: return "circuit model reference requires ModelDatabase authorization";
+    case InvalidConvergence: return "circuit convergence settings are invalid";
+    }
+    return "circuit compilation failed";
+}
+
+std::string_view MnaSolveErrorText(solo_rig::MnaSolveError error) {
+    using enum solo_rig::MnaSolveError;
+    switch (error) {
+    case None: return "";
+    case NotPrepared: return "circuit was not prepared";
+    case SingularMatrix: return "circuit matrix is singular";
+    case NonFinite: return "circuit solve produced a non-finite value";
+    case NonConvergent: return "circuit solver did not converge";
+    case InvalidInputCount: return "circuit input port count is invalid";
+    }
+    return "circuit solve failed";
+}
+
+void FillAuditionStimulus(solo_rig::AudioBuffer& buffer,
+                          const SoloRigModuleAuditionConfigV2& config,
+                          const float* caller_waveform) {
+    constexpr double two_pi = 6.28318530717958647692;
+    for (std::uint32_t channel = 0U; channel < config.channel_count; ++channel) {
+        auto* samples = buffer.ChannelData(channel);
+        double phase = 0.0;
+        for (std::uint32_t frame = 0U; frame < config.block_size; ++frame) {
+            double sample = 0.0;
+            if (config.stimulus_kind == 3U) {
+                sample = caller_waveform[frame];
+            } else if (config.stimulus_kind == 1U) {
+                sample = frame == 0U ? config.amplitude : 0.0;
+            } else if (config.stimulus_kind == 2U) {
+                const auto progress = config.block_size > 1U
+                    ? static_cast<double>(frame) / static_cast<double>(config.block_size - 1U) : 0.0;
+                const auto frequency = config.start_frequency_hz *
+                    std::pow(config.end_frequency_hz / config.start_frequency_hz, progress);
+                sample = config.amplitude * std::sin(phase);
+                phase += two_pi * frequency / static_cast<double>(config.sample_rate_hz);
+            } else {
+                sample = config.amplitude * std::sin(
+                    two_pi * config.start_frequency_hz * static_cast<double>(frame) /
+                    static_cast<double>(config.sample_rate_hz));
+            }
+            samples[frame] = static_cast<float>(sample);
+        }
+    }
+}
+
+struct AuditionSignalStats final {
+    double peak{};
+    double rms{};
+    double dc{};
+    bool finite{true};
+};
+
+AuditionSignalStats AnalyzeAuditionSignal(const solo_rig::AudioBuffer& buffer,
+                                          std::uint32_t sample_count) {
+    AuditionSignalStats stats;
+    double sum{};
+    double sum_squares{};
+    for (std::uint32_t channel = 0U; channel < buffer.ChannelCount(); ++channel) {
+        const auto* samples = buffer.ChannelData(channel);
+        for (std::uint32_t frame = 0U; frame < sample_count; ++frame) {
+            const auto sample = static_cast<double>(samples[frame]);
+            stats.finite = stats.finite && std::isfinite(sample);
+            stats.peak = std::max(stats.peak, std::fabs(sample));
+            sum += sample;
+            sum_squares += sample * sample;
+        }
+    }
+    const auto count = static_cast<double>(buffer.ChannelCount()) * sample_count;
+    if (count > 0.0) {
+        stats.dc = sum / count;
+        stats.rms = std::sqrt(sum_squares / count);
+    }
+    return stats;
 }
 
 bool EditorHistoryChanged(const EditorHistoryState& previous,
@@ -478,6 +623,40 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_snapshot_create(
         auto snapshot = std::make_unique<SoloRigSnapshot>();
         snapshot->preset = backend->editor.ExportPreset();
         snapshot->scene = backend->editor.Scene();
+        const auto& catalog = backend->editor.Catalog();
+        snapshot->node_ports.reserve(snapshot->scene.nodes.size());
+        snapshot->node_resources.reserve(snapshot->scene.nodes.size());
+        for (const auto& node : snapshot->scene.nodes) {
+            const auto catalog_entry = std::ranges::find_if(catalog, [&node](const auto& entry) {
+                return entry.module_id == node.module_id;
+            });
+            std::vector<SoloRigSnapshot::NodePort> ports;
+            SoloRigSnapshot::NodeResource resource;
+            if (catalog_entry != catalog.end()) {
+                ports.reserve(catalog_entry->ports.size());
+                for (const auto& port : catalog_entry->ports) {
+                    ports.push_back({.id = port.id,
+                                     .direction = port.direction == solo_rig::PortDirection::Output ? 1U : 0U,
+                                     .max_channels = port.max_channels});
+                }
+                resource.kind = catalog_entry->resource_kind;
+                resource.path = catalog_entry->resource_path;
+                resource.status = catalog_entry->resource_status;
+            }
+            if (ports.empty() && node.unresolved) {
+                resource.kind = "Module resource";
+                resource.path = node.module_id;
+                resource.status = node.diagnostic.empty() ? "Unresolved" : node.diagnostic;
+            } else if (resource.kind.empty()) {
+                resource.kind = "Module resource";
+                resource.path = node.module_id;
+                resource.status = node.unresolved ? "Unresolved" : "Ready";
+            } else if (node.unresolved) {
+                resource.status = node.diagnostic.empty() ? "Unresolved" : node.diagnostic;
+            }
+            snapshot->node_ports.push_back(std::move(ports));
+            snapshot->node_resources.push_back(std::move(resource));
+        }
         snapshot->node_skin_images_utf8.reserve(snapshot->scene.nodes.size());
         for (const auto& node : snapshot->scene.nodes) {
             snapshot->node_skin_images_utf8.push_back({PathToUtf8(node.skin.knob_image),
@@ -486,7 +665,6 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_snapshot_create(
                                                        PathToUtf8(node.skin.footswitch_image)});
         }
         snapshot->parameter_ranges.reserve(snapshot->preset.nodes.size());
-        const auto& catalog = backend->editor.Catalog();
         for (const auto& node : snapshot->preset.nodes) {
             std::vector<std::pair<float, float>> ranges;
             ranges.reserve(node.parameter_values.size());
@@ -663,6 +841,93 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node(
     return SOLO_RIG_STATUS_OK;
 }
 
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_port_count(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t* out_count) {
+    if (snapshot == nullptr || out_count == nullptr || node_index >= snapshot->node_ports.size()) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    *out_count = static_cast<uint32_t>(snapshot->node_ports[node_index].size());
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_port(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t port_index,
+    SoloRigNodePortView* out_port) {
+    if (snapshot == nullptr || out_port == nullptr || node_index >= snapshot->node_ports.size() ||
+        port_index >= snapshot->node_ports[node_index].size()) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    const auto& port = snapshot->node_ports[node_index][port_index];
+    out_port->port_id_utf8 = port.id.c_str();
+    out_port->direction = port.direction;
+    out_port->max_channels = port.max_channels;
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_resource(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    SoloRigNodeResourceView* out_resource) {
+    if (snapshot == nullptr || out_resource == nullptr || node_index >= snapshot->node_resources.size()) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    const auto& resource = snapshot->node_resources[node_index];
+    out_resource->kind_utf8 = resource.kind.c_str();
+    out_resource->path_utf8 = resource.path.c_str();
+    out_resource->status_utf8 = resource.status.c_str();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_skin_layout(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    SoloRigNodeSkinLayoutView* out_layout) {
+    const auto* node = FindSceneNode(snapshot, node_index);
+    if (node == nullptr || out_layout == nullptr) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    out_layout->width = node->skin.width;
+    out_layout->height = node->skin.height;
+    out_layout->background_color_utf8 = node->skin.background_color.c_str();
+    out_layout->label_color_utf8 = node->skin.label_color.c_str();
+    out_layout->has_footswitch_position = node->skin.footswitch_position.has_value() ? 1U : 0U;
+    out_layout->footswitch_x = node->skin.footswitch_position.has_value() ? node->skin.footswitch_position->x : 0.0;
+    out_layout->footswitch_y = node->skin.footswitch_position.has_value() ? node->skin.footswitch_position->y : 0.0;
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_skin_parameter_layout_count(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t* out_count) {
+    const auto* node = FindSceneNode(snapshot, node_index);
+    if (node == nullptr || out_count == nullptr) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    *out_count = static_cast<uint32_t>(node->skin.parameter_placements.size());
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_skin_parameter_layout(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t layout_index,
+    SoloRigNodeSkinParameterLayoutView* out_layout) {
+    const auto* node = FindSceneNode(snapshot, node_index);
+    if (node == nullptr || out_layout == nullptr || layout_index >= node->skin.parameter_placements.size()) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    const auto& placement = node->skin.parameter_placements[layout_index];
+    out_layout->parameter_id_utf8 = placement.parameter_id.c_str();
+    out_layout->x = placement.x;
+    out_layout->y = placement.y;
+    return SOLO_RIG_STATUS_OK;
+}
+
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_parameter(
     const SoloRigSnapshot* snapshot,
     uint32_t node_index,
@@ -770,6 +1035,67 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_node_bypassed_utf8(
         static_cast<void>(RestoreEditorHistory(*backend, std::move(previous)));
         return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR,
                         audio_error.empty() ? "audio graph rejected bypass change" : audio_error);
+    }
+    CommitEditorEdit(*backend, std::move(previous));
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_set_nodes_bypassed(
+    SoloRigBackend* backend,
+    const SoloRigNodeBatchEntry* nodes,
+    uint32_t node_count,
+    uint8_t bypassed) {
+    constexpr uint32_t kMaximumBatchNodeCount = 128U;
+    if (!ValidBackend(backend) || nodes == nullptr || node_count == 0U ||
+        node_count > kMaximumBatchNodeCount || bypassed > 1U) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "a bounded node batch and bypass value are required");
+    }
+    std::vector<std::string> instance_ids;
+    instance_ids.reserve(node_count);
+    std::set<std::string, std::less<>> unique_ids;
+    for (uint32_t index = 0U; index < node_count; ++index) {
+        if (!ValidText(nodes[index].instance_id_utf8)) {
+            return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                            "every batch node requires a valid instance ID");
+        }
+        std::string instance_id(nodes[index].instance_id_utf8);
+        if (!unique_ids.insert(instance_id).second) {
+            return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                            "batch node instance IDs must be unique");
+        }
+        instance_ids.push_back(std::move(instance_id));
+    }
+
+    auto previous = CaptureEditorHistory(*backend);
+    std::map<std::string, bool, std::less<>> original_states;
+    for (const auto& node : previous.preset.nodes) {
+        if (unique_ids.contains(node.instance_id)) {
+            original_states.emplace(node.instance_id, node.bypassed);
+        }
+    }
+    if (original_states.size() != unique_ids.size() ||
+        !backend->editor.SetNodesBypassed(instance_ids, bypassed != 0U)) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND,
+                        "one or more batch nodes were not found");
+    }
+
+    if (backend->audio_engine != nullptr && backend->audio_engine->IsOpen()) {
+        std::vector<std::string> applied;
+        applied.reserve(instance_ids.size());
+        for (const auto& instance_id : instance_ids) {
+            if (!backend->audio_engine->SetNodeBypassed(instance_id, bypassed != 0U)) {
+                const auto audio_error = backend->audio_engine->ErrorText();
+                for (const auto& applied_id : applied) {
+                    static_cast<void>(backend->audio_engine->SetNodeBypassed(applied_id, original_states[applied_id]));
+                }
+                static_cast<void>(RestoreEditorHistory(*backend, std::move(previous)));
+                return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR,
+                                audio_error.empty() ? "audio graph rejected batch bypass change" : audio_error);
+            }
+            applied.push_back(instance_id);
+        }
     }
     CommitEditorEdit(*backend, std::move(previous));
     backend->last_error.clear();
@@ -1240,6 +1566,416 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_import_resource_utf8(
     }
     CommitEditorEdit(*backend, std::move(previous));
     backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_validate_module_package_utf8(
+    SoloRigBackend* backend, const char* directory_path_utf8) {
+    if (!ValidBackend(backend) || !ValidText(directory_path_utf8)) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "a module package directory is required");
+    }
+    const auto directory = PathFromUtf8(directory_path_utf8);
+    if (!std::filesystem::is_directory(directory)) {
+        return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "module package directory was not found");
+    }
+    const auto result = solo_rig::LoadModulePackage(directory);
+    if (!result.package.has_value()) {
+        const auto message = result.errors.empty()
+            ? std::string("module package validation failed")
+            : std::string(ModulePackageErrorText(result.errors.front()));
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, message);
+    }
+    constexpr double sample_rate_hz = 48000.0;
+    constexpr std::uint32_t block_size = 256U;
+    if (const auto* circuit = std::get_if<solo_rig::CircuitNetlist>(&result.package->logic)) {
+        auto compiled = solo_rig::CompileMnaCircuit(*circuit);
+        if (!compiled.circuit.has_value()) {
+            const auto message = compiled.error.has_value()
+                ? std::string(MnaCompileErrorText(*compiled.error))
+                : std::string("circuit compilation failed");
+            return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED, message);
+        }
+        if (!compiled.circuit->Prepare(sample_rate_hz)) {
+            return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED,
+                            "circuit runtime rejected the validation sample rate");
+        }
+        std::vector<double> inputs(compiled.circuit->InputCount(), 0.0);
+        const auto solved = compiled.circuit->Solve(inputs);
+        if (!solved.Succeeded()) {
+            return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED,
+                            std::string(MnaSolveErrorText(solved.error)));
+        }
+        for (std::size_t output = 0U; output < compiled.circuit->OutputCount(); ++output) {
+            const auto value = compiled.circuit->OutputValue(output);
+            if (!value.has_value() || !std::isfinite(*value)) {
+                return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR,
+                                "circuit validation produced a non-finite output");
+            }
+        }
+    } else {
+        auto runtime = solo_rig::CreateModuleRuntime(*result.package);
+        if (const auto* error = std::get_if<solo_rig::ModuleRuntimeError>(&runtime); error != nullptr) {
+            return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED, std::string(ModuleRuntimeErrorText(*error)));
+        }
+        auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+        const solo_rig::AudioFormat format{
+            .sample_rate_hz = sample_rate_hz,
+            .max_block_size = block_size,
+            .channel_count = 1U,
+        };
+        if (!processor->Prepare(format)) {
+            return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED,
+                            "module runtime rejected the validation format");
+        }
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_audition_module_package_utf8(
+    SoloRigBackend* backend, const char* directory_path_utf8, SoloRigModuleAuditionView* out_audition) {
+    if (!ValidBackend(backend) || !ValidText(directory_path_utf8) || out_audition == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "a module package directory and audition output are required");
+    }
+    const auto directory = PathFromUtf8(directory_path_utf8);
+    const auto package = solo_rig::LoadModulePackage(directory);
+    if (!package.package.has_value()) {
+        const auto message = package.errors.empty()
+            ? std::string("module package validation failed")
+            : std::string(ModulePackageErrorText(package.errors.front()));
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, message);
+    }
+    auto runtime = solo_rig::CreateModuleRuntime(*package.package);
+    if (const auto* error = std::get_if<solo_rig::ModuleRuntimeError>(&runtime); error != nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED, std::string(ModuleRuntimeErrorText(*error)));
+    }
+    auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+    constexpr std::uint32_t sample_rate = 48000U;
+    constexpr std::uint32_t block_size = 256U;
+    const auto input_channels = std::ranges::find_if(package.package->descriptor.ports, [](const auto& port) {
+        return port.direction == solo_rig::PortDirection::Input;
+    });
+    const auto output_channels = std::ranges::find_if(package.package->descriptor.ports, [](const auto& port) {
+        return port.direction == solo_rig::PortDirection::Output;
+    });
+    if (input_channels == package.package->descriptor.ports.end() ||
+        output_channels == package.package->descriptor.ports.end()) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "module must expose input and output ports");
+    }
+    const auto channel_count = std::min(input_channels->max_channels, output_channels->max_channels);
+    if (channel_count == 0U || channel_count > 2U) {
+        return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED, "offline audition supports one or two channels");
+    }
+    const solo_rig::AudioFormat format{
+        .sample_rate_hz = static_cast<double>(sample_rate),
+        .max_block_size = block_size,
+        .channel_count = channel_count,
+    };
+    if (!processor->Prepare(format)) {
+        return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED, "module runtime rejected the audition format");
+    }
+    solo_rig::AudioBuffer input(channel_count, block_size);
+    solo_rig::AudioBuffer output(channel_count, block_size);
+    constexpr double two_pi = 6.28318530717958647692;
+    for (std::uint32_t channel = 0U; channel < channel_count; ++channel) {
+        auto* samples = input.ChannelData(channel);
+        for (std::uint32_t frame = 0U; frame < block_size; ++frame) {
+            samples[frame] = static_cast<float>(0.1 * std::sin(two_pi * 220.0 * frame / sample_rate));
+        }
+        samples[0] += 0.25F;
+    }
+    const auto started = std::chrono::steady_clock::now();
+    processor->Process(input, output, block_size);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    double peak = 0.0;
+    double sum_squares = 0.0;
+    bool finite = true;
+    for (std::uint32_t channel = 0U; channel < channel_count; ++channel) {
+        const auto* samples = output.ChannelData(channel);
+        for (std::uint32_t frame = 0U; frame < block_size; ++frame) {
+            const auto sample = static_cast<double>(samples[frame]);
+            finite = finite && std::isfinite(sample);
+            peak = std::max(peak, std::fabs(sample));
+            sum_squares += sample * sample;
+        }
+    }
+    const auto audio_seconds = static_cast<double>(block_size) / sample_rate;
+    const auto elapsed_seconds = std::chrono::duration<double>(elapsed).count();
+    *out_audition = SoloRigModuleAuditionView{
+        .sample_rate_hz = sample_rate,
+        .block_size = block_size,
+        .channel_count = channel_count,
+        .declared_latency_samples = processor->DeclaredLatencySamples(),
+        .output_peak = peak,
+        .output_rms = std::sqrt(sum_squares / static_cast<double>(block_size * channel_count)),
+        .processing_cpu_percent = audio_seconds > 0.0 ? elapsed_seconds / audio_seconds * 100.0 : 0.0,
+        .output_finite = static_cast<std::uint8_t>(finite ? 1U : 0U),
+    };
+    if (!finite) {
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, "offline audition produced non-finite output");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+static SoloRigStatus AuditionModulePackageV3Impl(
+    SoloRigBackend* backend,
+    const char* directory_path_utf8,
+    const SoloRigModuleAuditionConfigV2* config,
+    float* input_waveform,
+    float* output_waveform,
+    uint32_t waveform_capacity,
+    const char* parameter_id_utf8,
+    double parameter_value,
+    bool use_parameter_override,
+    SoloRigModuleAuditionAnalysisV3* out_analysis) {
+    if (!ValidBackend(backend) || !ValidText(directory_path_utf8) || config == nullptr ||
+        input_waveform == nullptr || output_waveform == nullptr || out_analysis == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "an audition directory, config, waveform buffers, and analysis output are required");
+    }
+    if (use_parameter_override && (!ValidText(parameter_id_utf8) || !std::isfinite(parameter_value))) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                        "a finite audition parameter override is required");
+    }
+    if (config->sample_rate_hz < 8000U || config->sample_rate_hz > 384000U ||
+        config->block_size < 16U || config->block_size > 8192U ||
+        config->channel_count == 0U || config->channel_count > 8U ||
+        config->stimulus_kind > 3U || waveform_capacity < config->block_size ||
+        !std::isfinite(config->amplitude) || config->amplitude < 0.0 || config->amplitude > 10.0 ||
+        ((config->stimulus_kind == 0U || config->stimulus_kind == 2U) &&
+         (!std::isfinite(config->start_frequency_hz) || !std::isfinite(config->end_frequency_hz) ||
+          config->start_frequency_hz <= 0.0 || config->end_frequency_hz <= 0.0 ||
+          config->start_frequency_hz >= static_cast<double>(config->sample_rate_hz) * 0.5 ||
+          config->end_frequency_hz >= static_cast<double>(config->sample_rate_hz) * 0.5))) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "offline audition config is invalid");
+    }
+    if (config->stimulus_kind == 3U) {
+        for (std::uint32_t frame = 0U; frame < config->block_size; ++frame) {
+            if (!std::isfinite(input_waveform[frame])) {
+                return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                                "caller audition waveform contains a non-finite sample");
+            }
+        }
+    }
+    const auto package = solo_rig::LoadModulePackage(PathFromUtf8(directory_path_utf8));
+    if (!package.package.has_value()) {
+        const auto message = package.errors.empty()
+            ? std::string("module package validation failed")
+            : std::string(ModulePackageErrorText(package.errors.front()));
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, message);
+    }
+    const auto requested_input = config->input_port_utf8 == nullptr
+        ? std::string_view{} : std::string_view(config->input_port_utf8);
+    const auto requested_output = config->output_port_utf8 == nullptr
+        ? std::string_view{} : std::string_view(config->output_port_utf8);
+    solo_rig::AudioBuffer selected_input(config->channel_count, config->block_size);
+    solo_rig::AudioBuffer selected_output(config->channel_count, config->block_size);
+    FillAuditionStimulus(selected_input, *config, input_waveform);
+    std::uint32_t declared_latency{};
+    solo_rig::NamedAudioPortDiagnostics solver_diagnostics{};
+    const auto started = std::chrono::steady_clock::now();
+
+    if (const auto* circuit = std::get_if<solo_rig::CircuitNetlist>(&package.package->logic)) {
+        auto runtime = solo_rig::CreateNamedMnaPortProcessor(*package.package);
+        if (const auto* error = std::get_if<solo_rig::ModuleRuntimeError>(&runtime); error != nullptr) {
+            return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED, std::string(ModuleRuntimeErrorText(*error)));
+        }
+        auto processor = std::move(std::get<std::unique_ptr<solo_rig::NamedAudioPortProcessor>>(runtime));
+        const auto input_contracts = processor->InputPorts();
+        const auto output_contracts = processor->OutputPorts();
+        const auto find_port = [](const auto& contracts, std::string_view requested) -> std::optional<std::size_t> {
+            if (contracts.count == 0U) return std::nullopt;
+            if (requested.empty()) return 0U;
+            for (std::size_t index = 0U; index < contracts.count; ++index) {
+                if (contracts.ports[index].name == requested) return index;
+            }
+            return std::nullopt;
+        };
+        const auto selected_input_index = find_port(input_contracts, requested_input);
+        const auto selected_output_index = find_port(output_contracts, requested_output);
+        if (!selected_input_index.has_value() || !selected_output_index.has_value()) {
+            return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "selected audition port was not found");
+        }
+        const solo_rig::AudioFormat format{
+            .sample_rate_hz = static_cast<double>(config->sample_rate_hz),
+            .max_block_size = config->block_size,
+            .channel_count = config->channel_count,
+        };
+        if (!processor->Prepare(format, circuit->solver.oversampling)) {
+            return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED,
+                            "named circuit runtime rejected the audition format");
+        }
+        if (use_parameter_override &&
+            !processor->SetParameter(parameter_id_utf8, static_cast<float>(parameter_value))) {
+            return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                            "audition parameter override is invalid or unsupported");
+        }
+        std::vector<solo_rig::AudioBuffer> input_buffers;
+        std::vector<solo_rig::AudioBuffer> output_buffers;
+        input_buffers.reserve(input_contracts.count);
+        output_buffers.reserve(output_contracts.count);
+        for (std::size_t index = 0U; index < input_contracts.count; ++index) {
+            input_buffers.emplace_back(config->channel_count, config->block_size);
+        }
+        for (std::size_t index = 0U; index < output_contracts.count; ++index) {
+            output_buffers.emplace_back(config->channel_count, config->block_size);
+        }
+        if (!input_buffers[*selected_input_index].CopyFrom(selected_input, config->block_size)) {
+            return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR,
+                            "named circuit audition input copy failed");
+        }
+        std::vector<solo_rig::NamedAudioPortInput> inputs;
+        std::vector<solo_rig::NamedAudioPortOutput> outputs;
+        inputs.reserve(input_contracts.count);
+        outputs.reserve(output_contracts.count);
+        for (std::size_t index = 0U; index < input_contracts.count; ++index) {
+            inputs.push_back({input_contracts.ports[index].name,
+                              input_contracts.ports[index].domain, &input_buffers[index]});
+        }
+        for (std::size_t index = 0U; index < output_contracts.count; ++index) {
+            outputs.push_back({output_contracts.ports[index].name,
+                               output_contracts.ports[index].domain, &output_buffers[index]});
+        }
+        if (!processor->Process(inputs, outputs, config->block_size) ||
+            !selected_output.CopyFrom(output_buffers[*selected_output_index], config->block_size)) {
+            return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, "named circuit audition processing failed");
+        }
+        declared_latency = processor->DeclaredLatencySamples();
+        solver_diagnostics = processor->Diagnostics();
+    } else {
+        const auto first_port = [&package](solo_rig::PortDirection direction) -> std::string_view {
+            const auto port = std::ranges::find_if(package.package->descriptor.ports,
+                [direction](const auto& candidate) { return candidate.direction == direction; });
+            return port == package.package->descriptor.ports.end() ? std::string_view{} : port->id;
+        };
+        const auto input_name = first_port(solo_rig::PortDirection::Input);
+        const auto output_name = first_port(solo_rig::PortDirection::Output);
+        if (input_name.empty() || output_name.empty() ||
+            (!requested_input.empty() && requested_input != input_name) ||
+            (!requested_output.empty() && requested_output != output_name)) {
+            return SetError(backend, SOLO_RIG_STATUS_NOT_FOUND, "selected audition port was not found");
+        }
+        auto runtime = solo_rig::CreateModuleRuntime(*package.package);
+        if (const auto* error = std::get_if<solo_rig::ModuleRuntimeError>(&runtime); error != nullptr) {
+            return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED, std::string(ModuleRuntimeErrorText(*error)));
+        }
+        auto processor = std::move(std::get<std::unique_ptr<solo_rig::ModuleRuntimeProcessor>>(runtime));
+        const solo_rig::AudioFormat format{
+            .sample_rate_hz = static_cast<double>(config->sample_rate_hz),
+            .max_block_size = config->block_size,
+            .channel_count = config->channel_count,
+        };
+        if (!processor->Prepare(format)) {
+            return SetError(backend, SOLO_RIG_STATUS_UNSUPPORTED,
+                            "module runtime rejected the audition format");
+        }
+        if (use_parameter_override &&
+            !processor->SetParameter(parameter_id_utf8, static_cast<float>(parameter_value))) {
+            return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
+                            "audition parameter override is invalid or unsupported");
+        }
+        processor->Process(selected_input, selected_output, config->block_size);
+        declared_latency = processor->DeclaredLatencySamples();
+    }
+
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    const auto input_stats = AnalyzeAuditionSignal(selected_input, config->block_size);
+    const auto output_stats = AnalyzeAuditionSignal(selected_output, config->block_size);
+    for (std::uint32_t frame = 0U; frame < config->block_size; ++frame) {
+        input_waveform[frame] = selected_input.ChannelData(0U)[frame];
+        output_waveform[frame] = selected_output.ChannelData(0U)[frame];
+    }
+    const auto audio_seconds = static_cast<double>(config->block_size) / config->sample_rate_hz;
+    const auto elapsed_seconds = std::chrono::duration<double>(elapsed).count();
+    *out_analysis = SoloRigModuleAuditionAnalysisV3{
+        .schema_version = 3U,
+        .sample_rate_hz = config->sample_rate_hz,
+        .block_size = config->block_size,
+        .channel_count = config->channel_count,
+        .declared_latency_samples = declared_latency,
+        .waveform_sample_count = config->block_size,
+        .input_peak = input_stats.peak,
+        .input_rms = input_stats.rms,
+        .input_dc = input_stats.dc,
+        .output_peak = output_stats.peak,
+        .output_rms = output_stats.rms,
+        .output_dc = output_stats.dc,
+        .processing_cpu_percent = audio_seconds > 0.0 ? elapsed_seconds / audio_seconds * 100.0 : 0.0,
+        .output_finite = static_cast<std::uint8_t>(output_stats.finite ? 1U : 0U),
+        .solver_processed_sample_count = solver_diagnostics.processed_solve_count,
+        .solver_total_iterations = solver_diagnostics.total_solver_iterations,
+        .solver_maximum_iterations = solver_diagnostics.maximum_solver_iterations,
+        .solver_failure_count = solver_diagnostics.solve_failure_count,
+        .solver_last_error = solver_diagnostics.last_solver_error,
+    };
+    if (!input_stats.finite || !output_stats.finite) {
+        return SetError(backend, SOLO_RIG_STATUS_INTERNAL_ERROR, "offline audition produced non-finite output");
+    }
+    backend->last_error.clear();
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_audition_module_package_v3_utf8(
+    SoloRigBackend* backend,
+    const char* directory_path_utf8,
+    const SoloRigModuleAuditionConfigV2* config,
+    float* input_waveform,
+    float* output_waveform,
+    uint32_t waveform_capacity,
+    SoloRigModuleAuditionAnalysisV3* out_analysis) {
+    return AuditionModulePackageV3Impl(backend, directory_path_utf8, config,
+        input_waveform, output_waveform, waveform_capacity, nullptr, 0.0, false, out_analysis);
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_audition_module_package_v4_utf8(
+    SoloRigBackend* backend,
+    const char* directory_path_utf8,
+    const SoloRigModuleAuditionConfigV2* config,
+    const char* parameter_id_utf8,
+    double parameter_value,
+    float* input_waveform,
+    float* output_waveform,
+    uint32_t waveform_capacity,
+    SoloRigModuleAuditionAnalysisV3* out_analysis) {
+    return AuditionModulePackageV3Impl(backend, directory_path_utf8, config,
+        input_waveform, output_waveform, waveform_capacity, parameter_id_utf8,
+        parameter_value, true, out_analysis);
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_audition_module_package_v2_utf8(
+    SoloRigBackend* backend,
+    const char* directory_path_utf8,
+    const SoloRigModuleAuditionConfigV2* config,
+    float* input_waveform,
+    float* output_waveform,
+    uint32_t waveform_capacity,
+    SoloRigModuleAuditionAnalysisV2* out_analysis) {
+    if (out_analysis == nullptr) {
+        return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT, "an audition analysis output is required");
+    }
+    SoloRigModuleAuditionAnalysisV3 extended{};
+    const auto status = solorig_backend_audition_module_package_v3_utf8(
+        backend, directory_path_utf8, config, input_waveform, output_waveform,
+        waveform_capacity, &extended);
+    if (status != SOLO_RIG_STATUS_OK) return status;
+    *out_analysis = SoloRigModuleAuditionAnalysisV2{
+        .schema_version = 2U,
+        .sample_rate_hz = extended.sample_rate_hz,
+        .block_size = extended.block_size,
+        .channel_count = extended.channel_count,
+        .declared_latency_samples = extended.declared_latency_samples,
+        .waveform_sample_count = extended.waveform_sample_count,
+        .input_peak = extended.input_peak,
+        .input_rms = extended.input_rms,
+        .input_dc = extended.input_dc,
+        .output_peak = extended.output_peak,
+        .output_rms = extended.output_rms,
+        .output_dc = extended.output_dc,
+        .processing_cpu_percent = extended.processing_cpu_percent,
+        .output_finite = extended.output_finite,
+    };
     return SOLO_RIG_STATUS_OK;
 }
 

@@ -8,6 +8,7 @@
 #include <fstream>
 #include <limits>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -47,6 +48,28 @@ TEST_CASE("C ABI backend creates a side-effect-free default snapshot") {
     REQUIRE(std::string(node.footswitch_skin_id_utf8) == "standard-footswitch");
     REQUIRE(std::string(node.knob_image_path_utf8).empty());
     REQUIRE(node.bypassed == 0U);
+    uint32_t port_count = 0U;
+    REQUIRE(solorig_snapshot_node_port_count(snapshot, 0U, &port_count) == SOLO_RIG_STATUS_OK);
+    REQUIRE(port_count == 2U);
+    SoloRigNodePortView input_port{};
+    SoloRigNodePortView output_port{};
+    REQUIRE(solorig_snapshot_node_port(snapshot, 0U, 0U, &input_port) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_snapshot_node_port(snapshot, 0U, 1U, &output_port) == SOLO_RIG_STATUS_OK);
+    REQUIRE(std::string(input_port.port_id_utf8) == "input");
+    REQUIRE(input_port.direction == 0U);
+    REQUIRE(input_port.max_channels == 2U);
+    REQUIRE(std::string(output_port.port_id_utf8) == "output");
+    REQUIRE(output_port.direction == 1U);
+    REQUIRE(output_port.max_channels == 2U);
+    SoloRigNodeResourceView resource{};
+    REQUIRE(solorig_snapshot_node_resource(snapshot, 0U, &resource) == SOLO_RIG_STATUS_OK);
+    REQUIRE(std::string(resource.kind_utf8) == "Built-in module");
+    REQUIRE(std::string(resource.path_utf8) == "Embedded runtime");
+    REQUIRE(std::string(resource.status_utf8) == "Ready");
+    REQUIRE(solorig_snapshot_node_port_count(snapshot, info.node_count, &port_count) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    REQUIRE(solorig_snapshot_node_resource(snapshot, info.node_count, &resource) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
     solorig_snapshot_destroy(snapshot);
     solorig_backend_destroy(backend);
 }
@@ -79,6 +102,67 @@ TEST_CASE("C ABI backend toggles node bypass state through the editor transactio
 
     REQUIRE(solorig_backend_set_node_bypassed_utf8(backend, "drive-1", 2U) == SOLO_RIG_STATUS_INVALID_ARGUMENT);
     REQUIRE(solorig_backend_set_node_bypassed_utf8(backend, "missing", 1U) == SOLO_RIG_STATUS_NOT_FOUND);
+    solorig_backend_destroy(backend);
+}
+
+TEST_CASE("C ABI backend batches node bypass changes into one reversible transaction") {
+    SoloRigBackend* backend = nullptr;
+    REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);
+    const std::array<SoloRigNodeBatchEntry, 2> nodes{{
+        {.instance_id_utf8 = "drive-1"},
+        {.instance_id_utf8 = "delay-1"},
+    }};
+    REQUIRE(solorig_backend_set_nodes_bypassed(backend, nodes.data(),
+                                               static_cast<uint32_t>(nodes.size()), 1U) ==
+            SOLO_RIG_STATUS_OK);
+
+    SoloRigSnapshot* snapshot = nullptr;
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    SoloRigSnapshotInfo info{};
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    REQUIRE(info.node_count == 2U);
+    REQUIRE(info.dirty != 0U);
+    for (uint32_t index = 0U; index < info.node_count; ++index) {
+        SoloRigNodeView node{};
+        REQUIRE(solorig_snapshot_node(snapshot, index, &node) == SOLO_RIG_STATUS_OK);
+        REQUIRE(node.bypassed != 0U);
+    }
+    solorig_snapshot_destroy(snapshot);
+
+    REQUIRE(solorig_backend_can_undo(backend) != 0U);
+    REQUIRE(solorig_backend_undo(backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    REQUIRE(info.dirty == 0U);
+    for (uint32_t index = 0U; index < info.node_count; ++index) {
+        SoloRigNodeView node{};
+        REQUIRE(solorig_snapshot_node(snapshot, index, &node) == SOLO_RIG_STATUS_OK);
+        REQUIRE(node.bypassed == 0U);
+    }
+    solorig_snapshot_destroy(snapshot);
+
+    const std::array<SoloRigNodeBatchEntry, 2> duplicate_nodes{{
+        {.instance_id_utf8 = "drive-1"},
+        {.instance_id_utf8 = "drive-1"},
+    }};
+    REQUIRE(solorig_backend_set_nodes_bypassed(backend, duplicate_nodes.data(),
+                                               static_cast<uint32_t>(duplicate_nodes.size()), 1U) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    const std::array<SoloRigNodeBatchEntry, 2> missing_nodes{{
+        {.instance_id_utf8 = "drive-1"},
+        {.instance_id_utf8 = "missing"},
+    }};
+    REQUIRE(solorig_backend_set_nodes_bypassed(backend, missing_nodes.data(),
+                                               static_cast<uint32_t>(missing_nodes.size()), 1U) ==
+            SOLO_RIG_STATUS_NOT_FOUND);
+    REQUIRE(solorig_backend_snapshot_create(backend, &snapshot) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_snapshot_info(snapshot, &info) == SOLO_RIG_STATUS_OK);
+    for (uint32_t index = 0U; index < info.node_count; ++index) {
+        SoloRigNodeView node{};
+        REQUIRE(solorig_snapshot_node(snapshot, index, &node) == SOLO_RIG_STATUS_OK);
+        REQUIRE(node.bypassed == 0U);
+    }
+    solorig_snapshot_destroy(snapshot);
     solorig_backend_destroy(backend);
 }
 
@@ -407,8 +491,26 @@ TEST_CASE("C ABI external module package import extends the catalog and persists
 
     SoloRigBackend* backend = nullptr;
     REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);
-    REQUIRE(solorig_backend_import_resource_utf8(backend, directory.string().c_str()) == SOLO_RIG_STATUS_OK);
     uint32_t catalog_count = 0U;
+    REQUIRE(solorig_backend_catalog_count(backend, &catalog_count) == SOLO_RIG_STATUS_OK);
+    REQUIRE(catalog_count == 2U);
+    REQUIRE(solorig_backend_validate_module_package_utf8(backend, directory.string().c_str()) == SOLO_RIG_STATUS_OK);
+    SoloRigModuleAuditionView audition{};
+    REQUIRE(solorig_backend_audition_module_package_utf8(backend, directory.string().c_str(), &audition) ==
+            SOLO_RIG_STATUS_OK);
+    REQUIRE(audition.sample_rate_hz == 48000U);
+    REQUIRE(audition.block_size == 256U);
+    REQUIRE(audition.channel_count == 1U);
+    REQUIRE(audition.output_finite != 0U);
+    REQUIRE(std::isfinite(audition.output_peak));
+    REQUIRE(std::isfinite(audition.output_rms));
+    REQUIRE(std::isfinite(audition.processing_cpu_percent));
+    REQUIRE(solorig_backend_catalog_count(backend, &catalog_count) == SOLO_RIG_STATUS_OK);
+    REQUIRE(catalog_count == 2U);
+    REQUIRE(solorig_backend_validate_module_package_utf8(backend, "missing-module-package") == SOLO_RIG_STATUS_NOT_FOUND);
+    REQUIRE(solorig_backend_audition_module_package_utf8(backend, directory.string().c_str(), nullptr) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    REQUIRE(solorig_backend_import_resource_utf8(backend, directory.string().c_str()) == SOLO_RIG_STATUS_OK);
     REQUIRE(solorig_backend_catalog_count(backend, &catalog_count) == SOLO_RIG_STATUS_OK);
     REQUIRE(catalog_count == 3U);
     bool found = false;
@@ -439,6 +541,257 @@ TEST_CASE("C ABI external module package import extends the catalog and persists
     solorig_backend_destroy(backend);
     std::filesystem::remove(preset_path, cleanup);
     std::filesystem::remove_all(directory, cleanup);
+}
+
+TEST_CASE("C ABI module validation compiles multi-port circuits and reports runtime diagnostics") {
+    const auto root = std::filesystem::temp_directory_path() / "solorig-abi-runtime-validation";
+    std::error_code cleanup;
+    std::filesystem::remove_all(root, cleanup);
+    const auto write_package = [&root](std::string_view directory_name, std::string_view module_id,
+                                      std::string_view ports, std::string_view circuit) {
+        const auto directory = root / directory_name;
+        std::filesystem::create_directories(directory / "logic");
+        std::ofstream(directory / "manifest.json", std::ios::binary | std::ios::trunc)
+            << "{\"schemaVersion\":1,\"moduleId\":\"" << module_id
+            << "\",\"displayName\":\"ABI Runtime Validation\",\"category\":\"analog-circuit\","
+               "\"logicFile\":\"logic/main.json\",\"ports\":" << ports << "}";
+        std::ofstream(directory / "logic" / "main.json", std::ios::binary | std::ios::trunc) << circuit;
+        return directory;
+    };
+    const auto multi_port = write_package("multi-port", "org.mumu-dada.solorig.abi-multi-port",
+        R"([{"id":"input-a","direction":"input","maxChannels":1},
+             {"id":"input-b","direction":"input","maxChannels":1},
+             {"id":"output","direction":"output","maxChannels":1}])",
+        R"({"version":2,"schema":"circuit","referenceGround":"0","nodes":["a","b","out","0"],
+             "ports":[{"id":"input-a","direction":"input","node":"a"},
+                      {"id":"input-b","direction":"input","node":"b"},
+                      {"id":"output","direction":"output","node":"out"}],
+             "components":[{"id":"ra","type":"resistor","pins":["a","out"],"value":1000},
+                           {"id":"rb","type":"resistor","pins":["b","out"],"value":3000},
+                           {"id":"load","type":"resistor","pins":["out","0"],"value":1000}],
+             "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}})" );
+    const auto singular = write_package("singular", "org.mumu-dada.solorig.abi-singular",
+        R"([{"id":"input","direction":"input","maxChannels":1},
+             {"id":"output","direction":"output","maxChannels":1}])",
+        R"({"version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","floating","0"],
+             "ports":[{"id":"input","direction":"input","node":"in"},
+                      {"id":"output","direction":"output","node":"out"}],
+             "components":[{"id":"series","type":"resistor","pins":["in","out"],"value":1000},
+                           {"id":"load","type":"resistor","pins":["out","0"],"value":1000}],
+             "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}})" );
+    const auto unauthorized = write_package("unauthorized", "org.mumu-dada.solorig.abi-unauthorized",
+        R"([{"id":"input","direction":"input","maxChannels":1},
+             {"id":"output","direction":"output","maxChannels":1}])",
+        R"({"version":2,"schema":"circuit","referenceGround":"0","nodes":["vcc","c","b","0"],
+             "ports":[{"id":"input","direction":"input","node":"b"},
+                      {"id":"output","direction":"output","node":"c"}],
+             "supplies":[{"id":"vcc","positive":"vcc","negative":"0","voltage":5}],
+             "components":[{"id":"load","type":"resistor","pins":["vcc","c"],"value":1000},
+                           {"id":"q","type":"bjt","pins":["c","b","0"],
+                            "model":"solorig.cleanroom.bjt.npn.v1"}],
+             "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1}})" );
+    const auto nonconvergent = write_package("nonconvergent", "org.mumu-dada.solorig.abi-nonconvergent",
+        R"([{"id":"input","direction":"input","maxChannels":1},
+             {"id":"output","direction":"output","maxChannels":1}])",
+        R"({"version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","vcc","0"],
+             "ports":[{"id":"input","direction":"input","node":"in"},
+                      {"id":"output","direction":"output","node":"out"}],
+             "supplies":[{"id":"vcc","positive":"vcc","negative":"0","voltage":5}],
+             "components":[{"id":"input-return","type":"resistor","pins":["in","0"],"value":1000},
+                           {"id":"feed","type":"resistor","pins":["vcc","out"],"value":1000},
+                           {"id":"diode","type":"diode","pins":["out","0"],
+                            "model":{"kind":"shockley","modelVersion":1,"saturationCurrent":1e-12,
+                                     "thermalVoltage":0.02585,"maxStep":0.5}}],
+             "solver":{"method":"modified-nodal-analysis","integration":"backward-euler","oversampling":1,
+                       "convergence":{"maxIterations":1,"absoluteTolerance":1e-12,
+                                      "relativeTolerance":1e-12}}})" );
+    const auto potentiometer = root / "potentiometer";
+    std::filesystem::create_directories(potentiometer / "logic");
+    std::ofstream(potentiometer / "manifest.json", std::ios::binary | std::ios::trunc)
+        << R"({"schemaVersion":1,"moduleId":"org.mumu-dada.solorig.abi-potentiometer",
+             "displayName":"ABI Potentiometer","category":"analog-circuit",
+             "logicFile":"logic/main.json",
+             "ports":[{"id":"input","direction":"input","maxChannels":1},
+                      {"id":"output","direction":"output","maxChannels":1}],
+             "parameters":[{"id":"position","minimum":0,"maximum":1,"default":0.5}]})";
+    std::ofstream(potentiometer / "logic" / "main.json", std::ios::binary | std::ios::trunc)
+        << R"({"version":2,"schema":"circuit","referenceGround":"0","nodes":["in","out","0"],
+             "ports":[{"id":"input","direction":"input","node":"in"},
+                      {"id":"output","direction":"output","node":"out"}],
+             "components":[{"id":"pot","type":"potentiometer","pins":["in","0","out"],
+                            "value":10000,
+                            "potentiometer":{"position":0.5,"minimum":0,"maximum":1}}],
+             "parameterBindings":[{"modelVersion":1,"parameter":"position","target":"pot",
+                                   "property":"potentiometer.position","smoothingSeconds":0}],
+             "solver":{"method":"modified-nodal-analysis","integration":"backward-euler",
+                       "oversampling":1}})";
+
+    SoloRigBackend* backend = nullptr;
+    REQUIRE(solorig_backend_create(&backend) == SOLO_RIG_STATUS_OK);
+    REQUIRE(solorig_backend_validate_module_package_utf8(backend, multi_port.string().c_str()) ==
+            SOLO_RIG_STATUS_OK);
+
+    std::array<float, 256> input_waveform{};
+    std::array<float, 256> output_waveform{};
+    SoloRigModuleAuditionConfigV2 audition_config{
+        .sample_rate_hz = 48000U,
+        .block_size = static_cast<std::uint32_t>(input_waveform.size()),
+        .channel_count = 1U,
+        .stimulus_kind = 0U,
+        .input_port_utf8 = "input-a",
+        .output_port_utf8 = "output",
+        .amplitude = 0.2,
+        .start_frequency_hz = 220.0,
+        .end_frequency_hz = 4000.0,
+    };
+    SoloRigModuleAuditionAnalysisV2 input_a_analysis{};
+    REQUIRE(solorig_backend_audition_module_package_v2_utf8(
+                backend, multi_port.string().c_str(), &audition_config,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &input_a_analysis) ==
+            SOLO_RIG_STATUS_OK);
+    REQUIRE(input_a_analysis.schema_version == 2U);
+    REQUIRE(input_a_analysis.waveform_sample_count == input_waveform.size());
+    REQUIRE(input_a_analysis.output_finite != 0U);
+    REQUIRE(input_a_analysis.input_peak > 0.19);
+    REQUIRE(input_a_analysis.output_rms > 0.0);
+    SoloRigModuleAuditionAnalysisV3 diagnostics_analysis{};
+    REQUIRE(solorig_backend_audition_module_package_v3_utf8(
+                backend, multi_port.string().c_str(), &audition_config,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &diagnostics_analysis) ==
+            SOLO_RIG_STATUS_OK);
+    REQUIRE(diagnostics_analysis.schema_version == 3U);
+    REQUIRE(diagnostics_analysis.solver_processed_sample_count == input_waveform.size());
+    REQUIRE(diagnostics_analysis.solver_total_iterations >= diagnostics_analysis.solver_processed_sample_count);
+    REQUIRE(diagnostics_analysis.solver_maximum_iterations >= 1U);
+    REQUIRE(diagnostics_analysis.solver_failure_count == 0U);
+
+    audition_config.input_port_utf8 = "input";
+    audition_config.output_port_utf8 = "output";
+    audition_config.stimulus_kind = 0U;
+    SoloRigModuleAuditionAnalysisV3 low_position_analysis{};
+    REQUIRE(solorig_backend_audition_module_package_v4_utf8(
+                backend, potentiometer.string().c_str(), &audition_config, "position", 0.25,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &low_position_analysis) ==
+            SOLO_RIG_STATUS_OK);
+    SoloRigModuleAuditionAnalysisV3 high_position_analysis{};
+    REQUIRE(solorig_backend_audition_module_package_v4_utf8(
+                backend, potentiometer.string().c_str(), &audition_config, "position", 0.75,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &high_position_analysis) ==
+            SOLO_RIG_STATUS_OK);
+    REQUIRE(low_position_analysis.output_rms > high_position_analysis.output_rms * 2.5);
+    REQUIRE(low_position_analysis.solver_failure_count == 0U);
+    REQUIRE(high_position_analysis.solver_failure_count == 0U);
+    REQUIRE(solorig_backend_audition_module_package_v4_utf8(
+                backend, potentiometer.string().c_str(), &audition_config, "missing", 0.5,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &high_position_analysis) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    REQUIRE(solorig_backend_audition_module_package_v4_utf8(
+                backend, potentiometer.string().c_str(), &audition_config, "position", 1.1,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &high_position_analysis) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    REQUIRE(solorig_backend_audition_module_package_v4_utf8(
+                backend, potentiometer.string().c_str(), &audition_config, "position",
+                std::numeric_limits<double>::quiet_NaN(), input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &high_position_analysis) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
+
+    audition_config.input_port_utf8 = "input-b";
+    SoloRigModuleAuditionAnalysisV2 input_b_analysis{};
+    REQUIRE(solorig_backend_audition_module_package_v2_utf8(
+                backend, multi_port.string().c_str(), &audition_config,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &input_b_analysis) ==
+            SOLO_RIG_STATUS_OK);
+    REQUIRE(input_a_analysis.output_rms > input_b_analysis.output_rms * 2.0);
+
+    audition_config.stimulus_kind = 1U;
+    SoloRigModuleAuditionAnalysisV2 impulse_analysis{};
+    REQUIRE(solorig_backend_audition_module_package_v2_utf8(
+                backend, multi_port.string().c_str(), &audition_config,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &impulse_analysis) ==
+            SOLO_RIG_STATUS_OK);
+    REQUIRE(std::abs(input_waveform[0] - 0.2F) < 0.000001F);
+    REQUIRE(input_waveform[1] == 0.0F);
+    REQUIRE(impulse_analysis.output_finite != 0U);
+
+    audition_config.stimulus_kind = 2U;
+    SoloRigModuleAuditionAnalysisV2 sweep_analysis{};
+    REQUIRE(solorig_backend_audition_module_package_v2_utf8(
+                backend, multi_port.string().c_str(), &audition_config,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &sweep_analysis) ==
+            SOLO_RIG_STATUS_OK);
+    REQUIRE(input_waveform[0] == 0.0F);
+    REQUIRE(sweep_analysis.input_rms > 0.0);
+    REQUIRE(sweep_analysis.output_finite != 0U);
+
+    audition_config.stimulus_kind = 3U;
+    for (std::size_t index = 0U; index < input_waveform.size(); ++index) {
+        input_waveform[index] = static_cast<float>(index) / static_cast<float>(input_waveform.size()) * 0.2F - 0.1F;
+    }
+    const auto caller_first = input_waveform.front();
+    const auto caller_last = input_waveform.back();
+    SoloRigModuleAuditionAnalysisV2 caller_waveform_analysis{};
+    REQUIRE(solorig_backend_audition_module_package_v2_utf8(
+                backend, multi_port.string().c_str(), &audition_config,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &caller_waveform_analysis) ==
+            SOLO_RIG_STATUS_OK);
+    REQUIRE(std::abs(input_waveform.front() - caller_first) < 0.000001F);
+    REQUIRE(std::abs(input_waveform.back() - caller_last) < 0.000001F);
+    REQUIRE(caller_waveform_analysis.input_peak > 0.09);
+    input_waveform[17] = std::numeric_limits<float>::quiet_NaN();
+    REQUIRE(solorig_backend_audition_module_package_v2_utf8(
+                backend, multi_port.string().c_str(), &audition_config,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &caller_waveform_analysis) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    input_waveform[17] = 0.0F;
+
+    audition_config.input_port_utf8 = "missing";
+    REQUIRE(solorig_backend_audition_module_package_v2_utf8(
+                backend, multi_port.string().c_str(), &audition_config,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &sweep_analysis) ==
+            SOLO_RIG_STATUS_NOT_FOUND);
+    audition_config.input_port_utf8 = "input-a";
+    REQUIRE(solorig_backend_audition_module_package_v2_utf8(
+                backend, multi_port.string().c_str(), &audition_config,
+                input_waveform.data(), output_waveform.data(), 255U, &sweep_analysis) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    audition_config.amplitude = 10.1;
+    REQUIRE(solorig_backend_audition_module_package_v2_utf8(
+                backend, multi_port.string().c_str(), &audition_config,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &sweep_analysis) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
+    audition_config.amplitude = 0.2;
+    audition_config.stimulus_kind = 2U;
+    audition_config.start_frequency_hz = 24000.0;
+    REQUIRE(solorig_backend_audition_module_package_v2_utf8(
+                backend, multi_port.string().c_str(), &audition_config,
+                input_waveform.data(), output_waveform.data(),
+                static_cast<std::uint32_t>(input_waveform.size()), &sweep_analysis) ==
+            SOLO_RIG_STATUS_INVALID_ARGUMENT);
+
+    REQUIRE(solorig_backend_validate_module_package_utf8(backend, singular.string().c_str()) ==
+            SOLO_RIG_STATUS_UNSUPPORTED);
+    REQUIRE(std::string(solorig_backend_last_error_utf8(backend)).find("singular") != std::string::npos);
+    REQUIRE(solorig_backend_validate_module_package_utf8(backend, unauthorized.string().c_str()) ==
+            SOLO_RIG_STATUS_UNSUPPORTED);
+    REQUIRE(std::string(solorig_backend_last_error_utf8(backend)).find("authorization") != std::string::npos);
+    REQUIRE(solorig_backend_validate_module_package_utf8(backend, nonconvergent.string().c_str()) ==
+            SOLO_RIG_STATUS_UNSUPPORTED);
+    REQUIRE(std::string(solorig_backend_last_error_utf8(backend)).find("converge") != std::string::npos);
+    solorig_backend_destroy(backend);
+    std::filesystem::remove_all(root, cleanup);
 }
 
 TEST_CASE("C ABI exposes explicit realtime and whitebox boundaries") {

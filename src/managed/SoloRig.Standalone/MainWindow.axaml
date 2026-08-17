@@ -6,8 +6,51 @@
         Height="760"
         MinWidth="820"
         MinHeight="520"
-        Title="{Binding WindowTitle}"
+        Title="SoloRig"
+        Background="#0D1117"
         KeyDown="WindowKeyDown"
         Closing="WindowClosing">
-  <ui:RigEditorView x:Name="EditorView" />
+  <Window.Styles>
+    <Style Selector="Button.workspace-switch">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="#394655" />
+      <Setter Property="Foreground" Value="#9AA8B8" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Padding" Value="13,7" />
+      <Setter Property="MinWidth" Value="96" />
+    </Style>
+    <Style Selector="Button.workspace-switch:pointerover">
+      <Setter Property="Background" Value="#222A34" />
+      <Setter Property="Foreground" Value="#EEF3F8" />
+    </Style>
+    <Style Selector="Button.workspace-switch.active">
+      <Setter Property="Background" Value="#4DD6A4" />
+      <Setter Property="BorderBrush" Value="#4DD6A4" />
+      <Setter Property="Foreground" Value="#10261F" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+  </Window.Styles>
+  <Grid RowDefinitions="Auto,*">
+    <Border Grid.Row="0" Background="#11151B" BorderBrush="#394655" BorderThickness="0,0,0,1" Padding="12,8">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <Border Width="28" Height="28" CornerRadius="6" Background="#4DD6A4">
+            <TextBlock Text="S" Foreground="#10261F" FontWeight="Bold" FontSize="16"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <TextBlock Text="SoloRig" Foreground="#EEF3F8" FontWeight="SemiBold" FontSize="14"
+                     VerticalAlignment="Center" />
+        </StackPanel>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+          <Button x:Name="RigWorkspaceButton" Classes="workspace-switch active" Content="效果链"
+                  Click="ShowRigWorkspaceClick" />
+          <Button x:Name="WorkshopWorkspaceButton" Classes="workspace-switch" Content="制作效果器"
+                  Click="ShowWorkshopWorkspaceClick" />
+        </StackPanel>
+      </Grid>
+    </Border>
+    <ui:RigEditorView Grid.Row="1" x:Name="EditorView" Margin="8" />
+    <ui:PedalWorkshopView Grid.Row="1" x:Name="WorkshopView" Margin="8" IsVisible="False" />
+  </Grid>
 </Window>

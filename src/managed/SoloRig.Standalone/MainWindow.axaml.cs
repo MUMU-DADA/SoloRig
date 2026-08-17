@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using SoloRig.Ui;
 using SoloRig.Ui.Avalonia;
 
@@ -9,6 +10,7 @@ public sealed partial class MainWindow : Window
 {
     private bool allowClose;
     private bool closePromptOpen;
+    private bool workshopActive;
 
     public MainWindow()
     {
@@ -20,6 +22,39 @@ public sealed partial class MainWindow : Window
     {
         DataContext = editor;
         EditorView.AttachEditor(editor);
+        editor.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is nameof(RigEditorViewModel.Theme) or nameof(RigEditorViewModel.DarkTheme) or null or "")
+            {
+                WorkshopView.ApplyTheme(editor.Theme, editor.DarkTheme);
+            }
+            if (!workshopActive && args.PropertyName is nameof(RigEditorViewModel.WindowTitle) or null or "")
+            {
+                Title = editor.WindowTitle;
+            }
+        };
+        WorkshopView.ApplyTheme(editor.Theme, editor.DarkTheme);
+        WorkshopView.Document.PropertyChanged += (_, args) =>
+        {
+            if (workshopActive && args.PropertyName is nameof(ModuleAuthoringDocument.WindowTitle) or null or "")
+            {
+                Title = WorkshopView.Document.WindowTitle;
+            }
+        };
+        WorkshopView.InstallRequested += (_, directory) =>
+        {
+            if (!editor.ImportResource(directory))
+            {
+                WorkshopView.Document.ReportStatus($"安装失败：{editor.Status}");
+                return;
+            }
+            editor.SetModuleCatalogFilter("外部");
+            editor.SelectedCatalogModule = editor.ModuleCatalog.FirstOrDefault(module =>
+                string.Equals(module.ModuleId, WorkshopView.Document.ModuleId, StringComparison.Ordinal));
+            WorkshopView.Document.ReportStatus("模块已安装到当前模块库");
+            SetWorkspace(false);
+        };
+        Title = editor.WindowTitle;
     }
 
     public bool HasStandaloneVisualContent => EditorView.HasStandaloneVisualContent;
@@ -30,19 +65,33 @@ public sealed partial class MainWindow : Window
 
     public bool ProbeParameterBinding() => EditorView.ProbeParameterBinding();
 
+    public bool ProbeParameterEditingWorkflow() => EditorView.ProbeParameterEditingWorkflow();
+
     public bool ProbeDpiScaling() => EditorView.ProbeDpiScaling();
+
+    public bool ProbeCanvasNavigation() => EditorView.ProbeCanvasNavigation();
+
+    public bool ProbeResponsiveWorkspace() => EditorView.ProbeResponsiveWorkspace();
 
     public bool ProbeRenderedSurface() => EditorView.ProbeRenderedSurface();
 
     public bool ProbeKeyboardShortcuts() => EditorView.ProbeKeyboardShortcuts();
 
+    public bool ProbeKeyboardAccessibility() => EditorView.ProbeKeyboardAccessibility();
+
     public bool ProbeSelectionState() => EditorView.ProbeSelectionState();
 
+    public bool ProbeInspectorDetails() => EditorView.ProbeInspectorDetails();
+
     public bool ProbeConnectionSelection() => EditorView.ProbeConnectionSelection();
+
+    public bool ProbeTopologyEditor() => EditorView.ProbeTopologyEditor();
 
     public bool ProbeDocumentStatus() => EditorView.ProbeDocumentStatus();
 
     public bool ProbeActionGates() => EditorView.ProbeActionGates();
+
+    public bool ProbeNodeNavigatorBatchWorkflow() => EditorView.ProbeNodeNavigatorBatchWorkflow();
 
     public bool ProbeModuleInsertion() => EditorView.ProbeModuleInsertion();
 
@@ -54,11 +103,63 @@ public sealed partial class MainWindow : Window
 
     public bool ProbeUndoRedo() => EditorView.ProbeUndoRedo();
 
-    private void WindowKeyDown(object? sender, KeyEventArgs args) => EditorView.HandleWindowKeyDown(args);
+    public bool ProbeWorkshopWorkspace()
+    {
+        var originalWidth = Width;
+        var originalHeight = Height;
+        try
+        {
+            Width = 820;
+            Height = 520;
+            SetWorkspace(true);
+            UpdateLayout();
+            WorkshopView.UpdateLayout();
+            return WorkshopView.HasWorkshopVisualContent && WorkshopView.ProbeProjectWorkflow() &&
+                   WorkshopView.ProbeResponsiveLayout() && WorkshopView.ProbeNarrowLayoutBounds() &&
+                   WorkshopView.ProbeThemePalette() && WorkshopView.ProbeSkinDesigner() &&
+                   WorkshopView.ProbeCircuitCanvas() && WorkshopView.ProbeAuditionWorkspace();
+        }
+        finally
+        {
+            Width = originalWidth;
+            Height = originalHeight;
+            SetWorkspace(false);
+            UpdateLayout();
+        }
+    }
+
+    private void WindowKeyDown(object? sender, KeyEventArgs args)
+    {
+        if (workshopActive)
+        {
+            WorkshopView.HandleWindowKeyDown(args);
+        }
+        else
+        {
+            EditorView.HandleWindowKeyDown(args);
+        }
+    }
+
+    private void ShowRigWorkspaceClick(object? sender, RoutedEventArgs args) => SetWorkspace(false);
+
+    private void ShowWorkshopWorkspaceClick(object? sender, RoutedEventArgs args) => SetWorkspace(true);
+
+    private void SetWorkspace(bool showWorkshop)
+    {
+        workshopActive = showWorkshop;
+        EditorView.IsVisible = !showWorkshop;
+        WorkshopView.IsVisible = showWorkshop;
+        RigWorkspaceButton.Classes.Set("active", !showWorkshop);
+        WorkshopWorkspaceButton.Classes.Set("active", showWorkshop);
+        Title = showWorkshop
+            ? WorkshopView.Document.WindowTitle
+            : (DataContext as RigEditorViewModel)?.WindowTitle ?? "SoloRig";
+    }
 
     private async void WindowClosing(object? sender, WindowClosingEventArgs args)
     {
-        if (allowClose || DataContext is not RigEditorViewModel editor || !editor.IsDirty)
+        if (allowClose || DataContext is not RigEditorViewModel editor ||
+            (!editor.IsDirty && !WorkshopView.Document.IsDirty))
         {
             return;
         }
@@ -72,7 +173,11 @@ public sealed partial class MainWindow : Window
         closePromptOpen = true;
         try
         {
-            if (!await EditorView.ConfirmPendingChangesAsync())
+            if (WorkshopView.Document.IsDirty && !await WorkshopView.ConfirmPendingChangesAsync())
+            {
+                return;
+            }
+            if (editor.IsDirty && !await EditorView.ConfirmPendingChangesAsync())
             {
                 return;
             }

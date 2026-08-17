@@ -59,6 +59,14 @@ struct NamedAudioPortOutput final {
     AudioBuffer* buffer{};
 };
 
+struct NamedAudioPortDiagnostics final {
+    std::uint64_t processed_solve_count{};
+    std::uint64_t total_solver_iterations{};
+    std::uint32_t maximum_solver_iterations{};
+    std::uint32_t solve_failure_count{};
+    std::uint32_t last_solver_error{};
+};
+
 class NamedAudioPortProcessor {
 public:
     virtual ~NamedAudioPortProcessor() = default;
@@ -71,6 +79,11 @@ public:
                                        std::span<NamedAudioPortOutput> outputs,
                                        std::uint32_t sample_count) noexcept = 0;
     [[nodiscard]] virtual std::uint32_t DeclaredLatencySamples() const noexcept = 0;
+    [[nodiscard]] virtual bool SetParameter(std::string_view, float) noexcept { return false; }
+    [[nodiscard]] virtual std::optional<float> ParameterValue(std::string_view) const noexcept {
+        return std::nullopt;
+    }
+    [[nodiscard]] virtual NamedAudioPortDiagnostics Diagnostics() const noexcept { return {}; }
     virtual void Reset() noexcept = 0;
 };
 

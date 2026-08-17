@@ -605,11 +605,21 @@ private:
 
 class NamedMnaPortProcessor final : public NamedAudioPortProcessor {
 public:
+    struct Binding {
+        std::string parameter_id;
+        float minimum{};
+        float maximum{};
+        std::size_t control_index{};
+    };
+    static constexpr std::size_t kMaximumBindings = 64U;
+
     NamedMnaPortProcessor(std::uint32_t declared_latency_samples,
                           MnaPreparedCircuit circuit,
                           const CircuitNetlist& netlist,
-                          const EffectDescriptor& descriptor)
-        : declared_latency_samples_(declared_latency_samples), circuit_(std::move(circuit)) {
+                          const EffectDescriptor& descriptor,
+                          std::vector<Binding> bindings)
+        : declared_latency_samples_(declared_latency_samples), circuit_(std::move(circuit)),
+          bindings_(std::move(bindings)) {
         for (const auto& port : netlist.ports) {
             auto& list = port.direction == CircuitPortDirection::Input ? inputs_ : outputs_;
             auto& names = port.direction == CircuitPortDirection::Input ? input_names_ : output_names_;
@@ -637,6 +647,17 @@ public:
                 NamedAudioPortDomain::AudioSignal, 0U};
         }
         valid_ = valid_ && inputs_.count > 0U && outputs_.count > 0U;
+        for (std::size_t index = 0U; index < bindings_.size(); ++index) {
+            const auto parameter = std::find_if(descriptor.parameters.begin(), descriptor.parameters.end(),
+                [this, index](const EffectParameter& item) {
+                    return item.id == bindings_[index].parameter_id;
+                });
+            if (parameter == descriptor.parameters.end()) {
+                valid_ = false;
+                continue;
+            }
+            targets_[index].store(parameter->default_value, std::memory_order_relaxed);
+        }
     }
 
     [[nodiscard]] NamedAudioPortContractList InputPorts() const noexcept override { return inputs_; }
@@ -676,6 +697,7 @@ public:
     bool Process(std::span<const NamedAudioPortInput> inputs,
                  std::span<NamedAudioPortOutput> outputs,
                  std::uint32_t sample_count) noexcept override {
+        diagnostics_ = {};
         if (!prepared_ || inputs.size() != inputs_.count || outputs.size() != outputs_.count ||
             lane_circuits_.empty()) return false;
         for (std::size_t index = 0U; index < inputs.size(); ++index) {
@@ -690,15 +712,35 @@ public:
         }
 
         std::array<double, kMaximumNamedAudioPorts> input_values{};
+        std::array<float, kMaximumBindings> targets{};
         for (std::uint32_t sample = 0U; sample < sample_count; ++sample) {
+            for (std::size_t binding = 0U; binding < bindings_.size(); ++binding) {
+                targets[binding] = targets_[binding].load(std::memory_order_acquire);
+            }
             for (std::size_t channel = 0U; channel < lane_circuits_.size(); ++channel) {
+                for (std::size_t binding = 0U; binding < bindings_.size(); ++binding) {
+                    if (!lane_circuits_[channel].SetControlTarget(
+                            bindings_[binding].control_index, targets[binding])) {
+                        ++diagnostics_.solve_failure_count;
+                        diagnostics_.last_solver_error = static_cast<std::uint32_t>(MnaSolveError::NonFinite);
+                        return false;
+                    }
+                }
                 for (std::size_t index = 0U; index < inputs.size(); ++index) {
                     input_values[index] = inputs[index].buffer->ChannelData(
                         static_cast<std::uint32_t>(channel))[sample];
                 }
                 const auto solved = lane_circuits_[channel].Solve(
                     std::span<const double>(input_values.data(), inputs.size()));
-                if (!solved.Succeeded()) return false;
+                ++diagnostics_.processed_solve_count;
+                diagnostics_.total_solver_iterations += solved.iteration_count;
+                diagnostics_.maximum_solver_iterations = std::max(
+                    diagnostics_.maximum_solver_iterations, solved.maximum_iteration_count);
+                if (!solved.Succeeded()) {
+                    ++diagnostics_.solve_failure_count;
+                    diagnostics_.last_solver_error = static_cast<std::uint32_t>(solved.error);
+                    return false;
+                }
                 for (std::size_t index = 0U; index < outputs.size(); ++index) {
                     const auto value = lane_circuits_[channel].OutputValue(index);
                     if (!value.has_value() || !std::isfinite(*value)) return false;
@@ -713,8 +755,29 @@ public:
     [[nodiscard]] std::uint32_t DeclaredLatencySamples() const noexcept override {
         return declared_latency_samples_;
     }
+    [[nodiscard]] bool SetParameter(std::string_view parameter_id, float value) noexcept override {
+        if (!std::isfinite(value)) return false;
+        for (std::size_t index = 0U; index < bindings_.size(); ++index) {
+            if (bindings_[index].parameter_id == parameter_id) {
+                if (value < bindings_[index].minimum || value > bindings_[index].maximum) return false;
+                targets_[index].store(value, std::memory_order_release);
+                return true;
+            }
+        }
+        return false;
+    }
+    [[nodiscard]] std::optional<float> ParameterValue(std::string_view parameter_id) const noexcept override {
+        for (std::size_t index = 0U; index < bindings_.size(); ++index) {
+            if (bindings_[index].parameter_id == parameter_id) {
+                return targets_[index].load(std::memory_order_acquire);
+            }
+        }
+        return std::nullopt;
+    }
+    [[nodiscard]] NamedAudioPortDiagnostics Diagnostics() const noexcept override { return diagnostics_; }
     void Reset() noexcept override {
         for (auto& circuit : lane_circuits_) circuit.Reset();
+        diagnostics_ = {};
     }
 
 private:
@@ -727,6 +790,9 @@ private:
     std::array<std::uint32_t, kMaximumNamedAudioPorts> input_max_channels_{};
     std::array<std::uint32_t, kMaximumNamedAudioPorts> output_max_channels_{};
     std::vector<MnaPreparedCircuit> lane_circuits_;
+    std::vector<Binding> bindings_;
+    std::array<std::atomic<float>, kMaximumBindings> targets_{};
+    NamedAudioPortDiagnostics diagnostics_;
     bool valid_{true};
     bool prepared_{};
 };
@@ -816,9 +882,31 @@ std::variant<std::unique_ptr<NamedAudioPortProcessor>, ModuleRuntimeError> Creat
     if (package.descriptor.ports.size() != circuit.ports.size()) {
         return ModuleRuntimeError::UnsupportedPortLayout;
     }
+    if (circuit.parameter_bindings.size() > NamedMnaPortProcessor::kMaximumBindings) {
+        return ModuleRuntimeError::InvalidInitialParameterValue;
+    }
+    std::vector<NamedMnaPortProcessor::Binding> bindings;
+    bindings.reserve(circuit.parameter_bindings.size());
+    for (const auto& binding : circuit.parameter_bindings) {
+        const auto parameter = std::find_if(package.descriptor.parameters.begin(), package.descriptor.parameters.end(),
+            [&binding](const EffectParameter& item) { return item.id == binding.parameter_id; });
+        const auto control_index = compiled.circuit->FindControl(binding.parameter_id);
+        const auto control_range = control_index.has_value()
+            ? compiled.circuit->GetControlRange(*control_index) : std::nullopt;
+        if (parameter == package.descriptor.parameters.end() || !control_index.has_value() ||
+            !control_range.has_value() || !std::isfinite(parameter->minimum) ||
+            !std::isfinite(parameter->maximum) || !std::isfinite(parameter->default_value) ||
+            parameter->minimum < control_range->minimum || parameter->maximum > control_range->maximum ||
+            parameter->default_value < parameter->minimum || parameter->default_value > parameter->maximum) {
+            return ModuleRuntimeError::InvalidInitialParameterValue;
+        }
+        bindings.push_back({.parameter_id = binding.parameter_id, .minimum = parameter->minimum,
+            .maximum = parameter->maximum, .control_index = *control_index});
+    }
     return std::unique_ptr<NamedAudioPortProcessor>(
         std::make_unique<NamedMnaPortProcessor>(package.descriptor.declared_latency_samples,
-                                                std::move(*compiled.circuit), circuit, package.descriptor));
+                                                std::move(*compiled.circuit), circuit, package.descriptor,
+                                                std::move(bindings)));
 }
 
 std::variant<std::unique_ptr<ModuleRuntimeProcessor>, ModuleRuntimeError> CreateAnalogRuntime(const ModulePackage& package,
