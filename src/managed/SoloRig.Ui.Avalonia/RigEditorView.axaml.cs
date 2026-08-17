@@ -78,6 +78,7 @@ public sealed partial class RigEditorView : UserControl
     {
         Patterns = ["*.nam", "*.nam-a2", "*.ir", "*.wav", "*.json"]
     };
+
     private static readonly FilePickerFileType ThemeFileType = new("SoloRig theme")
     {
         Patterns = ["*.json"],
@@ -108,9 +109,20 @@ public sealed partial class RigEditorView : UserControl
     public RigEditorViewModel? ViewModel => viewModel;
 
     public bool HasGraphVisualContent =>
-        EditorCanvas is not null && viewModel is not null &&
+        EditorCanvas is not null && CanvasConnectionLayer is not null && CanvasNodeLayer is not null && viewModel is not null &&
         viewModel.CanvasNodes.Count >= 2 && viewModel.CanvasConnections.Count >= 1 &&
-        EditorCanvas.Bounds.Width > 0 && EditorCanvas.Bounds.Height > 0;
+        EditorCanvas.Bounds.Width > 0 && EditorCanvas.Bounds.Height > 0 &&
+        CanvasConnectionLayer.Bounds.Width >= EditorCanvas.Bounds.Width - 0.5 &&
+        CanvasConnectionLayer.Bounds.Height >= EditorCanvas.Bounds.Height - 0.5 &&
+        CanvasNodeLayer.Bounds.Width >= EditorCanvas.Bounds.Width - 0.5 &&
+        CanvasNodeLayer.Bounds.Height >= EditorCanvas.Bounds.Height - 0.5 &&
+        CanvasNodeLayer.ItemCount == viewModel.CanvasNodes.Count &&
+        Enumerable.Range(0, CanvasNodeLayer.ItemCount).All(index =>
+            CanvasNodeLayer.ContainerFromIndex(index) is Control container &&
+            container.Bounds.Width > 0 && container.Bounds.Height > 0 &&
+            container.TranslatePoint(default, EditorCanvas) is { } origin &&
+            origin.X + container.Bounds.Width > 0 && origin.Y + container.Bounds.Height > 0 &&
+            origin.X < EditorCanvas.Bounds.Width && origin.Y < EditorCanvas.Bounds.Height);
 
     public bool HasEditorControlsVisualContent => HasGraphVisualContent &&
         ModuleCatalogList is not null && ModuleCatalogList.Bounds.Width > 0 &&
@@ -119,7 +131,6 @@ public sealed partial class RigEditorView : UserControl
 
     public bool HasStandaloneVisualContent => HasEditorControlsVisualContent &&
         DocumentStatusText is not null && RealtimeStatusText is not null && WhiteboxStatusText is not null &&
-        EffectChainStripPanel is not null && EffectChainStripPanel.Children.Count >= 2 &&
         HasThemePalette &&
         !string.IsNullOrWhiteSpace(DocumentStatusText.Text) &&
         !string.IsNullOrWhiteSpace(RealtimeStatusText.Text) &&
@@ -284,12 +295,30 @@ public sealed partial class RigEditorView : UserControl
                BuildVisualRegressionFingerprint() == originalFingerprint;
     }
 
-    public bool ProbeDpiScaling() => viewModel is not null && viewModel.ProbeDpiScaling();
+    public bool ProbeDpiScaling()
+    {
+        if (viewModel is null || !viewModel.ProbeDpiScaling())
+        {
+            return false;
+        }
+
+        UpdateLayout();
+        return HasGraphVisualContent;
+    }
 
     public bool ProbeRenderedSurface()
     {
         if (viewModel is null || !HasStandaloneVisualContent || Bounds.Width <= 0 || Bounds.Height <= 0)
         {
+            var containers = CanvasNodeLayer is null
+                ? "missing"
+                : string.Join(";", Enumerable.Range(0, CanvasNodeLayer.ItemCount).Select(index =>
+                {
+                    var container = CanvasNodeLayer.ContainerFromIndex(index) as Control;
+                    var origin = container?.TranslatePoint(default, EditorCanvas);
+                    return $"{index}:bounds={container?.Bounds},origin={origin}";
+                }));
+            Console.Error.WriteLine($"[standalone-visual-probe] rendered surface precondition: viewModel={viewModel is not null}, standalone={HasStandaloneVisualContent}, bounds={Bounds}, canvas={EditorCanvas?.Bounds}, connectionLayer={CanvasConnectionLayer?.Bounds}, nodeLayer={CanvasNodeLayer?.Bounds}, items={CanvasNodeLayer?.ItemCount}, containers={containers}");
             return false;
         }
 
@@ -297,6 +326,7 @@ public sealed partial class RigEditorView : UserControl
         var repeated = CaptureRenderedSurface();
         if (original is null || repeated is null || original != repeated)
         {
+            Console.Error.WriteLine($"[standalone-visual-probe] rendered surface detail: original={original}, repeated={repeated}");
             return false;
         }
 
@@ -308,13 +338,32 @@ public sealed partial class RigEditorView : UserControl
 
         try
         {
+            UpdateLayout();
             var switched = CaptureRenderedSurface();
-            if (switched is null || switched == original || !viewModel.ToggleTheme(markDirty: false) ||
-                viewModel.DarkTheme != originalDark)
+            if (switched is null || switched == original || !viewModel.ToggleTheme(markDirty: false))
             {
+                Console.Error.WriteLine($"[standalone-visual-probe] rendered surface theme detail: original={original}, switched={switched}, dark={viewModel.DarkTheme}, expected={originalDark}");
                 return false;
             }
-            return CaptureRenderedSurface() == original;
+            UpdateLayout();
+            if (viewModel.DarkTheme != originalDark)
+            {
+                Console.Error.WriteLine($"[standalone-visual-probe] rendered surface theme restore state: dark={viewModel.DarkTheme}, expected={originalDark}");
+                return false;
+            }
+            var restored = CaptureRenderedSurface();
+            if (restored != original)
+            {
+                Console.Error.WriteLine($"[standalone-visual-probe] rendered surface restore detail: original={original}, restored={restored}");
+                return false;
+            }
+            var capturePath = Environment.GetEnvironmentVariable("SOLO_RIG_VISUAL_PROBE_CAPTURE");
+            if (!string.IsNullOrWhiteSpace(capturePath) && CaptureRenderedSurface(capturePath) is null)
+            {
+                Console.Error.WriteLine($"[standalone-visual-probe] failed to save rendered surface: {capturePath}");
+                return false;
+            }
+            return true;
         }
         finally
         {
@@ -382,42 +431,6 @@ public sealed partial class RigEditorView : UserControl
                           PortInspectorButton.Classes.Contains("selected") == (originalTab == "端口") &&
                           ResourceInspectorButton.Classes.Contains("selected") == (originalTab == "资源");
         return probePassed && BuildVisualRegressionFingerprint() == originalFingerprint && filterRestored && tabRestored;
-    }
-
-    public bool ProbeEffectChainSelection()
-    {
-        if (viewModel is null || EffectChainStripPanel is null || EffectChainStripPanel.Children.Count == 0)
-        {
-            return false;
-        }
-
-        var originalSelected = viewModel.SelectedNode?.InstanceId;
-        var target = viewModel.EffectChainNodes.LastOrDefault();
-        var originalFingerprint = BuildVisualRegressionFingerprint();
-        if (target is null)
-        {
-            return false;
-        }
-
-        var button = EffectChainStripPanel.Children
-            .OfType<Button>()
-            .FirstOrDefault(candidate => candidate.DataContext is CanvasNodeSnapshot node &&
-                                         node.InstanceId == target.InstanceId);
-        if (button is null)
-        {
-            return false;
-        }
-
-        button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        var selected = viewModel.SelectedNode?.InstanceId == target.InstanceId;
-        var inspectorUpdated = viewModel.SelectedNodeDisplayName == target.DisplayName;
-
-        var restored = originalSelected is null
-            ? viewModel.ClearSelection()
-            : viewModel.SelectNode(originalSelected);
-        return selected && inspectorUpdated && restored &&
-               (viewModel.SelectedNode?.InstanceId ?? string.Empty) == (originalSelected ?? string.Empty) &&
-               BuildVisualRegressionFingerprint() == originalFingerprint;
     }
 
     public bool ProbeConnectionSelection()
@@ -575,8 +588,15 @@ public sealed partial class RigEditorView : UserControl
 
     public bool ProbeModuleInsertion()
     {
-        if (viewModel is null || !HasGraphVisualContent || CaptureRenderedSurface() is not { } originalSurface)
+        if (viewModel is null)
         {
+            return false;
+        }
+
+        UpdateLayout();
+        if (!HasGraphVisualContent || CaptureRenderedSurface() is not { } originalSurface)
+        {
+            Console.Error.WriteLine($"[standalone-visual-probe] module insertion precondition: graph={HasGraphVisualContent}, canvas={EditorCanvas.Bounds}, nodeLayer={CanvasNodeLayer.Bounds}, items={CanvasNodeLayer.ItemCount}");
             return false;
         }
 
@@ -609,14 +629,26 @@ public sealed partial class RigEditorView : UserControl
             var linkedToChain = viewModel.CanvasConnections.Any(connection =>
                 connection.DestinationInstanceId == addedNode.InstanceId);
             var projectedIntoChain = viewModel.EffectChainNodes.Any(node => node.InstanceId == addedNode.InstanceId);
-            var projectedChainButton = EffectChainStripPanel?.Children
-                .OfType<Button>()
-                .Any(button => button.DataContext is CanvasNodeSnapshot node &&
-                              node.InstanceId == addedNode.InstanceId) == true;
+            UpdateLayout();
+            var addedIndex = viewModel.CanvasNodes
+                .Select((node, index) => (node, index))
+                .First(item => item.node.InstanceId == addedNode.InstanceId).index;
+            var addedContainer = CanvasNodeLayer?.ContainerFromIndex(addedIndex) as Control;
+            var addedOrigin = addedContainer?.TranslatePoint(default, EditorCanvas);
+            var projectedCanvasControl = addedContainer is not null && addedOrigin is { } origin &&
+                                         addedContainer.Bounds.Width > 0 && addedContainer.Bounds.Height > 0 &&
+                                         origin.X + addedContainer.Bounds.Width > 0 &&
+                                         origin.Y + addedContainer.Bounds.Height > 0 &&
+                                         origin.X < EditorCanvas.Bounds.Width && origin.Y < EditorCanvas.Bounds.Height;
             var afterSurface = CaptureRenderedSurface();
-            return projectedInsideCanvas && linkedToChain && projectedIntoChain &&
-                   projectedChainButton &&
-                   afterSurface is not null && afterSurface != originalSurface;
+            var passed = projectedInsideCanvas && linkedToChain && projectedIntoChain &&
+                         projectedCanvasControl &&
+                         afterSurface is not null && afterSurface != originalSurface;
+            if (!passed)
+            {
+                Console.Error.WriteLine($"[standalone-visual-probe] module insertion detail: inside={projectedInsideCanvas}, linked={linkedToChain}, chain={projectedIntoChain}, canvasControl={projectedCanvasControl}, container={addedContainer?.Bounds}, origin={addedOrigin}, surfaceChanged={afterSurface is not null && afterSurface != originalSurface}");
+            }
+            return passed;
         }
         finally
         {
@@ -627,6 +659,7 @@ public sealed partial class RigEditorView : UserControl
             viewModel.RestoreDocumentState(originalDirty);
             viewModel.ClearHistory();
             viewModel.SelectedCatalogModule = originalSelectedCatalogModule;
+            UpdateLayout();
         }
     }
 
@@ -811,7 +844,7 @@ public sealed partial class RigEditorView : UserControl
         return passed && restored;
     }
 
-    private RenderedSurfaceFingerprint? CaptureRenderedSurface()
+    private RenderedSurfaceFingerprint? CaptureRenderedSurface(string? outputPath = null)
     {
         var topLevel = TopLevel.GetTopLevel(this);
         var renderScale = topLevel?.RenderScaling ?? 1.0;
@@ -834,6 +867,15 @@ public sealed partial class RigEditorView : UserControl
             if (png.Length < 32 || png[0] != 0x89 || png[1] != 0x50 || png[2] != 0x4E || png[3] != 0x47)
             {
                 return null;
+            }
+            if (!string.IsNullOrWhiteSpace(outputPath))
+            {
+                var directory = Path.GetDirectoryName(outputPath);
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+                File.WriteAllBytes(outputPath, png);
             }
             return new RenderedSurfaceFingerprint(
                 pixelSize.Width,
@@ -897,7 +939,6 @@ public sealed partial class RigEditorView : UserControl
         DataContext = editor;
         editor.PropertyChanged += ViewModelPropertyChanged;
         ApplyTheme(editor.Theme, editor.DarkTheme);
-        RenderEffectChainStrip();
         UpdateSelectionStyles();
         StartRuntimeRefreshTimer();
     }
@@ -988,57 +1029,7 @@ public sealed partial class RigEditorView : UserControl
         {
             UpdateSelectionStyles();
         }
-        if (viewModel is not null &&
-            (args.PropertyName == nameof(RigEditorViewModel.CanvasNodes) ||
-             args.PropertyName == nameof(RigEditorViewModel.EffectChainNodes) ||
-             args.PropertyName == nameof(RigEditorViewModel.DarkTheme) ||
-             args.PropertyName == nameof(RigEditorViewModel.Theme)))
-        {
-            RenderEffectChainStrip();
-        }
     }
-
-    private void RenderEffectChainStrip()
-    {
-        if (EffectChainStripPanel is null)
-        {
-            return;
-        }
-
-        EffectChainStripPanel.Children.Clear();
-        if (viewModel is null)
-        {
-            return;
-        }
-
-        var accentBrush = ResourceBrush("SrgAccentBrush", "#4DD6A4");
-        var textBrush = ResourceBrush("SrgTextBrush", "#E7EEF4");
-        foreach (var node in viewModel.EffectChainNodes)
-        {
-            var button = new Button
-            {
-                DataContext = node,
-                Background = new SolidColorBrush(Color.Parse(node.CardBackground)),
-                BorderBrush = new SolidColorBrush(Color.Parse(node.CardBorder)),
-                Content = new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 4,
-                    Children =
-                    {
-                        new TextBlock { Text = "FX", Foreground = accentBrush, FontSize = 8, FontWeight = FontWeight.Bold },
-                        new TextBlock { Text = node.DisplayName, Foreground = textBrush, FontSize = 9 }
-                    }
-                }
-            };
-            button.Classes.Add("srg-chain-item");
-            button.Click += EffectChainNodeClick;
-            EffectChainStripPanel.Children.Add(button);
-        }
-    }
-
-    private IBrush ResourceBrush(string key, string fallback) =>
-        Resources[key] as IBrush ?? new SolidColorBrush(Color.Parse(fallback));
 
     private void UpdateSelectionStyles()
     {
@@ -1442,20 +1433,6 @@ public sealed partial class RigEditorView : UserControl
             ModuleDragPreview.IsVisible = false;
         }
         moduleDragOverCanvas = false;
-    }
-
-    private void EffectChainNodeClick(object? sender, RoutedEventArgs args)
-    {
-        if (viewModel is null || sender is not Control control ||
-            control.DataContext is not CanvasNodeSnapshot node)
-        {
-            return;
-        }
-        if (viewModel.SelectNode(node.InstanceId))
-        {
-            viewModel.ReportInteractionStatus($"已选择效果器: {node.DisplayName}");
-        }
-        args.Handled = true;
     }
 
     private void NodeInputEndpointPressed(object? sender, PointerPressedEventArgs args)

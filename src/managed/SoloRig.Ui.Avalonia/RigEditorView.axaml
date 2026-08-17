@@ -59,18 +59,6 @@
       <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentHoverBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource SrgAccentHoverBrush}" />
     </Style>
-    <Style Selector="Button.srg-chain-item">
-      <Setter Property="Background" Value="{DynamicResource SrgControlBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentBrush}" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="Foreground" Value="{DynamicResource SrgTextBrush}" />
-      <Setter Property="CornerRadius" Value="5" />
-      <Setter Property="Padding" Value="7,3" />
-    </Style>
-    <Style Selector="Button.srg-chain-item:pointerover">
-      <Setter Property="Background" Value="{DynamicResource SrgControlHoverBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource SrgAccentHoverBrush}" />
-    </Style>
     <Style Selector="Button.srg-footswitch">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
@@ -233,25 +221,7 @@
         </Border>
 
         <Border Grid.Column="1" Background="{DynamicResource SrgCanvasBrush}">
-          <Grid RowDefinitions="Auto,*">
-            <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="17,14,17,10">
-              <StackPanel Spacing="2">
-                <TextBlock Text="效果器链路" Classes="srg-text" FontSize="13" FontWeight="SemiBold" />
-                <TextBlock Text="自由移动模块 · 点击两个端点建立方向连接" Classes="srg-muted" FontSize="10" />
-                <TextBlock Text="{Binding ConnectionSelectionText}" Classes="srg-muted" FontSize="9" TextTrimming="CharacterEllipsis" />
-                <ScrollViewer Height="30" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Hidden" Margin="0,6,0,0">
-                  <StackPanel x:Name="EffectChainStripPanel" Orientation="Horizontal" Spacing="5" />
-                </ScrollViewer>
-              </StackPanel>
-              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                <Button x:Name="CanvasConnectButton" Classes="srg-button ghost" Content="连接首尾"
-                        Command="{Binding ConnectSelectedCommand}" IsEnabled="{Binding CanConnectNodes}" />
-                <Button x:Name="CanvasDisconnectButton" Classes="srg-button ghost" Content="断开连接"
-                        Command="{Binding DisconnectSelectedCommand}" IsEnabled="{Binding CanDisconnectNodes}" />
-              </StackPanel>
-            </Grid>
-
-            <Border Grid.Row="1" Margin="16,0,16,14" BorderBrush="{DynamicResource SrgStrongBorderBrush}" BorderThickness="1"
+            <Border Margin="16,14" BorderBrush="{DynamicResource SrgStrongBorderBrush}" BorderThickness="1"
                     CornerRadius="8" ClipToBounds="True">
               <Border.Background>
                 <DynamicResource ResourceKey="SrgCanvasBackgroundBrush" />
@@ -301,7 +271,10 @@
 
                 <Line StartPoint="150,236" EndPoint="1000,236"
                       Stroke="{DynamicResource SrgGridBrush}" StrokeThickness="1" Opacity="0.6" />
-                <ItemsControl ItemsSource="{Binding CanvasConnections}">
+                <ItemsControl x:Name="CanvasConnectionLayer" Canvas.Left="0" Canvas.Top="0" ZIndex="4"
+                              Width="{Binding Bounds.Width, ElementName=EditorCanvas}"
+                              Height="{Binding Bounds.Height, ElementName=EditorCanvas}"
+                              ItemsSource="{Binding CanvasConnections}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
                   </ItemsControl.ItemsPanel>
@@ -314,16 +287,19 @@
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <ItemsControl ItemsSource="{Binding CanvasNodes}">
+                <ItemsControl x:Name="CanvasNodeLayer" Canvas.Left="0" Canvas.Top="0" ZIndex="8"
+                              Width="{Binding Bounds.Width, ElementName=EditorCanvas}"
+                              Height="{Binding Bounds.Height, ElementName=EditorCanvas}"
+                              ItemsSource="{Binding CanvasNodes}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
                   </ItemsControl.ItemsPanel>
-                  <ItemsControl.ItemContainerTheme>
-                    <ControlTheme TargetType="ContentPresenter">
+                  <ItemsControl.Styles>
+                    <Style Selector="ContentPresenter">
                       <Setter Property="Canvas.Left" Value="{Binding CanvasX}" />
                       <Setter Property="Canvas.Top" Value="{Binding CanvasY}" />
-                    </ControlTheme>
-                  </ItemsControl.ItemContainerTheme>
+                    </Style>
+                  </ItemsControl.Styles>
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
                       <Grid Width="{Binding Width}" Height="{Binding Height}">
@@ -407,6 +383,21 @@
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
+                <Border Canvas.Right="14" Canvas.Top="12" ZIndex="16"
+                        Background="{DynamicResource SrgOverlayBrush}" BorderBrush="{DynamicResource SrgToolBorderBrush}"
+                        BorderThickness="1" CornerRadius="7" Padding="9,7">
+                  <StackPanel Spacing="5">
+                    <TextBlock Text="{Binding ConnectionSelectionText}" Classes="srg-muted" FontSize="9"
+                               MaxWidth="280" TextTrimming="CharacterEllipsis" />
+                    <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                      <Button x:Name="CanvasConnectButton" Classes="srg-button ghost" Content="连接首尾"
+                              Command="{Binding ConnectSelectedCommand}" IsEnabled="{Binding CanConnectNodes}" />
+                      <Button x:Name="CanvasDisconnectButton" Classes="srg-button ghost" Content="断开连接"
+                              Command="{Binding DisconnectSelectedCommand}" IsEnabled="{Binding CanDisconnectNodes}" />
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+
                 <TextBlock Canvas.Left="16" Canvas.Bottom="12"
                            Text="模块可拖动 · 连接操作：先点击源输出端点，再点击目标输入端点"
                            Classes="srg-muted" FontSize="10" />
@@ -426,7 +417,6 @@
                 </Border>
               </Canvas>
             </Border>
-          </Grid>
         </Border>
 
         <Border Grid.Column="2" Background="{DynamicResource SrgPanelBrush}" BorderBrush="{DynamicResource SrgBorderBrush}" BorderThickness="1,0,0,0"

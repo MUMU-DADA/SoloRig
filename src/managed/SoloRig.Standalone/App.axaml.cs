@@ -41,8 +41,7 @@ public sealed class App : Application
                     var renderedSurface = dpiScaling && RunVisualProbe("rendered surface", mainWindow.ProbeRenderedSurface);
                     var keyboardShortcuts = renderedSurface && RunVisualProbe("keyboard shortcuts", mainWindow.ProbeKeyboardShortcuts);
                     var selectionState = keyboardShortcuts && RunVisualProbe("selection state", mainWindow.ProbeSelectionState);
-                    var chainSelection = selectionState && RunVisualProbe("effect chain selection", mainWindow.ProbeEffectChainSelection);
-                    var connectionSelection = chainSelection && RunVisualProbe("connection selection", mainWindow.ProbeConnectionSelection);
+                    var connectionSelection = selectionState && RunVisualProbe("connection selection", mainWindow.ProbeConnectionSelection);
                     var documentStatus = connectionSelection && RunVisualProbe("document status", mainWindow.ProbeDocumentStatus);
                     var actionGates = documentStatus && RunVisualProbe("action gates", mainWindow.ProbeActionGates);
                     var moduleDragPreview = actionGates && RunVisualProbe("module drag preview", mainWindow.ProbeModuleDragPreview);
@@ -50,7 +49,7 @@ public sealed class App : Application
                     var presetLibrary = moduleInsertion && RunVisualProbe("preset library", mainWindow.ProbePresetLibrary);
                     var undoRedo = presetLibrary && RunVisualProbe("undo/redo", mainWindow.ProbeUndoRedo);
                     if (visualContent && deviceAvailability && externalTheme && themeSwitch && parameterBinding && dpiScaling && renderedSurface &&
-                        keyboardShortcuts && selectionState && chainSelection && connectionSelection && documentStatus && actionGates && moduleDragPreview &&
+                        keyboardShortcuts && selectionState && connectionSelection && documentStatus && actionGates && moduleDragPreview &&
                         moduleInsertion && presetLibrary && undoRedo)
                     {
                         probe.Stop();
