@@ -411,8 +411,9 @@ if(BUILD_TESTING)
         tests/nonlinear_mosfet_dynamic_tests.cpp
         tests/nonlinear_mosfet_dynamic_mna_tests.cpp
         tests/nonlinear_mosfet_dynamic_runtime_tests.cpp
-        tests/nonlinear_mosfet_dynamic_binding_tests.cpp
-        tests/nonlinear_pentode_tests.cpp
+    tests/nonlinear_mosfet_dynamic_binding_tests.cpp
+    tests/m30_whitebox_device_matrix_tests.cpp
+    tests/nonlinear_pentode_tests.cpp
         tests/nonlinear_triode_tests.cpp
         tests/nonlinear_vari_mu_tests.cpp
         tests/digital_delay_tests.cpp

@@ -6,6 +6,7 @@
              SizeChanged="RigEditorSizeChanged">
   <UserControl.Resources>
     <local:SkinImageConverter x:Key="SkinImageConverter" />
+    <local:ConnectionGeometryConverter x:Key="ConnectionGeometryConverter" />
   </UserControl.Resources>
   <UserControl.Styles>
     <Style Selector="TextBlock.srg-text">
@@ -407,12 +408,50 @@
                   </ItemsControl.ItemsPanel>
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <Line StartPoint="{Binding SourcePoint}" EndPoint="{Binding DestinationPoint}"
-                            Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="{Binding StrokeThickness}"
-                            Opacity="{Binding StrokeOpacity}" PointerPressed="CanvasConnectionPressed" />
+                      <Grid Classes="srg-connection-item"
+                            ToolTip.Tip="{Binding SourceInstanceId} → {Binding DestinationInstanceId}"
+                            AutomationProperties.Name="{Binding SourceInstanceId} 到 {Binding DestinationInstanceId} 的连接">
+                        <Path Classes="srg-connection-arrow"
+                              Data="{Binding ., Converter={StaticResource ConnectionGeometryConverter}, ConverterParameter=Arrow}"
+                              Fill="{DynamicResource SrgOutputBrush}" Stroke="{DynamicResource SrgCanvasBrush}" StrokeThickness="1"
+                              IsHitTestVisible="False" />
+                        <Path Classes="srg-connection-halo"
+                              Data="{Binding ., Converter={StaticResource ConnectionGeometryConverter}}"
+                              Stroke="{DynamicResource SrgCanvasBrush}" StrokeThickness="{Binding HaloThickness}"
+                              Opacity="{Binding HaloOpacity}" StrokeLineCap="Round" StrokeJoin="Round"
+                              IsHitTestVisible="False" />
+                        <Path Classes="srg-connection-hover-line"
+                              Data="{Binding ., Converter={StaticResource ConnectionGeometryConverter}}"
+                              Stroke="{DynamicResource SrgAccentHoverBrush}" StrokeThickness="5"
+                              Opacity="0" StrokeLineCap="Round" StrokeJoin="Round" IsHitTestVisible="False" />
+                        <Path Classes="srg-connection-hit"
+                              Data="{Binding ., Converter={StaticResource ConnectionGeometryConverter}}"
+                              Stroke="Transparent" StrokeThickness="{Binding HitTestThickness}"
+                              StrokeLineCap="Round" StrokeJoin="Round"
+                              PointerEntered="CanvasConnectionPointerEntered"
+                              PointerExited="CanvasConnectionPointerExited"
+                              PointerPressed="CanvasConnectionPressed" />
+                        <Path Classes="srg-connection-line"
+                              Data="{Binding ., Converter={StaticResource ConnectionGeometryConverter}}"
+                              Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="{Binding StrokeThickness}"
+                              Opacity="{Binding StrokeOpacity}" StrokeLineCap="Round" StrokeJoin="Round"
+                              IsHitTestVisible="False" />
+                      </Grid>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                <Path x:Name="ConnectionPreviewHalo" Canvas.Left="0" Canvas.Top="0" ZIndex="6"
+                      Stroke="{DynamicResource SrgCanvasBrush}" StrokeThickness="10" Opacity="0.9"
+                      StrokeLineCap="Round" StrokeJoin="Round"
+                      IsVisible="False" IsHitTestVisible="False" />
+                <Path x:Name="ConnectionPreviewPath" Canvas.Left="0" Canvas.Top="0" ZIndex="7"
+                      Stroke="{DynamicResource SrgAccentHoverBrush}" StrokeThickness="4" Opacity="0.98"
+                      StrokeDashArray="6,4" StrokeLineCap="Round" StrokeJoin="Round"
+                      IsVisible="False" IsHitTestVisible="False" />
+                <Ellipse x:Name="ConnectionPreviewTarget" Canvas.Left="0" Canvas.Top="0" ZIndex="8"
+                         Width="18" Height="18" IsVisible="False" IsHitTestVisible="False"
+                         Fill="{DynamicResource SrgCanvasBrush}" Stroke="{DynamicResource SrgAccentHoverBrush}"
+                         StrokeThickness="3" />
 
                 <ItemsControl x:Name="CanvasNodeLayer" Canvas.Left="0" Canvas.Top="0" ZIndex="8"
                               RenderTransformOrigin="0%,0%"
@@ -444,8 +483,53 @@
                               </StackPanel>
                               <TextBlock Grid.Column="1" Text="•••" Classes="srg-muted" FontSize="12" />
                             </Grid>
+                            <ItemsControl Grid.RowSpan="3" ItemsSource="{Binding RuntimeSkinElements}"
+                                          IsVisible="{Binding HasSkinElements}" Foreground="{Binding LabelForeground}"
+                                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ZIndex="1">
+                              <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
+                              </ItemsControl.ItemsPanel>
+                              <ItemsControl.Styles>
+                                <Style Selector="ContentPresenter">
+                                  <Setter Property="Canvas.Left" Value="{Binding X}" />
+                                  <Setter Property="Canvas.Top" Value="{Binding Y}" />
+                                  <Setter Property="Panel.ZIndex" Value="{Binding ZIndex}" />
+                                </Style>
+                              </ItemsControl.Styles>
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                  <Border Width="{Binding Width}" Height="{Binding Height}" Background="Transparent"
+                                          IsVisible="{Binding !IsRuntimeInteractive}"
+                                          BorderBrush="{DynamicResource SrgAccentBrush}" BorderThickness="1" CornerRadius="3">
+                                    <Border.RenderTransform>
+                                      <RotateTransform Angle="{Binding Rotation}" />
+                                    </Border.RenderTransform>
+                                    <Grid>
+                                      <Ellipse IsVisible="{Binding IsKnob}" Width="{Binding Width}" Height="{Binding Width}"
+                                               Fill="{DynamicResource SrgKnobBrush}" Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="2" />
+                                      <Rectangle IsVisible="{Binding IsFader}" Width="8" Height="{Binding Height}"
+                                                 Fill="{DynamicResource SrgKnobBrush}" Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="2" />
+                                      <Border IsVisible="{Binding IsSwitch}" Background="{DynamicResource SrgTrackBrush}"
+                                              BorderBrush="{DynamicResource SrgAccentBrush}" BorderThickness="2" CornerRadius="4" />
+                                      <Ellipse IsVisible="{Binding IsButton}" Width="{Binding Width}" Height="{Binding Height}"
+                                               Fill="{DynamicResource SrgControlBrush}" Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="2" />
+                                      <Ellipse IsVisible="{Binding IsFootswitch}" Width="{Binding Width}" Height="{Binding Height}"
+                                               Fill="{DynamicResource SrgControlBrush}" Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="3" />
+                                      <Ellipse IsVisible="{Binding IsLed}" Width="{Binding Width}" Height="{Binding Height}"
+                                               Fill="{Binding IndicatorColor}" Stroke="#FFD6D2" StrokeThickness="1" />
+                                      <Border IsVisible="{Binding IsConnector}" Background="{DynamicResource SrgInputPanelBrush}"
+                                              BorderBrush="{DynamicResource SrgAccentBrush}" BorderThickness="2" CornerRadius="50" />
+                                      <TextBlock Text="{Binding Label}" IsVisible="{Binding IsLabel}"
+                                                 HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="8" />
+                                      <TextBlock Text="{Binding Label}" IsVisible="{Binding !IsLabel}"
+                                                 HorizontalAlignment="Center" VerticalAlignment="Bottom" FontSize="8" />
+                                    </Grid>
+                                  </Border>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                             <ItemsControl Grid.RowSpan="3" ItemsSource="{Binding Controls}" HorizontalAlignment="Stretch"
-                                          VerticalAlignment="Stretch" ZIndex="1">
+                                          VerticalAlignment="Stretch" ZIndex="4">
                               <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                   <Canvas />
@@ -459,13 +543,16 @@
                               </ItemsControl.Styles>
                               <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                  <Button Classes="srg-parameter-chip" Width="48" Tag="{Binding Target}"
-                                          Click="NodeParameterChipClick" AutomationProperties.Name="{Binding Label}"
-                                          AutomationProperties.HelpText="在检查器中编辑此参数">
-                                    <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                    <Grid Width="32" Height="32">
-                                      <Ellipse Width="29" Height="29" Fill="{DynamicResource SrgKnobBrush}"
-                                               Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="2" />
+                                  <Button Classes="srg-parameter-chip" Width="{Binding ControlWidth}" Height="{Binding ControlHeight}"
+                                          Tag="{Binding}" Click="NodeRuntimeControlClick"
+                                          PointerPressed="NodeRuntimeControlPointerPressed"
+                                          PointerReleased="NodeRuntimeControlPointerReleased"
+                                          PointerWheelChanged="NodeRuntimeControlWheelChanged"
+                                          AutomationProperties.Name="{Binding AutomationName}"
+                                          AutomationProperties.HelpText="滚轮调整；拨档、按钮和踩钉可直接操作">
+                                    <Grid Width="{Binding ControlWidth}" Height="{Binding ControlHeight}">
+                                      <Ellipse IsVisible="{Binding IsKnob}" Width="{Binding ControlWidth}" Height="{Binding ControlWidth}"
+                                               Fill="{DynamicResource SrgKnobBrush}" Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="2" />
                                       <Border IsVisible="{Binding IsKnob}" Width="2" Height="11"
                                               Background="{DynamicResource SrgAccentBrush}" VerticalAlignment="Top"
                                               Margin="0,4,0,0" RenderTransformOrigin="0.5,1">
@@ -473,22 +560,36 @@
                                           <RotateTransform Angle="{Binding KnobAngle}" />
                                         </Border.RenderTransform>
                                       </Border>
-                                      <Border IsVisible="{Binding IsToggle}" Width="29" Height="17"
-                                              Background="{DynamicResource SrgTrackBrush}"
-                                              BorderBrush="{DynamicResource SrgAccentBrush}" BorderThickness="1"
-                                              CornerRadius="8" VerticalAlignment="Center">
-                                        <Ellipse Width="11" Height="11" Fill="{DynamicResource SrgAccentBrush}"
-                                                 HorizontalAlignment="Right" Margin="0,0,3,0" />
+                                      <Border IsVisible="{Binding IsFader}" Width="{Binding ControlWidth}" Height="{Binding ControlHeight}"
+                                              Background="{DynamicResource SrgTrackBrush}" BorderBrush="{DynamicResource SrgAccentBrush}"
+                                              BorderThickness="1" CornerRadius="4" HorizontalAlignment="Center">
+                                        <Canvas Width="{Binding ControlWidth}" Height="{Binding ControlHeight}">
+                                          <Border Width="{Binding ControlWidth}" Height="10" Canvas.Top="{Binding FaderThumbTop}"
+                                                  Background="{DynamicResource SrgKnobBrush}" BorderBrush="{DynamicResource SrgAccentBrush}"
+                                                  BorderThickness="1" CornerRadius="3" />
+                                        </Canvas>
                                       </Border>
-                                      <Image IsVisible="{Binding HasImage}" Width="29" Height="29"
-                                             Source="{Binding ImagePath, Converter={StaticResource SkinImageConverter}}"
-                                             Stretch="Uniform" />
+                                      <Border IsVisible="{Binding IsToggle}" Width="{Binding ControlWidth}" Height="17"
+                                              Background="{DynamicResource SrgTrackBrush}" BorderBrush="{DynamicResource SrgAccentBrush}"
+                                              BorderThickness="1" CornerRadius="8" VerticalAlignment="Center">
+                                        <Canvas Width="{Binding ControlWidth}" Height="17">
+                                          <Ellipse Width="12" Height="12" Canvas.Left="{Binding ToggleThumbLeft}" Canvas.Top="2"
+                                                   Fill="{DynamicResource SrgAccentBrush}" />
+                                        </Canvas>
+                                      </Border>
+                                      <Ellipse IsVisible="{Binding IsButton}" Width="{Binding ControlWidth}" Height="{Binding ControlWidth}"
+                                               Fill="{DynamicResource SrgControlBrush}" Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="2" />
+                                      <Ellipse IsVisible="{Binding IsFootswitch}" Width="{Binding ControlWidth}" Height="{Binding ControlHeight}"
+                                               Fill="{DynamicResource SrgControlBrush}" Stroke="{DynamicResource SrgAccentBrush}" StrokeThickness="3" />
+                                      <Image IsVisible="{Binding HasImage}" Width="{Binding ControlWidth}" Height="{Binding ControlHeight}"
+                                             Source="{Binding ImagePath, Converter={StaticResource SkinImageConverter}}" Stretch="Uniform" />
+                                      <StackPanel VerticalAlignment="Bottom" HorizontalAlignment="Center" Spacing="1">
+                                        <TextBlock Text="{Binding Label}" Foreground="{Binding LabelColor}" FontSize="9"
+                                                   HorizontalAlignment="Center" />
+                                        <TextBlock Text="{Binding StateText}" Classes="srg-muted" FontSize="8"
+                                                   HorizontalAlignment="Center" />
+                                      </StackPanel>
                                     </Grid>
-                                    <TextBlock Text="{Binding Label}" Foreground="{Binding LabelColor}" FontSize="9"
-                                               HorizontalAlignment="Center" />
-                                    <TextBlock Text="{Binding ValueText}" Classes="srg-muted" FontSize="8"
-                                               HorizontalAlignment="Center" />
-                                    </StackPanel>
                                   </Button>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -531,15 +632,28 @@
                             </Canvas>
                           </Grid>
                         </Border>
+                        <Ellipse Classes="srg-endpoint-candidate" Width="27" Height="27"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-14,0,0,0"
+                                 Stroke="{DynamicResource SrgAccentHoverBrush}" StrokeThickness="2" Fill="Transparent"
+                                 IsVisible="{Binding IsConnectionDestinationValid}" IsHitTestVisible="False" />
+                        <Ellipse Classes="srg-endpoint-candidate" Width="27" Height="27"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-14,0,0,0"
+                                 Stroke="{DynamicResource SrgErrorBrush}" StrokeThickness="2" Fill="Transparent"
+                                 IsVisible="{Binding IsConnectionDestinationInvalid}" IsHitTestVisible="False" />
                         <Button Classes="srg-endpoint" Width="15" Height="15" HorizontalAlignment="Left" VerticalAlignment="Center"
                                 Margin="-8,0,0,0" Background="{DynamicResource SrgAccentBrush}"
                                 BorderBrush="{DynamicResource SrgAccentOutlineBrush}" BorderThickness="2"
                                 Tag="{Binding InstanceId}" AutomationProperties.Name="{Binding InstanceId}"
                                 AutomationProperties.HelpText="选择为连接目标" Click="NodeInputEndpointClick" />
+                        <Ellipse Classes="srg-endpoint-candidate" Width="27" Height="27"
+                                 HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-14,0"
+                                 Stroke="{DynamicResource SrgAccentHoverBrush}" StrokeThickness="2" Fill="Transparent"
+                                 IsVisible="{Binding IsConnectionSourceCandidate}" IsHitTestVisible="False" />
                         <Button Classes="srg-endpoint" Width="15" Height="15" HorizontalAlignment="Right" VerticalAlignment="Center"
                                 Margin="0,0,-8,0" Background="{DynamicResource SrgOutputBrush}"
                                 BorderBrush="{DynamicResource SrgOutputOutlineBrush}" BorderThickness="2"
                                 Tag="{Binding InstanceId}" AutomationProperties.Name="{Binding InstanceId}"
+                                PointerPressed="NodeOutputEndpointPointerPressed"
                                 AutomationProperties.HelpText="选择为连接来源" Click="NodeOutputEndpointClick" />
                       </Grid>
                     </DataTemplate>

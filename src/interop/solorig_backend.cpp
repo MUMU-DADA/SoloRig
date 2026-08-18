@@ -65,6 +65,7 @@ struct SoloRigSnapshot {
     std::string midi_status;
     std::vector<std::vector<std::pair<float, float>>> parameter_ranges;
     std::vector<std::array<std::string, 4>> node_skin_images_utf8;
+    std::vector<std::vector<solo_rig::PedalSkinDefinition::Element>> node_skin_elements;
     std::vector<std::vector<NodePort>> node_ports;
     std::vector<NodeResource> node_resources;
     bool audio_open{};
@@ -594,11 +595,12 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_whitebox_status(
         return SetError(backend, SOLO_RIG_STATUS_INVALID_ARGUMENT,
                         "backend and output whitebox status are required");
     }
-    static constexpr char kGraphStatus[] = "M12 immutable circuit IR contract available";
+    static constexpr char kGraphStatus[] =
+        "Circuit v2 component netlists parse and enter MNA Compile";
     static constexpr char kRuntimeStatus[] =
-        "M13 prepared runtime has a validated subset; WDF/full generic compiler remains unsupported";
+        "M30 device matrix verifies diode, BJT, JFET, MOSFET and opamp Compile/Prepare/Solve/Reset; complex topologies remain staged";
     static constexpr char kEvidenceStatus[] =
-        "M16 evidence schema is schema-only/blocked unless authorized inputs exist";
+        "Self-authored mathematical golden and runtime boundaries are covered; authorized SPICE, commercial data and hardware references remain blocked";
     static constexpr char kDiagnostic[] =
         "PedalKernel source/models and SPICE/golden data are unavailable or unauthorized; no equivalence claim";
     out_status->schema_version = 1U;
@@ -658,11 +660,13 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_backend_snapshot_create(
             snapshot->node_resources.push_back(std::move(resource));
         }
         snapshot->node_skin_images_utf8.reserve(snapshot->scene.nodes.size());
+        snapshot->node_skin_elements.reserve(snapshot->scene.nodes.size());
         for (const auto& node : snapshot->scene.nodes) {
             snapshot->node_skin_images_utf8.push_back({PathToUtf8(node.skin.knob_image),
                                                        PathToUtf8(node.skin.toggle_image),
                                                        PathToUtf8(node.skin.button_image),
                                                        PathToUtf8(node.skin.footswitch_image)});
+            snapshot->node_skin_elements.push_back(node.skin.elements);
         }
         snapshot->parameter_ranges.reserve(snapshot->preset.nodes.size());
         for (const auto& node : snapshot->preset.nodes) {
@@ -925,6 +929,42 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_skin_parameter_layout(
     out_layout->parameter_id_utf8 = placement.parameter_id.c_str();
     out_layout->x = placement.x;
     out_layout->y = placement.y;
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_skin_element_count(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t* out_count) {
+    if (snapshot == nullptr || out_count == nullptr || node_index >= snapshot->node_skin_elements.size()) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    *out_count = static_cast<uint32_t>(snapshot->node_skin_elements[node_index].size());
+    return SOLO_RIG_STATUS_OK;
+}
+
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_skin_element(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t element_index,
+    SoloRigNodeSkinElementView* out_element) {
+    if (snapshot == nullptr || out_element == nullptr || node_index >= snapshot->node_skin_elements.size() ||
+        element_index >= snapshot->node_skin_elements[node_index].size()) {
+        return SOLO_RIG_STATUS_INVALID_ARGUMENT;
+    }
+    const auto& element = snapshot->node_skin_elements[node_index][element_index];
+    out_element->id_utf8 = element.id.c_str();
+    out_element->type_utf8 = element.type.c_str();
+    out_element->binding_utf8 = element.binding.c_str();
+    out_element->x = element.x;
+    out_element->y = element.y;
+    out_element->width = element.width;
+    out_element->height = element.height;
+    out_element->rotation = element.rotation;
+    out_element->detents = element.detents;
+    out_element->z_index = element.z_index;
+    out_element->label_utf8 = element.label.c_str();
+    out_element->style_utf8 = element.style.c_str();
     return SOLO_RIG_STATUS_OK;
 }
 

@@ -7,12 +7,27 @@ namespace SoloRig.Ui;
 
 public sealed record NodeControlSnapshot(string Target, string Id, string Label, float Value, float Minimum, float Maximum, bool IsToggle,
                                          string ImagePath = "", double X = 0.0, double Y = 0.0,
-                                         string LabelColor = "")
+                                         string LabelColor = "", string ElementId = "", string ElementType = "parameter",
+                                         int Detents = 0, double ControlWidth = 48.0, double ControlHeight = 52.0,
+                                         bool IsMomentary = false, bool IsLatching = false, bool IsFootswitch = false)
 {
-    public bool IsKnob => !IsToggle;
+    public bool IsElement => !string.IsNullOrWhiteSpace(ElementId);
+    public bool IsKnob => !IsFader && !IsToggle && !IsFootswitch;
+    public bool IsFader => ElementType.StartsWith("fader.", StringComparison.Ordinal);
+    public bool IsButton => ElementType.StartsWith("button.", StringComparison.Ordinal);
+    public bool IsBypass => Target.EndsWith(".__bypass", StringComparison.Ordinal);
+    public bool IsActive => IsBypass
+        ? Value > 0.5F
+        : float.IsFinite(Minimum) && float.IsFinite(Maximum) && Maximum > Minimum &&
+          Value > Minimum + (Maximum - Minimum) * 0.5F;
     public bool HasImage => !string.IsNullOrWhiteSpace(ImagePath);
-    public double CanvasLeft => X - 24.0 - 11.0;
-    public double CanvasTop => Y - 34.0 - 11.0;
+    public string AutomationName => IsBypass ? $"{Label}踩钉" : $"{Label}控件";
+    public string StateText => IsBypass ? (Value > 0.5F ? "旁路" : "启用") : ValueText;
+    public double FaderThumbTop => Math.Clamp((1.0 - NormalizedValue) * Math.Max(0.0, ControlHeight - 16.0), 0.0,
+        Math.Max(0.0, ControlHeight - 16.0));
+    public double ToggleThumbLeft => IsActive ? Math.Max(0.0, ControlWidth - 20.0) : 4.0;
+    public double CanvasLeft => IsElement ? X : X - 24.0 - 11.0;
+    public double CanvasTop => IsElement ? Y : Y - 34.0 - 11.0;
     public string ValueText => Value.ToString("0.##", CultureInfo.InvariantCulture);
     public string RangeText => $"{Minimum.ToString("0.##", CultureInfo.InvariantCulture)}..{Maximum.ToString("0.##", CultureInfo.InvariantCulture)}";
     public double KnobAngle
@@ -27,9 +42,21 @@ public sealed record NodeControlSnapshot(string Target, string Id, string Label,
             return -135.0 + normalized * 270.0;
         }
     }
+
+    private double NormalizedValue => !float.IsFinite(Minimum) || !float.IsFinite(Maximum) || Maximum <= Minimum
+        ? 0.0
+        : Math.Clamp((Value - Minimum) / (Maximum - Minimum), 0.0F, 1.0F);
 }
 
-public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, double CanvasY, bool DarkTheme)
+public sealed record CanvasNodeSnapshot(
+    NodeSnapshot Source,
+    double CanvasX,
+    double CanvasY,
+    bool DarkTheme,
+    bool ConnectionSourceCandidate = false,
+    bool ConnectionDestinationCandidate = false,
+    bool ConnectionDestinationValid = false,
+    bool ConnectionDestinationInvalid = false)
 {
     public string InstanceId => Source.InstanceId;
     public string ModuleId => Source.ModuleId;
@@ -42,9 +69,28 @@ public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, dou
     public bool Selected => Source.Selected;
     public bool Unresolved => Source.Unresolved;
     public bool Bypassed => Source.Bypassed;
+    public bool IsConnectionSourceCandidate => ConnectionSourceCandidate;
+    public bool IsConnectionDestinationCandidate => ConnectionDestinationCandidate;
+    public bool IsConnectionDestinationValid => ConnectionDestinationValid;
+    public bool IsConnectionDestinationInvalid => ConnectionDestinationInvalid;
     public NodeSkinSnapshot Skin => Source.Skin;
     public string Diagnostic => Source.Diagnostic;
     public IReadOnlyList<ParameterSnapshot> Parameters => Source.Parameters;
+    public bool HasSkinElements => Skin.HasElements;
+    public IReadOnlyList<NodeSkinElementSnapshot> RuntimeSkinElements => Skin.Elements.Select(element =>
+    {
+        var parameter = Source.Parameters.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, element.Binding, StringComparison.Ordinal));
+        var value = element.IsFootswitch ? (Bypassed ? 1.0F : 0.0F) : parameter?.Value;
+        var minimum = parameter?.Minimum ?? (element.IsFootswitch ? 0.0F : 0.0F);
+        var maximum = parameter?.Maximum ?? (element.IsFootswitch ? 1.0F : 1.0F);
+        return element with
+        {
+            RuntimeValue = value,
+            RuntimeMinimum = minimum,
+            RuntimeMaximum = maximum,
+        };
+    }).ToArray();
     public string LayoutText => Source.LayoutText;
     public string PerformanceText => Source.PerformanceText;
     public string LatencyText => $"{Source.DeclaredLatencySamples} samples · {Source.EstimatedCpuPercent:0.0}% CPU";
@@ -55,19 +101,59 @@ public sealed record CanvasNodeSnapshot(NodeSnapshot Source, double CanvasX, dou
     {
         get
         {
-            var parameters = Parameters.Take(8).ToArray();
-            return parameters.Select((parameter, index) =>
+            var parameters = Parameters.ToArray();
+            var controls = new List<NodeControlSnapshot>();
+            var boundParameters = new HashSet<string>(StringComparer.Ordinal);
+            if (Skin.HasElements)
             {
+                foreach (var element in Skin.Elements.Where(item => item.IsRuntimeInteractive))
+                {
+                    if (element.IsFootswitch)
+                    {
+                        controls.Add(new NodeControlSnapshot(
+                            $"{InstanceId}.__bypass", element.Id,
+                            string.IsNullOrWhiteSpace(element.Label) ? "旁路" : element.Label,
+                            Bypassed ? 1.0F : 0.0F, 0.0F, 1.0F, true, "", element.X, element.Y,
+                            LabelForeground, element.Id, element.Type, element.Detents, element.Width,
+                            element.Height, false, false, true));
+                        continue;
+                    }
+
+                    var parameter = parameters.FirstOrDefault(item =>
+                        string.Equals(item.Id, element.Binding, StringComparison.Ordinal));
+                    if (parameter is null)
+                    {
+                        continue;
+                    }
+                    boundParameters.Add(parameter.Id);
+                    var isToggle = element.IsSwitch || element.Type is "button.momentary" or "button.latching";
+                    controls.Add(new NodeControlSnapshot(
+                        $"{InstanceId}.{parameter.Id}", parameter.Id,
+                        string.IsNullOrWhiteSpace(element.Label) ? FormatParameterName(parameter.Id) : element.Label,
+                        parameter.Value, parameter.Minimum, parameter.Maximum, isToggle,
+                        isToggle ? Skin.ToggleImagePath : Skin.KnobImagePath, element.X, element.Y,
+                        LabelForeground, element.Id, element.Type, element.Detents, element.Width,
+                        element.Height, element.Type == "button.momentary", element.Type == "button.latching"));
+                }
+            }
+
+            foreach (var (parameter, index) in parameters.Take(8).Select((item, itemIndex) => (item, itemIndex)))
+            {
+                if (boundParameters.Contains(parameter.Id))
+                {
+                    continue;
+                }
                 var isToggle = IsToggleParameter(parameter.Id);
                 var imagePath = isToggle ? Skin.ToggleImagePath : Skin.KnobImagePath;
                 var placement = Skin.ParameterPlacements.FirstOrDefault(item =>
                     string.Equals(item.ParameterId, parameter.Id, StringComparison.Ordinal));
                 var x = placement?.X ?? (index + 1.0) * Width / (parameters.Length + 1.0);
                 var y = placement?.Y ?? Math.Clamp(Height * 0.48, 56.0, Height - 58.0);
-                return new NodeControlSnapshot($"{InstanceId}.{parameter.Id}", parameter.Id,
+                controls.Add(new NodeControlSnapshot($"{InstanceId}.{parameter.Id}", parameter.Id,
                     FormatParameterName(parameter.Id), parameter.Value, parameter.Minimum, parameter.Maximum,
-                    isToggle, imagePath, x, y, LabelForeground);
-            }).ToArray();
+                    isToggle, imagePath, x, y, LabelForeground));
+            }
+            return controls;
         }
     }
     public string FootswitchImagePath => Skin.FootswitchImagePath;
@@ -125,6 +211,10 @@ public sealed record CanvasConnectionSnapshot(
     public string DestinationPoint => $"{DestinationX:0.###},{DestinationY:0.###}";
     public double StrokeThickness => Selected ? 5.0 : 3.0;
     public double StrokeOpacity => Selected ? 1.0 : 0.82;
+    public double HaloThickness => Selected ? 11.0 : 8.0;
+    public double HaloOpacity => Selected ? 0.92 : 0.72;
+    public double HitTestThickness => Selected ? 22.0 : 18.0;
+    public double ArrowSize => Selected ? 9.0 : 7.0;
 }
 
 public sealed record ParameterEditorSnapshot(string Target, string Id, float Value, float Minimum, float Maximum)
@@ -195,6 +285,7 @@ public sealed class NodeNavigatorEntry : INotifyPropertyChanged
             selectionChanged(InstanceId, value);
         }
     }
+
 }
 
 public sealed record PresetLibraryEntry(string DisplayName, string SourcePath, bool IsValid, string StatusText)
@@ -431,21 +522,11 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     }
     public string ConnectionCandidateStatusText
     {
-        get
-        {
-            if (snapshot.Nodes.Count < 2) return "至少需要两个效果器节点";
-            if (string.IsNullOrWhiteSpace(ConnectionSourceNodeId) || string.IsNullOrWhiteSpace(ConnectionDestinationNodeId))
-                return "请选择来源和目标节点";
-            if (string.Equals(ConnectionSourceNodeId, ConnectionDestinationNodeId, StringComparison.Ordinal))
-                return "不能连接效果器自身";
-            if (snapshot.Connections.Any(connection =>
-                    string.Equals(connection.SourceInstanceId, ConnectionSourceNodeId, StringComparison.Ordinal) &&
-                    string.Equals(connection.DestinationInstanceId, ConnectionDestinationNodeId, StringComparison.Ordinal)))
-                return "该连接已存在";
-            if (ConnectionCandidateCreatesCycle()) return "该连接会形成环路";
-            return $"可创建：{ConnectionSourceNodeId} → {ConnectionDestinationNodeId}";
-        }
+        get => ConnectionCandidateFeedback.Reason;
     }
+    public ConnectionFeedback ConnectionCandidateFeedback =>
+        EvaluateConnectionCandidate(ConnectionSourceNodeId, ConnectionDestinationNodeId);
+    public ConnectionFeedbackKind ConnectionCandidateFeedbackKind => ConnectionCandidateFeedback.Kind;
     // The chain projection is ordered from the first node through each serial
     // connection, then appends any disconnected nodes deterministically.  The
     // canvas remains the editing surface; this projection makes successful
@@ -603,14 +684,7 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     public string SelectedResourceStateText => SelectedResource?.StatusText ?? "-";
     public bool CanDuplicateSelected => SelectedNode is not null;
     public bool CanDeleteSelected => SelectedNode is not null;
-    public bool CanConnectNodes => snapshot.Nodes.Count >= 2 &&
-        !string.IsNullOrWhiteSpace(ConnectionSourceNodeId) &&
-        !string.IsNullOrWhiteSpace(ConnectionDestinationNodeId) &&
-        !string.Equals(ConnectionSourceNodeId, ConnectionDestinationNodeId, StringComparison.Ordinal) &&
-        !snapshot.Connections.Any(connection =>
-            string.Equals(connection.SourceInstanceId, ConnectionSourceNodeId, StringComparison.Ordinal) &&
-            string.Equals(connection.DestinationInstanceId, ConnectionDestinationNodeId, StringComparison.Ordinal)) &&
-        !ConnectionCandidateCreatesCycle();
+    public bool CanConnectNodes => IsConnectionCandidateValid(ConnectionSourceNodeId, ConnectionDestinationNodeId);
     public bool CanDisconnectNodes => snapshot.Connections.Count > 0;
     public bool CanUndo => backend is not null && backend.CanUndo;
     public bool CanRedo => backend is not null && backend.CanRedo;
@@ -977,7 +1051,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 nameof(NodeNavigatorEntries), nameof(FilteredNodeNavigatorEntries), nameof(NodeNavigatorSummaryText),
                 nameof(BatchSelectedNodeCount), nameof(CanBatchNodes), nameof(CanBatchBypassNodes), nameof(CanBatchEnableNodes),
                 nameof(ConnectionNodeIds), nameof(ConnectionSourceNodeId), nameof(ConnectionDestinationNodeId),
-                nameof(ConnectionCandidateStatusText),
+                nameof(ConnectionCandidateStatusText), nameof(ConnectionCandidateFeedback),
+                nameof(ConnectionCandidateFeedbackKind),
                 nameof(SelectedNode), nameof(SelectedNodeDisplayName), nameof(SelectedParameters), nameof(SelectedPorts),
                 nameof(SelectedPortSummary), nameof(SelectedResource), nameof(SelectedResourceKindText),
                 nameof(SelectedResourcePathText), nameof(SelectedResourceStateText), nameof(IsDirty), nameof(DarkTheme),
@@ -1280,6 +1355,19 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             Status = $"参数 {parameter.Id}: {candidate.ToString("0.###", CultureInfo.InvariantCulture)}";
         }
         return updated;
+    }
+
+    public bool ToggleParameter(string target)
+    {
+        var parameter = FindParameterEditor(target);
+        if (parameter is null || !parameter.IsValidRange)
+        {
+            Status = "参数切换目标无效";
+            return false;
+        }
+        var midpoint = parameter.Minimum + (parameter.Maximum - parameter.Minimum) * 0.5F;
+        var candidate = parameter.Value <= midpoint ? parameter.Maximum : parameter.Minimum;
+        return SetParameter(target, candidate);
     }
 
     private ParameterEditorSnapshot? FindParameterEditor(string target)
@@ -1614,7 +1702,8 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         RebuildCanvasProjections();
         OnPropertiesChanged(nameof(CanvasConnections), nameof(SelectedConnection), nameof(ConnectionSelectionText),
             nameof(ConnectionSourceNodeId), nameof(ConnectionDestinationNodeId), nameof(CanConnectNodes),
-            nameof(ConnectionCandidateStatusText));
+            nameof(ConnectionCandidateStatusText), nameof(ConnectionCandidateFeedback),
+            nameof(ConnectionCandidateFeedbackKind), nameof(CanvasNodes));
         Status = $"已选择连接：{sourceInstanceId} → {destinationInstanceId}";
         return true;
     }
@@ -1644,7 +1733,10 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
         field = value;
-        OnPropertiesChanged(propertyName, nameof(CanConnectNodes), nameof(ConnectionCandidateStatusText));
+        RebuildCanvasProjections();
+        OnPropertiesChanged(propertyName, nameof(CanvasNodes), nameof(CanConnectNodes),
+            nameof(ConnectionCandidateStatusText), nameof(ConnectionCandidateFeedback),
+            nameof(ConnectionCandidateFeedbackKind));
     }
 
     private void NormalizeConnectionCandidate()
@@ -1661,9 +1753,74 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    private bool IsConnectionCandidateValid(string? sourceInstanceId, string? destinationInstanceId)
+    {
+        return EvaluateConnectionCandidate(sourceInstanceId, destinationInstanceId).IsAllowed;
+    }
+
+    private ConnectionFeedback EvaluateConnectionCandidate(
+        string? sourceInstanceId, string? destinationInstanceId)
+    {
+        if (snapshot.Nodes.Count < 2 || string.IsNullOrWhiteSpace(sourceInstanceId) ||
+            string.IsNullOrWhiteSpace(destinationInstanceId) ||
+            string.Equals(sourceInstanceId, destinationInstanceId, StringComparison.Ordinal))
+        {
+            return snapshot.Nodes.Count < 2
+                ? ConnectionFeedback.Neutral("至少需要两个效果器节点")
+                : string.IsNullOrWhiteSpace(sourceInstanceId) || string.IsNullOrWhiteSpace(destinationInstanceId)
+                    ? ConnectionFeedback.Neutral("请选择来源和目标节点")
+                    : ConnectionFeedback.Blocked("不能连接效果器自身");
+        }
+
+        var source = snapshot.Nodes.FirstOrDefault(node =>
+            string.Equals(node.InstanceId, sourceInstanceId, StringComparison.Ordinal));
+        var destination = snapshot.Nodes.FirstOrDefault(node =>
+            string.Equals(node.InstanceId, destinationInstanceId, StringComparison.Ordinal));
+        if (source is null || destination is null)
+        {
+            return ConnectionFeedback.Blocked("来源或目标节点已不存在，请重新选择");
+        }
+        if (snapshot.Connections.Any(connection =>
+                string.Equals(connection.SourceInstanceId, sourceInstanceId, StringComparison.Ordinal) &&
+                string.Equals(connection.DestinationInstanceId, destinationInstanceId, StringComparison.Ordinal)))
+        {
+            return ConnectionFeedback.Blocked("该连接已存在");
+        }
+        if (ConnectionCandidateCreatesCycle(sourceInstanceId, destinationInstanceId))
+        {
+            return ConnectionFeedback.Blocked("该连接会形成环路");
+        }
+
+        var sourcePort = source.Ports.FirstOrDefault(port => port.IsOutput);
+        if (sourcePort is null)
+        {
+            return ConnectionFeedback.Blocked($"来源节点 {source.InstanceId} 没有可用输出端口");
+        }
+        var destinationPort = destination.Ports.FirstOrDefault(port => !port.IsOutput);
+        if (destinationPort is null)
+        {
+            return ConnectionFeedback.Blocked($"目标节点 {destination.InstanceId} 没有可用输入端口");
+        }
+        if (sourcePort.MaxChannels == 0U || destinationPort.MaxChannels == 0U)
+        {
+            return ConnectionFeedback.Blocked("来源或目标端口没有可用音频通道");
+        }
+
+        return ConnectionFeedback.Allowed(
+            $"可创建：{source.InstanceId}.{sourcePort.Id} ({ChannelSummary(sourcePort.MaxChannels)}) → " +
+            $"{destination.InstanceId}.{destinationPort.Id} ({ChannelSummary(destinationPort.MaxChannels)})");
+    }
+
+    private static string ChannelSummary(uint maxChannels) => maxChannels == 1U ? "mono" : $"{maxChannels}ch";
+
     private bool ConnectionCandidateCreatesCycle()
     {
-        if (string.IsNullOrWhiteSpace(ConnectionSourceNodeId) || string.IsNullOrWhiteSpace(ConnectionDestinationNodeId))
+        return ConnectionCandidateCreatesCycle(ConnectionSourceNodeId, ConnectionDestinationNodeId);
+    }
+
+    private bool ConnectionCandidateCreatesCycle(string? sourceInstanceId, string? destinationInstanceId)
+    {
+        if (string.IsNullOrWhiteSpace(sourceInstanceId) || string.IsNullOrWhiteSpace(destinationInstanceId))
         {
             return false;
         }
@@ -1674,12 +1831,12 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
                 StringComparer.Ordinal);
         var pending = new Stack<string>();
         var visited = new HashSet<string>(StringComparer.Ordinal);
-        pending.Push(ConnectionDestinationNodeId);
+        pending.Push(destinationInstanceId);
         while (pending.Count > 0)
         {
             var current = pending.Pop();
             if (!visited.Add(current)) continue;
-            if (string.Equals(current, ConnectionSourceNodeId, StringComparison.Ordinal)) return true;
+            if (string.Equals(current, sourceInstanceId, StringComparison.Ordinal)) return true;
             if (successors.TryGetValue(current, out var next))
             {
                 foreach (var destination in next) pending.Push(destination);
@@ -2373,7 +2530,18 @@ public sealed class RigEditorViewModel : INotifyPropertyChanged, IDisposable
     {
         var scale = Math.Max(snapshot.DpiScale, 1.0);
         var projectedNodes = snapshot.Nodes.Select(node =>
-            new CanvasNodeSnapshot(node, node.LayoutX / scale, node.LayoutY / scale, snapshot.DarkTheme)).ToArray();
+        {
+            var isSourceCandidate = string.Equals(connectionSourceNodeId, node.InstanceId, StringComparison.Ordinal);
+            var isDestinationCandidate = string.Equals(connectionDestinationNodeId, node.InstanceId, StringComparison.Ordinal);
+            var isSelectedConnectionEndpoint = isDestinationCandidate &&
+                string.Equals(selectedConnectionSource, connectionSourceNodeId, StringComparison.Ordinal) &&
+                string.Equals(selectedConnectionDestination, connectionDestinationNodeId, StringComparison.Ordinal);
+            var destinationValid = isDestinationCandidate &&
+                (IsConnectionCandidateValid(connectionSourceNodeId, node.InstanceId) || isSelectedConnectionEndpoint);
+            return new CanvasNodeSnapshot(node, node.LayoutX / scale, node.LayoutY / scale, snapshot.DarkTheme,
+                isSourceCandidate, isDestinationCandidate, destinationValid,
+                isDestinationCandidate && !destinationValid && !isSelectedConnectionEndpoint);
+        }).ToArray();
         canvasNodes = projectedNodes;
         canvasConnections = snapshot.Connections.Select(connection => new CanvasConnectionSnapshot(
             connection.SourceInstanceId, connection.DestinationInstanceId,

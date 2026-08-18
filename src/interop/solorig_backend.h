@@ -156,6 +156,23 @@ typedef struct SoloRigNodeSkinParameterLayoutView {
     double y;
 } SoloRigNodeSkinParameterLayoutView;
 
+// Additive v2 pedal skin element view. Strings are owned by the snapshot and
+// remain valid until solorig_snapshot_destroy(snapshot).
+typedef struct SoloRigNodeSkinElementView {
+    const char* id_utf8;
+    const char* type_utf8;
+    const char* binding_utf8;
+    double x;
+    double y;
+    double width;
+    double height;
+    double rotation;
+    int32_t detents;
+    int32_t z_index;
+    const char* label_utf8;
+    const char* style_utf8;
+} SoloRigNodeSkinElementView;
+
 typedef struct SoloRigNodeBatchEntry {
     const char* instance_id_utf8;
 } SoloRigNodeBatchEntry;
@@ -377,6 +394,15 @@ SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_skin_parameter_layout(
     uint32_t node_index,
     uint32_t layout_index,
     SoloRigNodeSkinParameterLayoutView* out_layout);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_skin_element_count(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t* out_count);
+SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_node_skin_element(
+    const SoloRigSnapshot* snapshot,
+    uint32_t node_index,
+    uint32_t element_index,
+    SoloRigNodeSkinElementView* out_element);
 SOLO_RIG_BACKEND_API SoloRigStatus solorig_snapshot_parameter(
     const SoloRigSnapshot* snapshot,
     uint32_t node_index,

@@ -36,6 +36,7 @@ public sealed record ModuleAuthoringIssue(
     object? TargetObject = null)
 {
     public string SeverityText => IsWarning ? "警告" : "错误";
+    public bool IsError => !IsWarning;
     public string LocationText => string.IsNullOrWhiteSpace(TargetId) ? TargetDisplayName(Target) :
         $"{TargetDisplayName(Target)} · {TargetId}";
 
@@ -180,6 +181,12 @@ public sealed class PedalSkinDraft : ModuleAuthoringDraft
     public PedalSkinDraft()
     {
         ParameterPlacements.CollectionChanged += ParameterPlacementsChanged;
+        Elements.CollectionChanged += ElementsChanged;
+        Elements.Add(new PedalSkinElementDraft("default-input", "connector.ts", "input", 24.0, 78.0));
+        Elements.Add(new PedalSkinElementDraft("default-output", "connector.ts", "output", 172.0, 78.0));
+        Elements.Add(new PedalSkinElementDraft("default-dc", "connector.dc", "", 24.0, 28.0));
+        Elements.Add(new PedalSkinElementDraft("default-led", "indicator.led", "", 172.0, 28.0));
+        Elements.Add(new PedalSkinElementDraft("default-footswitch", "footswitch", "", 98.0, 126.0));
     }
 
     public string Id { get => id; set => Set(ref id, value); }
@@ -270,6 +277,7 @@ public sealed class PedalSkinDraft : ModuleAuthoringDraft
         }
     }
     public ObservableCollection<PedalSkinParameterPlacementDraft> ParameterPlacements { get; } = [];
+    public ObservableCollection<PedalSkinElementDraft> Elements { get; } = [];
     public string PreviewBackground => IsPreviewColor(Background) ? Background : "#26313C";
     public string PreviewLabelColor => IsPreviewColor(LabelColor) ? LabelColor : "#EEF3F8";
     public double PreviewFootswitchLeft =>
@@ -297,6 +305,27 @@ public sealed class PedalSkinDraft : ModuleAuthoringDraft
     }
 
     private void ParameterPlacementChanged() => NotifyChanged();
+
+    private void ElementsChanged(object? sender, NotifyCollectionChangedEventArgs args)
+    {
+        if (args.OldItems is not null)
+        {
+            foreach (PedalSkinElementDraft element in args.OldItems)
+            {
+                element.Changed -= ElementChanged;
+            }
+        }
+        if (args.NewItems is not null)
+        {
+            foreach (PedalSkinElementDraft element in args.NewItems)
+            {
+                element.Changed += ElementChanged;
+            }
+        }
+        NotifyChanged();
+    }
+
+    private void ElementChanged() => NotifyChanged();
 
     private static bool IsPreviewColor(string value) =>
         !string.IsNullOrWhiteSpace(value) && value.Length == 7 && value[0] == '#' &&
@@ -385,17 +414,56 @@ public sealed class AnalogPinDraft : ModuleAuthoringDraft
     private string id;
     private string displayName;
     private string node;
+    private double anchorX;
+    private double anchorY;
+    private string side;
+    private string electricalRole;
 
-    public AnalogPinDraft(string id, string displayName, string node)
+    public AnalogPinDraft(
+        string id,
+        string displayName,
+        string node,
+        double anchorX = 0.0,
+        double anchorY = 0.0,
+        string side = "left",
+        string electricalRole = "passive")
     {
         this.id = id;
         this.displayName = displayName;
         this.node = node;
+        this.anchorX = anchorX;
+        this.anchorY = anchorY;
+        this.side = side;
+        this.electricalRole = electricalRole;
     }
 
     public string Id { get => id; set => Set(ref id, value); }
     public string DisplayName { get => displayName; set => Set(ref displayName, value); }
     public string Node { get => node; set => Set(ref node, value); }
+    public double AnchorX => anchorX;
+    public double AnchorY => anchorY;
+    public double VisualLeft => anchorX - 6.0;
+    public double VisualTop => anchorY - 6.0;
+    public string Side => side;
+    public string ElectricalRole => electricalRole;
+
+    internal void ApplyDescriptor(AnalogPinDescriptor descriptor)
+    {
+        id = descriptor.Id;
+        displayName = descriptor.DisplayName;
+        anchorX = descriptor.AnchorX;
+        anchorY = descriptor.AnchorY;
+        side = descriptor.Side;
+        electricalRole = descriptor.ElectricalRole;
+        NotifyPropertyChanged(nameof(Id));
+        NotifyPropertyChanged(nameof(DisplayName));
+        NotifyPropertyChanged(nameof(AnchorX));
+        NotifyPropertyChanged(nameof(AnchorY));
+        NotifyPropertyChanged(nameof(VisualLeft));
+        NotifyPropertyChanged(nameof(VisualTop));
+        NotifyPropertyChanged(nameof(Side));
+        NotifyPropertyChanged(nameof(ElectricalRole));
+    }
 }
 
 public sealed class AnalogJsonFieldDraft : ModuleAuthoringDraft
@@ -723,6 +791,7 @@ public sealed class AnalogComponentDraft : ModuleAuthoringDraft
                 Properties.Add(property);
             }
         }
+        RefreshPinDescriptors();
         RefreshPropertyDescriptors();
     }
 
@@ -739,9 +808,21 @@ public sealed class AnalogComponentDraft : ModuleAuthoringDraft
             }
             ApplyDescriptor(value, previousDescriptor);
             NotifyPropertyChanged(nameof(Descriptor));
+            NotifyPropertyChanged(nameof(SelectedDescriptor));
         }
     }
     public AnalogComponentDescriptor Descriptor => AnalogComponentCatalog.Get(Type);
+    public AnalogComponentDescriptor SelectedDescriptor
+    {
+        get => Descriptor;
+        set
+        {
+            if (value is not null)
+            {
+                Type = value.Type;
+            }
+        }
+    }
     public ObservableCollection<AnalogPinDraft> Pins { get; } = [];
     public ObservableCollection<AnalogComponentPropertyDraft> Properties { get; } = [];
     public double CanvasX { get => canvasX; set => Set(ref canvasX, value); }
@@ -859,8 +940,7 @@ public sealed class AnalogComponentDraft : ModuleAuthoringDraft
         }
         for (var index = 0; index < descriptor.Pins.Count; ++index)
         {
-            Pins[index].Id = descriptor.Pins[index].Id;
-            Pins[index].DisplayName = descriptor.Pins[index].DisplayName;
+            Pins[index].ApplyDescriptor(descriptor.Pins[index]);
         }
         while (Pins.Count > descriptor.Pins.Count)
         {
@@ -886,6 +966,18 @@ public sealed class AnalogComponentDraft : ModuleAuthoringDraft
         RefreshPropertyDescriptors();
         NotifyPropertyChanged(nameof(PinA));
         NotifyPropertyChanged(nameof(PinB));
+    }
+
+    private void RefreshPinDescriptors()
+    {
+        if (!AnalogComponentCatalog.TryGet(Type, out var descriptor))
+        {
+            return;
+        }
+        for (var index = 0; index < Math.Min(Pins.Count, descriptor.Pins.Count); ++index)
+        {
+            Pins[index].ApplyDescriptor(descriptor.Pins[index]);
+        }
     }
 
     private void SetPinNode(int index, string value)
@@ -1064,6 +1156,56 @@ public sealed class AnalogParameterBindingDraft : ModuleAuthoringDraft
     public double SmoothingSeconds { get => smoothingSeconds; set => Set(ref smoothingSeconds, value); }
 }
 
+public sealed class AnalogWirePointDraft : ModuleAuthoringDraft
+{
+    private double x;
+    private double y;
+
+    public AnalogWirePointDraft(double x, double y)
+    {
+        this.x = x;
+        this.y = y;
+    }
+
+    public double X { get => x; set => Set(ref x, value); }
+    public double Y { get => y; set => Set(ref y, value); }
+}
+
+public sealed class AnalogWireRouteDraft : ModuleAuthoringDraft
+{
+    private string node;
+
+    public AnalogWireRouteDraft(string node)
+    {
+        this.node = node;
+        Points.CollectionChanged += PointsChanged;
+    }
+
+    public string Node { get => node; set => Set(ref node, value); }
+    public ObservableCollection<AnalogWirePointDraft> Points { get; } = [];
+
+    private void PointsChanged(object? sender, NotifyCollectionChangedEventArgs args)
+    {
+        if (args.OldItems is not null)
+        {
+            foreach (AnalogWirePointDraft point in args.OldItems)
+            {
+                point.Changed -= PointChanged;
+            }
+        }
+        if (args.NewItems is not null)
+        {
+            foreach (AnalogWirePointDraft point in args.NewItems)
+            {
+                point.Changed += PointChanged;
+            }
+        }
+        NotifyChanged();
+    }
+
+    private void PointChanged() => NotifyChanged();
+}
+
 public sealed class AnalogCircuitDraft : ModuleAuthoringDraft
 {
     private string referenceGround = "0";
@@ -1081,6 +1223,7 @@ public sealed class AnalogCircuitDraft : ModuleAuthoringDraft
         Supplies.CollectionChanged += DraftsChanged;
         ParameterBindings.CollectionChanged += DraftsChanged;
         Components.CollectionChanged += DraftsChanged;
+        WireRoutes.CollectionChanged += DraftsChanged;
         RootProperties.CollectionChanged += DraftsChanged;
         SolverProperties.CollectionChanged += DraftsChanged;
         ConvergenceProperties.CollectionChanged += DraftsChanged;
@@ -1123,6 +1266,7 @@ public sealed class AnalogCircuitDraft : ModuleAuthoringDraft
     public ObservableCollection<AnalogSupplyDraft> Supplies { get; } = [];
     public ObservableCollection<AnalogParameterBindingDraft> ParameterBindings { get; } = [];
     public ObservableCollection<AnalogComponentDraft> Components { get; } = [];
+    public ObservableCollection<AnalogWireRouteDraft> WireRoutes { get; } = [];
     public ObservableCollection<AnalogComponentPropertyDraft> RootProperties { get; } = [];
     public ObservableCollection<AnalogComponentPropertyDraft> SolverProperties { get; } = [];
     public ObservableCollection<AnalogComponentPropertyDraft> ConvergenceProperties { get; } = [];
@@ -1252,6 +1396,11 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
     private IReadOnlyList<string> validationMessages = [];
     private IReadOnlyList<ModuleAuthoringIssue> validationIssues = [];
     private string? nativeValidationMessage;
+    private string whiteboxGraphStatus = "尚未运行原生白盒验证";
+    private string whiteboxRuntimeStatus = "尚未运行原生白盒验证";
+    private string whiteboxEvidenceStatus = "尚未读取白盒证据状态";
+    private string whiteboxDiagnostic = "校验项目后读取当前 generic white-box 边界";
+    private string whiteboxRealtimeStatus = "尚未读取实时线程契约";
     private string auditionSummary = "尚未运行离线试听";
     private string auditionDetails = "";
     private int auditionStimulusIndex;
@@ -1297,20 +1446,25 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
 
     public static IReadOnlyList<ModuleAuthoringKindOption> KindOptions { get; } =
     [
-        new(ModuleAuthoringKind.DigitalAlgorithm, "数字算法", "使用受支持的数字处理操作创建模块"),
-        new(ModuleAuthoringKind.AnalogCircuit, "模拟电路", "使用 circuit.json v2 白盒网表创建模块"),
-        new(ModuleAuthoringKind.NeuralAmpModel, "NAM / NAM A2", "将 NAM 模型封装为可安装模块"),
+        new(ModuleAuthoringKind.DigitalAlgorithm, "数字效果器", "使用受支持的数字处理操作创建模块"),
+        new(ModuleAuthoringKind.AnalogCircuit, "白盒模拟电路", "使用 circuit.json v2 元件级网表创建模块"),
+        new(ModuleAuthoringKind.NeuralAmpModel, "NAM / NAM A2", "将 NAM 或 NAM A2 模型封装为可安装模块"),
         new(ModuleAuthoringKind.ImpulseResponse, "IR 箱体", "将 WAV 脉冲响应封装为卷积模块"),
     ];
     public static IReadOnlyList<ModuleAuthoringTemplateOption> TemplateOptions { get; } =
     [
-        new("digital-gain", ModuleAuthoringKind.DigitalAlgorithm, "数字增益", "单参数线性增益起点"),
-        new("digital-delay", ModuleAuthoringKind.DigitalAlgorithm, "数字延迟", "时间、反馈与干湿比完整延迟链"),
-        new("analog-divider", ModuleAuthoringKind.AnalogCircuit, "模拟分压器", "双电阻 Circuit v2 白盒起点"),
-        new("analog-diode-clipper", ModuleAuthoringKind.AnalogCircuit, "二极管削波", "电阻与 Shockley 二极管削波起点"),
-        new("nam-wrapper", ModuleAuthoringKind.NeuralAmpModel, "NAM 模型封装", "导入 NAM 或 NAM A2 模型"),
-        new("ir-cabinet", ModuleAuthoringKind.ImpulseResponse, "IR 箱体封装", "导入 WAV 脉冲响应"),
+        new("digital-blank", ModuleAuthoringKind.DigitalAlgorithm, "空白数字效果器", "仅保留直通操作，从空白算法结构开始"),
+        new("digital-gain", ModuleAuthoringKind.DigitalAlgorithm, "示例：数字增益", "单参数线性增益示例"),
+        new("digital-delay", ModuleAuthoringKind.DigitalAlgorithm, "示例：数字延迟", "时间、反馈与干湿比延迟链示例"),
+        new("analog-blank", ModuleAuthoringKind.AnalogCircuit, "空白白盒电路", "仅保留输入、输出和参考地，从元件级电路开始"),
+        new("analog-divider", ModuleAuthoringKind.AnalogCircuit, "示例：模拟分压器", "双电阻 Circuit v2 白盒示例"),
+        new("analog-diode-clipper", ModuleAuthoringKind.AnalogCircuit, "示例：二极管削波", "电阻与 Shockley 二极管削波示例"),
+        new("nam-wrapper", ModuleAuthoringKind.NeuralAmpModel, "空白 NAM 模块", "导入 NAM 或 NAM A2 模型"),
+        new("ir-cabinet", ModuleAuthoringKind.ImpulseResponse, "空白 IR 箱体", "导入 WAV 脉冲响应"),
     ];
+
+    public static IReadOnlyList<ModuleAuthoringTemplateOption> TemplatesForKind(ModuleAuthoringKind projectKind) =>
+        TemplateOptions.Where(option => option.Kind == projectKind).ToArray();
     public static IReadOnlyList<string> PortDirections { get; } = ["input", "output"];
     public static IReadOnlyList<string> ControlKinds { get; } = ["knob", "toggle", "button", "footswitch"];
     public static IReadOnlyList<string> DigitalOperationTypes { get; } =
@@ -1360,6 +1514,13 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
     public string Status { get => status; private set => SetField(ref status, value); }
     public IReadOnlyList<string> ValidationMessages => validationMessages;
     public IReadOnlyList<ModuleAuthoringIssue> ValidationIssues => validationIssues;
+    public string WhiteboxGraphStatus => whiteboxGraphStatus;
+    public string WhiteboxRuntimeStatus => whiteboxRuntimeStatus;
+    public string WhiteboxEvidenceStatus => whiteboxEvidenceStatus;
+    public string WhiteboxDiagnostic => whiteboxDiagnostic;
+    public string WhiteboxRealtimeStatus => whiteboxRealtimeStatus;
+    public bool HasValidationIssues => validationIssues.Count > 0;
+    public bool HasNoValidationIssues => validationIssues.Count == 0;
     public bool IsValid => validationIssues.All(issue => issue.IsWarning);
     public string ValidationSummary
     {
@@ -1531,6 +1692,11 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             analogStructuredMode = projectKind == ModuleAuthoringKind.AnalogCircuit;
             ApplyAnalogCircuit(DefaultAnalogCircuit());
             nativeValidationMessage = null;
+            whiteboxGraphStatus = "尚未运行原生白盒验证";
+            whiteboxRuntimeStatus = "尚未运行原生白盒验证";
+            whiteboxEvidenceStatus = "尚未读取白盒证据状态";
+            whiteboxDiagnostic = "校验项目后读取当前 generic white-box 边界";
+            whiteboxRealtimeStatus = "尚未读取实时线程契约";
             logicFile = DefaultLogicFile(projectKind);
             logicSource = DefaultLogicSource(projectKind);
             ReplaceDrafts(Ports,
@@ -1572,6 +1738,14 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
         {
             switch (template.Id)
             {
+                case "digital-blank":
+                    moduleId = "org.example.solorig.new-digital-effect";
+                    displayName = "New Digital Effect";
+                    description = "Blank digital effect with a pass-through operation";
+                    algorithmId = "solorig.custom";
+                    ReplaceDrafts(Parameters, []);
+                    ReplaceDrafts(DigitalOperations, [new DigitalOperationDraft("bypass")]);
+                    break;
                 case "digital-delay":
                     moduleId = "org.example.solorig.new-delay";
                     displayName = "New Digital Delay";
@@ -1589,6 +1763,12 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                         new DigitalOperationDraft("feedback", "feedback"),
                         new DigitalOperationDraft("mix", "mix"),
                     ]);
+                    break;
+                case "analog-blank":
+                    moduleId = "org.example.solorig.new-analog-effect";
+                    displayName = "New Analog Effect";
+                    description = "Blank component-level Circuit v2 effect";
+                    ReplaceDrafts(AnalogCircuit.Components, []);
                     break;
                 case "analog-divider":
                     moduleId = "org.example.solorig.new-divider";
@@ -1612,7 +1792,7 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                     moduleId = "org.example.solorig.new-ir-cabinet";
                     displayName = "New IR Cabinet";
                     break;
-                default:
+                case "digital-gain":
                     moduleId = "org.example.solorig.new-gain";
                     displayName = "New Digital Gain";
                     break;
@@ -1847,6 +2027,19 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             Math.Clamp(54.0 + index * 62.0, 26.0, Math.Max(26.0, Skin.Width - 26.0)),
             Math.Clamp(Skin.Height * 0.48, 42.0, Math.Max(42.0, Skin.Height - 58.0)));
         Skin.ParameterPlacements.Add(placement);
+        var controlType = parameterId == string.Empty ? "knob.continuous" :
+            Parameters.FirstOrDefault(parameter => string.Equals(parameter.Id, parameterId, StringComparison.Ordinal))?.ControlKind switch
+            {
+                "toggle" => "switch.toggle",
+                "button" => "button.momentary",
+                "footswitch" => "footswitch",
+                _ => "knob.continuous",
+            };
+        if (Skin.Elements.All(element => !string.Equals(element.Binding, parameterId, StringComparison.Ordinal)))
+        {
+            Skin.Elements.Add(new PedalSkinElementDraft(
+                $"parameter-{parameterId}", controlType, parameterId, placement.X, placement.Y));
+        }
         return placement;
     }
 
@@ -1987,6 +2180,27 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
         return true;
     }
 
+    public AnalogWireRouteDraft GetOrCreateAnalogWireRoute(string node)
+    {
+        var normalized = node.Trim();
+        var existing = AnalogCircuit.WireRoutes.FirstOrDefault(route =>
+            string.Equals(route.Node, normalized, StringComparison.Ordinal));
+        if (existing is not null)
+        {
+            return existing;
+        }
+        var route = new AnalogWireRouteDraft(normalized);
+        AnalogCircuit.WireRoutes.Add(route);
+        return route;
+    }
+
+    public bool RemoveAnalogWireRoute(string node)
+    {
+        var route = AnalogCircuit.WireRoutes.FirstOrDefault(candidate =>
+            string.Equals(candidate.Node, node.Trim(), StringComparison.Ordinal));
+        return route is not null && AnalogCircuit.WireRoutes.Remove(route);
+    }
+
     private string NextAnalogNodeId() => UniqueId("node", AnalogCircuit.Nodes
         .Concat(AnalogCircuit.Components.SelectMany(component => component.Pins.Select(pin => pin.Node)))
         .Concat(AnalogCircuit.Ports.Select(port => port.Node))
@@ -2014,6 +2228,18 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             {
                 supply.NegativeNode = replacement;
             }
+        }
+        var previousRoute = AnalogCircuit.WireRoutes.FirstOrDefault(route =>
+            string.Equals(route.Node, previous, StringComparison.Ordinal));
+        var replacementRoute = AnalogCircuit.WireRoutes.FirstOrDefault(route =>
+            string.Equals(route.Node, replacement, StringComparison.Ordinal));
+        if (previousRoute is not null && replacementRoute is null)
+        {
+            previousRoute.Node = replacement;
+        }
+        else if (previousRoute is not null && replacementRoute is not null)
+        {
+            AnalogCircuit.WireRoutes.Remove(previousRoute);
         }
     }
 
@@ -2104,6 +2330,20 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
         nativeValidationMessage = valid ? null : message;
         RefreshValidation();
         Status = valid ? "原生模块加载器校验通过" : $"原生校验失败：{message}";
+    }
+
+    public void SetWhiteboxRuntimeStatus(WhiteboxStatusSnapshot whitebox,
+        RealtimeContractSnapshot realtime)
+    {
+        whiteboxGraphStatus = whitebox.GraphStatus;
+        whiteboxRuntimeStatus = whitebox.RuntimeStatus;
+        whiteboxEvidenceStatus = whitebox.EvidenceStatus;
+        whiteboxDiagnostic = whitebox.Diagnostic;
+        whiteboxRealtimeStatus = realtime.IsRealtimeSafe
+            ? $"实时线程契约：已满足 · {realtime.SampleFormatText} · 最大过采样 {realtime.MaximumOversampling}x"
+            : "实时线程契约：未满足或尚未准备具体运行时";
+        OnPropertiesChanged(nameof(WhiteboxGraphStatus), nameof(WhiteboxRuntimeStatus),
+            nameof(WhiteboxEvidenceStatus), nameof(WhiteboxDiagnostic), nameof(WhiteboxRealtimeStatus));
     }
 
     public void SetAuditionResult(ModuleAuditionSnapshot result)
@@ -2428,7 +2668,7 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             if (AnalogCircuit.Components.Count == 0)
             {
                 AddIssue("模拟电路至少需要一个元件", ModuleAuthoringIssueTarget.AnalogCircuit,
-                    fieldId: "components");
+                    fieldId: "components", warning: true);
             }
             foreach (var component in AnalogCircuit.Components)
             {
@@ -2554,6 +2794,62 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                 (Component: component, Pin: pin, Node: pin.Node.Trim())))
                 .Where(entry => !string.IsNullOrWhiteSpace(entry.Node))
                 .ToArray();
+            foreach (var controlOnlyNode in pinNodes.GroupBy(entry => entry.Node, StringComparer.Ordinal)
+                         .Where(group => group.Count() > 1 &&
+                                         group.All(entry => string.Equals(entry.Pin.ElectricalRole, "control",
+                                             StringComparison.Ordinal))))
+            {
+                var entry = controlOnlyNode.First();
+                AddIssue($"网络 {controlOnlyNode.Key} 仅连接控制引脚，可能缺少信号端或参考节点",
+                    ModuleAuthoringIssueTarget.AnalogPin, entry.Component.Id, entry.Pin.Id,
+                    warning: true, targetObject: entry.Component);
+            }
+            var declaredNodes = AnalogCircuit.Nodes
+                .Where(node => !string.IsNullOrWhiteSpace(node))
+                .Select(node => node.Trim())
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var entry in pinNodes.Where(entry => !declaredNodes.Contains(entry.Node)))
+            {
+                AddIssue($"引脚 {entry.Component.Id}.{entry.Pin.Id} 使用了未声明网络 {entry.Node}",
+                    ModuleAuthoringIssueTarget.AnalogPin, entry.Component.Id, entry.Pin.Id,
+                    warning: true, targetObject: entry.Component);
+            }
+            foreach (var duplicateNode in AnalogCircuit.Nodes.Where(node => !string.IsNullOrWhiteSpace(node))
+                         .GroupBy(node => node.Trim(), StringComparer.Ordinal).Where(group => group.Count() > 1))
+            {
+                AddIssue($"网络声明重复：{duplicateNode.Key}", ModuleAuthoringIssueTarget.AnalogCircuit,
+                    duplicateNode.Key, "nodes", warning: true);
+            }
+            foreach (var component in AnalogCircuit.Components.Where(component => component.Pins.Count == 2))
+            {
+                var firstNode = component.Pins[0].Node.Trim();
+                var secondNode = component.Pins[1].Node.Trim();
+                if (!string.IsNullOrWhiteSpace(firstNode) && string.Equals(firstNode, secondNode, StringComparison.Ordinal))
+                {
+                    foreach (var pin in component.Pins)
+                    {
+                        AddIssue($"元件 {component.Id} 的两个引脚都连接到 {firstNode}，可能形成短接",
+                            ModuleAuthoringIssueTarget.AnalogPin, component.Id, pin.Id,
+                            warning: true, targetObject: component);
+                    }
+                }
+            }
+            foreach (var component in AnalogCircuit.Components.Where(component => component.Pins.Count > 2))
+            {
+                foreach (var sharedNode in component.Pins
+                             .Where(pin => !string.IsNullOrWhiteSpace(pin.Node))
+                             .GroupBy(pin => pin.Node.Trim(), StringComparer.Ordinal)
+                             .Where(group => group.Count() > 1))
+                {
+                    var pinNames = string.Join("、", sharedNode.Select(pin => pin.DisplayName));
+                    foreach (var pin in sharedNode)
+                    {
+                        AddIssue($"元件 {component.Id} 的引脚 {pinNames} 共用网络 {sharedNode.Key}，可能形成角色短接",
+                            ModuleAuthoringIssueTarget.AnalogPin, component.Id, pin.Id,
+                            warning: true, targetObject: component);
+                    }
+                }
+            }
             foreach (var group in pinNodes.GroupBy(entry => entry.Node, StringComparer.Ordinal)
                          .Where(group => group.Count() == 1 && !connectedNodes.Contains(group.Key)))
             {
@@ -2574,7 +2870,8 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                                                      supply.PositiveNode.Trim() != ground))
             {
                 AddIssue($"参考地节点 {ground} 未连接到任何元件或电源",
-                    ModuleAuthoringIssueTarget.AnalogCircuit, ground, "referenceGround");
+                    ModuleAuthoringIssueTarget.AnalogCircuit, ground, "referenceGround",
+                    warning: AnalogCircuit.Components.Count == 0);
             }
             var usedNodes = pinNodes.Select(entry => entry.Node)
                 .Concat(AnalogCircuit.Ports.Select(port => port.Node.Trim()))
@@ -2588,6 +2885,30 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             {
                 AddIssue($"声明节点 {node} 未被端口、电源或元件使用，运行时可能形成奇异矩阵",
                     ModuleAuthoringIssueTarget.AnalogCircuit, node.Trim(), "nodes", warning: true);
+            }
+            foreach (var duplicateRoute in AnalogCircuit.WireRoutes.Where(route => !string.IsNullOrWhiteSpace(route.Node))
+                         .GroupBy(route => route.Node.Trim(), StringComparer.Ordinal).Where(group => group.Count() > 1))
+            {
+                AddIssue($"网络 {duplicateRoute.Key} 存在重复人工路由",
+                    ModuleAuthoringIssueTarget.AnalogCircuit, duplicateRoute.Key, "wireRoutes",
+                    warning: true, targetObject: duplicateRoute.First());
+            }
+            foreach (var route in AnalogCircuit.WireRoutes)
+            {
+                var routeNode = route.Node.Trim();
+                if (string.IsNullOrWhiteSpace(routeNode) || !pinNodes.Any(entry => entry.Node == routeNode))
+                {
+                    AddIssue($"人工路由 {routeNode} 没有对应的元件网络",
+                        ModuleAuthoringIssueTarget.AnalogCircuit, routeNode, "wireRoutes",
+                        warning: true, targetObject: route);
+                }
+                foreach (var point in route.Points.Where(point =>
+                             !double.IsFinite(point.X) || !double.IsFinite(point.Y) || point.X < 0.0 || point.Y < 0.0))
+                {
+                    AddIssue($"网络 {routeNode} 的折点坐标无效：{point.X:0.##},{point.Y:0.##}",
+                        ModuleAuthoringIssueTarget.AnalogCircuit, routeNode, "wireRoutes",
+                        warning: true, targetObject: route);
+                }
             }
             ValidateJsonProperties(message => AddIssue(message, ModuleAuthoringIssueTarget.AnalogCircuit,
                 fieldId: "root"), AnalogCircuit.RootProperties, "电路根对象");
@@ -2690,6 +3011,46 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                     errors.Add($"外观参数 {placement.ParameterId} 的坐标超出踏板范围");
                 }
             }
+            foreach (var duplicate in Skin.Elements
+                         .Where(element => !string.IsNullOrWhiteSpace(element.Id))
+                         .GroupBy(element => element.Id.Trim(), StringComparer.Ordinal)
+                         .Where(group => group.Count() > 1))
+            {
+                errors.Add($"外观元素 ID 重复：{duplicate.Key}");
+            }
+            foreach (var element in Skin.Elements)
+            {
+                if (string.IsNullOrWhiteSpace(element.Id))
+                {
+                    errors.Add("外观元素 ID 不能为空");
+                }
+                if (!PedalControlCatalog.Contains(element.Type))
+                {
+                    errors.Add($"外观元素类型未知：{element.Type}");
+                }
+                if (!string.IsNullOrWhiteSpace(element.Binding) &&
+                    Parameters.All(parameter => !string.Equals(parameter.Id.Trim(), element.Binding.Trim(), StringComparison.Ordinal)) &&
+                    Ports.All(port => !string.Equals(port.Id.Trim(), element.Binding.Trim(), StringComparison.Ordinal)))
+                {
+                    errors.Add($"外观元素 {element.Id} 引用了未知参数：{element.Binding}");
+                }
+                if (!double.IsFinite(element.X) || !double.IsFinite(element.Y) ||
+                    !double.IsFinite(element.Width) || !double.IsFinite(element.Height) ||
+                    !double.IsFinite(element.Rotation) || element.Width <= 0.0 || element.Height <= 0.0 ||
+                    element.X < 0.0 || element.X > Skin.Width || element.Y < 0.0 || element.Y > Skin.Height ||
+                    element.X + element.Width > Skin.Width || element.Y + element.Height > Skin.Height)
+                {
+                    errors.Add($"外观元素 {element.Id} 的位置或尺寸超出踏板范围");
+                }
+                if (element.Rotation < -360.0 || element.Rotation > 360.0 || element.Detents < 0 || element.Detents > 128)
+                {
+                    errors.Add($"外观元素 {element.Id} 的旋转或档位数无效");
+                }
+                if (string.IsNullOrWhiteSpace(element.Style))
+                {
+                    errors.Add($"外观元素 {element.Id} 的样式不能为空");
+                }
+            }
             if (Skin.UseCustomFootswitchPosition &&
                 (!double.IsFinite(Skin.FootswitchX) || !double.IsFinite(Skin.FootswitchY) ||
                  Skin.FootswitchX < 0.0 || Skin.FootswitchX > Skin.Width ||
@@ -2711,7 +3072,8 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
         }
         validationMessages = errors;
         validationIssues = issues;
-        OnPropertiesChanged(nameof(ValidationMessages), nameof(ValidationIssues), nameof(IsValid), nameof(ValidationSummary));
+        OnPropertiesChanged(nameof(ValidationMessages), nameof(ValidationIssues),
+            nameof(HasValidationIssues), nameof(HasNoValidationIssues), nameof(IsValid), nameof(ValidationSummary));
         return validationMessages;
     }
 
@@ -2974,7 +3336,7 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             var value = new JsonObject
             {
                 ["id"] = component.Id.Trim(),
-                ["type"] = component.Type,
+                ["type"] = component.Descriptor.RuntimeType,
                 ["pins"] = JsonSerializer.SerializeToNode(component.Pins.Select(pin => pin.Node.Trim()).ToArray()),
             };
             var modelReference = component.Properties.FirstOrDefault(property => property.Id == "model")?.TextValue.Trim();
@@ -3160,13 +3522,14 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             }
             foreach (var component in root.GetProperty("components").EnumerateArray())
             {
-                var type = component.GetProperty("type").GetString() ?? string.Empty;
+                var runtimeType = component.GetProperty("type").GetString() ?? string.Empty;
+                var type = ResolveAuthoringComponentType(runtimeType, component);
                 if (!AnalogComponentCatalog.TryGet(type, out var descriptor))
                 {
                     return false;
                 }
                 var pins = component.GetProperty("pins").EnumerateArray().Select(pin => pin.GetString() ?? string.Empty).ToArray();
-                if (pins.Length != descriptor.Pins.Count && type != "relay")
+                if (pins.Length != descriptor.Pins.Count && runtimeType != "relay")
                 {
                     return false;
                 }
@@ -3174,13 +3537,15 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                 {
                     var pinDescriptor = index < descriptor.Pins.Count
                         ? descriptor.Pins[index]
-                        : new AnalogPinDescriptor($"pin-{index + 1}", $"引脚 {index + 1}");
-                    return new AnalogPinDraft(pinDescriptor.Id, pinDescriptor.DisplayName, pin);
+                        : new AnalogPinDescriptor($"pin-{index + 1}", $"引脚 {index + 1}",
+                            0.0, 0.0, "left", "passive");
+                    return new AnalogPinDraft(pinDescriptor.Id, pinDescriptor.DisplayName, pin,
+                        pinDescriptor.AnchorX, pinDescriptor.AnchorY, pinDescriptor.Side, pinDescriptor.ElectricalRole);
                 }).ToArray();
                 var properties = component.EnumerateObject()
                     .Where(property => property.Name is not ("id" or "type" or "pins"))
                     .Select(property => new AnalogComponentPropertyDraft(
-                        type == "diode" && property.Name == "model" && property.Value.ValueKind == JsonValueKind.Object
+                        runtimeType == "diode" && property.Name == "model" && property.Value.ValueKind == JsonValueKind.Object
                             ? "diodeModel"
                             : property.Name,
                         property.Value.GetRawText()))
@@ -3197,13 +3562,27 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                     pinDrafts,
                     properties));
             }
-            return circuit.Components.Count > 0;
+            return true;
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException)
         {
             circuit = new AnalogCircuitDraft();
             return false;
         }
+    }
+
+    private static string ResolveAuthoringComponentType(string runtimeType, JsonElement component)
+    {
+        var modelText = component.GetRawText().ToLowerInvariant();
+        return runtimeType switch
+        {
+            "bjt" => modelText.Contains("pnp", StringComparison.Ordinal) ? "bjt-pnp" : "bjt-npn",
+            "jfet" => modelText.Contains("p-channel", StringComparison.Ordinal) ||
+                      modelText.Contains("dynamic.p", StringComparison.Ordinal) ? "jfet-p" : "jfet-n",
+            "mosfet" => modelText.Contains("p-channel", StringComparison.Ordinal) ||
+                        modelText.Contains("dynamic.p", StringComparison.Ordinal) ? "mosfet-p" : "mosfet-n",
+            _ => runtimeType,
+        };
     }
 
     private string BuildSkinSource()
@@ -3213,7 +3592,7 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             : new { id = id.Trim(), image = image.Trim().Replace('\\', '/') };
         var skin = new
         {
-            schemaVersion = 1,
+            schemaVersion = 2,
             id = Skin.Id.Trim(),
             controls = new
             {
@@ -3234,6 +3613,21 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                     x = placement.X,
                     y = placement.Y,
                 }),
+                elements = Skin.Elements.Select(element => new
+                {
+                    id = element.Id.Trim(),
+                    type = element.Type.Trim(),
+                    binding = string.IsNullOrWhiteSpace(element.Binding) ? null : element.Binding.Trim(),
+                    x = element.X,
+                    y = element.Y,
+                    width = element.Width,
+                    height = element.Height,
+                    rotation = element.Rotation,
+                    detents = element.Detents,
+                    zIndex = element.ZIndex,
+                    label = string.IsNullOrWhiteSpace(element.Label) ? null : element.Label,
+                    style = string.IsNullOrWhiteSpace(element.Style) ? null : element.Style,
+                }),
                 footswitch = Skin.UseCustomFootswitchPosition
                     ? new { x = Skin.FootswitchX, y = Skin.FootswitchY }
                     : null,
@@ -3246,7 +3640,7 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
     {
         var metadata = new
         {
-            schemaVersion = 1,
+            schemaVersion = 2,
             analogCircuit = new
             {
                 components = AnalogCircuit.Components.Select(component => new
@@ -3254,6 +3648,11 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                     id = component.Id.Trim(),
                     x = component.CanvasX,
                     y = component.CanvasY,
+                }),
+                routes = AnalogCircuit.WireRoutes.Select(route => new
+                {
+                    node = route.Node.Trim(),
+                    points = route.Points.Select(point => new { x = point.X, y = point.Y }),
                 }),
             },
         };
@@ -3269,7 +3668,8 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
         }
         using var document = JsonDocument.Parse(File.ReadAllText(path));
         var root = document.RootElement;
-        if (root.GetProperty("schemaVersion").GetInt32() != 1 ||
+        var schemaVersion = root.GetProperty("schemaVersion").GetInt32();
+        if (schemaVersion is not (1 or 2) ||
             !root.TryGetProperty("analogCircuit", out var analogCircuit) ||
             !analogCircuit.TryGetProperty("components", out var components))
         {
@@ -3287,15 +3687,33 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             component.CanvasX = layout.TryGetProperty("x", out var x) ? x.GetDouble() : 0.0;
             component.CanvasY = layout.TryGetProperty("y", out var y) ? y.GetDouble() : 0.0;
         }
+        if (schemaVersion >= 2 && analogCircuit.TryGetProperty("routes", out var routes) &&
+            routes.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var routeValue in routes.EnumerateArray())
+            {
+                var route = new AnalogWireRouteDraft(ReadOptionalString(routeValue, "node"));
+                if (routeValue.TryGetProperty("points", out var points) && points.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var point in points.EnumerateArray())
+                    {
+                        route.Points.Add(new AnalogWirePointDraft(
+                            point.GetProperty("x").GetDouble(), point.GetProperty("y").GetDouble()));
+                    }
+                }
+                circuit.WireRoutes.Add(route);
+            }
+        }
     }
 
     private static PedalSkinDraft ReadSkin(string path)
     {
         using var document = JsonDocument.Parse(File.ReadAllText(path));
         var root = document.RootElement;
-        if (root.GetProperty("schemaVersion").GetUInt32() != 1)
+        var schemaVersion = root.GetProperty("schemaVersion").GetUInt32();
+        if (schemaVersion is not (1 or 2))
         {
-            throw new InvalidDataException("只支持 schemaVersion 1 外观文件");
+            throw new InvalidDataException("只支持 schemaVersion 1 或 2 外观文件");
         }
         var controls = root.GetProperty("controls");
         var (knobId, knobImage) = ReadSkinControl(controls.GetProperty("knob"));
@@ -3338,6 +3756,39 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                         placement.GetProperty("y").GetDouble()));
                 }
             }
+            if (schemaVersion >= 2 && layout.TryGetProperty("elements", out var elements))
+            {
+                if (elements.ValueKind != JsonValueKind.Array)
+                {
+                    throw new InvalidDataException("外观元素必须是数组");
+                }
+                result.Elements.Clear();
+                foreach (var element in elements.EnumerateArray())
+                {
+                    var id = ReadOptionalString(element, "id");
+                    var type = ReadOptionalString(element, "type");
+                    if (string.IsNullOrWhiteSpace(id) || !PedalControlCatalog.Contains(type))
+                    {
+                        throw new InvalidDataException("外观元素必须包含已知的唯一 id 和 type");
+                    }
+                    var descriptor = PedalControlCatalog.Get(type);
+                    result.Elements.Add(new PedalSkinElementDraft(
+                        id,
+                        type,
+                        ReadOptionalString(element, "binding"),
+                        element.TryGetProperty("x", out var x) ? x.GetDouble() : 0.0,
+                        element.TryGetProperty("y", out var y) ? y.GetDouble() : 0.0)
+                    {
+                        Width = element.TryGetProperty("width", out var elementWidth) ? elementWidth.GetDouble() : descriptor.DefaultWidth,
+                        Height = element.TryGetProperty("height", out var elementHeight) ? elementHeight.GetDouble() : descriptor.DefaultHeight,
+                        Rotation = element.TryGetProperty("rotation", out var rotation) ? rotation.GetDouble() : 0.0,
+                        Detents = element.TryGetProperty("detents", out var detents) ? detents.GetInt32() : descriptor.DefaultDetents,
+                        ZIndex = element.TryGetProperty("zIndex", out var zIndex) ? zIndex.GetInt32() : 0,
+                        Label = ReadOptionalString(element, "label"),
+                        Style = ReadOptionalString(element, "style", "{}"),
+                    });
+                }
+            }
             if (layout.TryGetProperty("footswitch", out var footswitch))
             {
                 if (footswitch.ValueKind != JsonValueKind.Object)
@@ -3347,6 +3798,21 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                 result.UseCustomFootswitchPosition = true;
                 result.FootswitchX = footswitch.GetProperty("x").GetDouble();
                 result.FootswitchY = footswitch.GetProperty("y").GetDouble();
+            }
+        }
+        if (schemaVersion == 1)
+        {
+            foreach (var placement in result.ParameterPlacements)
+            {
+                var type = placement.ControlKind switch
+                {
+                    "toggle" => "switch.toggle",
+                    "button" => "button.momentary",
+                    "footswitch" => "footswitch",
+                    _ => "knob.continuous",
+                };
+                result.Elements.Add(new PedalSkinElementDraft(
+                    $"parameter-{placement.ParameterId}", type, placement.ParameterId, placement.X, placement.Y));
             }
         }
         return result;
@@ -3390,6 +3856,20 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
         {
             Skin.ParameterPlacements.Add(new PedalSkinParameterPlacementDraft(
                 placement.ParameterId, placement.X, placement.Y));
+        }
+        Skin.Elements.Clear();
+        foreach (var element in source.Elements)
+        {
+            Skin.Elements.Add(new PedalSkinElementDraft(element.Id, element.Type, element.Binding, element.X, element.Y)
+            {
+                Width = element.Width,
+                Height = element.Height,
+                Rotation = element.Rotation,
+                Detents = element.Detents,
+                ZIndex = element.ZIndex,
+                Label = element.Label,
+                Style = element.Style,
+            });
         }
     }
 
@@ -3439,6 +3919,16 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                 component.Properties.Select(property => new AnalogComponentPropertyDraft(property.Id, property.JsonValue)),
                 component.CanvasX,
                 component.CanvasY));
+        }
+        AnalogCircuit.WireRoutes.Clear();
+        foreach (var route in source.WireRoutes)
+        {
+            var cloned = new AnalogWireRouteDraft(route.Node);
+            foreach (var point in route.Points)
+            {
+                cloned.Points.Add(new AnalogWirePointDraft(point.X, point.Y));
+            }
+            AnalogCircuit.WireRoutes.Add(cloned);
         }
         ReplaceAnalogProperties(AnalogCircuit.RootProperties, source.RootProperties);
         ReplaceAnalogProperties(AnalogCircuit.SolverProperties, source.SolverProperties);
@@ -3501,6 +3991,20 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             skin.ParameterPlacements.Add(new PedalSkinParameterPlacementDraft(
                 placement.ParameterId, placement.X, placement.Y));
         }
+        skin.Elements.Clear();
+        foreach (var element in Skin.Elements)
+        {
+            skin.Elements.Add(new PedalSkinElementDraft(element.Id, element.Type, element.Binding, element.X, element.Y)
+            {
+                Width = element.Width,
+                Height = element.Height,
+                Rotation = element.Rotation,
+                Detents = element.Detents,
+                ZIndex = element.ZIndex,
+                Label = element.Label,
+                Style = element.Style,
+            });
+        }
 
         var circuit = new AnalogCircuitDraft
         {
@@ -3546,6 +4050,15 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                 component.Properties.Select(property => new AnalogComponentPropertyDraft(property.Id, property.JsonValue)),
                 component.CanvasX,
                 component.CanvasY));
+        }
+        foreach (var route in AnalogCircuit.WireRoutes)
+        {
+            var cloned = new AnalogWireRouteDraft(route.Node);
+            foreach (var point in route.Points)
+            {
+                cloned.Points.Add(new AnalogWirePointDraft(point.X, point.Y));
+            }
+            circuit.WireRoutes.Add(cloned);
         }
         ReplaceAnalogProperties(circuit.RootProperties, AnalogCircuit.RootProperties);
         ReplaceAnalogProperties(circuit.SolverProperties, AnalogCircuit.SolverProperties);

@@ -66,6 +66,7 @@ public sealed partial class MainWindow : Window
     public bool ProbeParameterBinding() => EditorView.ProbeParameterBinding();
 
     public bool ProbeParameterEditingWorkflow() => EditorView.ProbeParameterEditingWorkflow();
+    public bool ProbeRuntimeControlInteraction() => EditorView.ProbeRuntimeControlInteraction();
 
     public bool ProbeDpiScaling() => EditorView.ProbeDpiScaling();
 
@@ -114,10 +115,31 @@ public sealed partial class MainWindow : Window
             SetWorkspace(true);
             UpdateLayout();
             WorkshopView.UpdateLayout();
-            return WorkshopView.HasWorkshopVisualContent && WorkshopView.ProbeProjectWorkflow() &&
-                   WorkshopView.ProbeResponsiveLayout() && WorkshopView.ProbeNarrowLayoutBounds() &&
-                   WorkshopView.ProbeThemePalette() && WorkshopView.ProbeSkinDesigner() &&
-                   WorkshopView.ProbeCircuitCanvas() && WorkshopView.ProbeAuditionWorkspace();
+            var visualContent = WorkshopView.HasWorkshopVisualContent;
+            var project = visualContent && WorkshopView.ProbeProjectWorkflow();
+            var responsive = project && WorkshopView.ProbeResponsiveLayout();
+            var dpiSnapshots = responsive && WorkshopView.ProbeResponsiveDpiSnapshots();
+            // Restore the narrow probe fixture after the DPI samples; a real window
+            // resize is applied on the next layout pass, so make the fixture explicit.
+            Width = 820;
+            Height = 520;
+            SetWorkspace(true);
+            UpdateLayout();
+            WorkshopView.UpdateLayout();
+            var narrow = dpiSnapshots && WorkshopView.ProbeNarrowLayoutBounds();
+            var palette = narrow && WorkshopView.ProbeThemePalette();
+            var skin = palette && WorkshopView.ProbeSkinDesigner();
+            var circuit = skin && WorkshopView.ProbeCircuitCanvas();
+            var routingStress = circuit && WorkshopView.ProbeCircuitRoutingStress();
+            var validation = routingStress && WorkshopView.ProbeValidationStates();
+            var audition = validation && WorkshopView.ProbeAuditionWorkspace();
+            if (!audition)
+            {
+                Console.Error.WriteLine($"[standalone-visual-probe] workshop detail: visual={visualContent}, project={project}, " +
+                                        $"responsive={responsive}, dpiSnapshots={dpiSnapshots}, narrow={narrow}, palette={palette}, skin={skin}, " +
+                                        $"circuit={circuit}, routingStress={routingStress}, validation={validation}, audition={audition}");
+            }
+            return audition;
         }
         finally
         {

@@ -1,6 +1,12 @@
 namespace SoloRig.Ui;
 
-public sealed record AnalogPinDescriptor(string Id, string DisplayName);
+public sealed record AnalogPinDescriptor(
+    string Id,
+    string DisplayName,
+    double AnchorX,
+    double AnchorY,
+    string Side,
+    string ElectricalRole);
 
 public sealed record AnalogPropertyDescriptor(
     string Id,
@@ -18,7 +24,12 @@ public sealed record AnalogComponentDescriptor(
     string DisplayName,
     string Category,
     IReadOnlyList<AnalogPinDescriptor> Pins,
-    IReadOnlyList<AnalogPropertyDescriptor> Properties);
+    IReadOnlyList<AnalogPropertyDescriptor> Properties,
+    string RuntimeType,
+    string SymbolKind,
+    string SymbolPath,
+    double SymbolWidth,
+    double SymbolHeight);
 
 public static class AnalogComponentCatalog
 {
@@ -53,18 +64,25 @@ public static class AnalogComponentCatalog
         Component("ota", "跨导放大器", "放大器", ["out+", "out-", "non-inverting", "inverting"],
             ModelProperties("amplifierModel", "放大器模型", BoundedOtaModel,
                 "solorig.cleanroom.ota.bounded.v1")),
-        Component("bjt", "BJT", "半导体", ["collector", "base", "emitter"],
+        Component("bjt-npn", "NPN 三极管", "半导体", ["collector", "base", "emitter"],
             ModelProperties("bjtModel", "BJT 模型", BjtModel,
-                "solorig.cleanroom.bjt.npn.v1", "solorig.cleanroom.bjt.pnp.v1",
-                "solorig.cleanroom.bjt.dynamic.npn.v2", "solorig.cleanroom.bjt.dynamic.pnp.v2")),
-        Component("jfet", "JFET", "半导体", ["drain", "gate", "source"],
+                "solorig.cleanroom.bjt.npn.v1", "solorig.cleanroom.bjt.dynamic.npn.v2")),
+        Component("bjt-pnp", "PNP 三极管", "半导体", ["collector", "base", "emitter"],
+            ModelProperties("bjtModel", "BJT 模型", PnpBjtModel,
+                "solorig.cleanroom.bjt.pnp.v1", "solorig.cleanroom.bjt.dynamic.pnp.v2")),
+        Component("jfet-n", "N 沟道 JFET", "半导体", ["drain", "gate", "source"],
             ModelProperties("jfetModel", "JFET 模型", JfetModel,
-                "solorig.cleanroom.jfet.n-channel.v1", "solorig.cleanroom.jfet.p-channel.v1",
-                "solorig.cleanroom.jfet.dynamic.n.v2", "solorig.cleanroom.jfet.dynamic.p.v2")),
-        Component("mosfet", "MOSFET", "半导体", ["drain", "gate", "source"],
+                "solorig.cleanroom.jfet.n-channel.v1", "solorig.cleanroom.jfet.dynamic.n.v2")),
+        Component("jfet-p", "P 沟道 JFET", "半导体", ["drain", "gate", "source"],
+            ModelProperties("jfetModel", "JFET 模型", PChannelJfetModel,
+                "solorig.cleanroom.jfet.p-channel.v1", "solorig.cleanroom.jfet.dynamic.p.v2")),
+        Component("mosfet-n", "N 沟道 MOSFET", "半导体", ["drain", "gate", "source"],
             ModelProperties("mosfetModel", "MOSFET 模型", MosfetModel,
-                "solorig.cleanroom.mosfet.n-channel.v1", "solorig.cleanroom.mosfet.p-channel.v1",
-                "solorig.cleanroom.mosfet.n-channel.dynamic.v2",
+                "solorig.cleanroom.mosfet.n-channel.v1",
+                "solorig.cleanroom.mosfet.n-channel.dynamic.v2")),
+        Component("mosfet-p", "P 沟道 MOSFET", "半导体", ["drain", "gate", "source"],
+            ModelProperties("mosfetModel", "MOSFET 模型", PChannelMosfetModel,
+                "solorig.cleanroom.mosfet.p-channel.v1",
                 "solorig.cleanroom.mosfet.p-channel.dynamic.v2")),
         Component("triode", "三极电子管", "电子管", ["plate", "grid", "cathode"],
             ModelProperties("triodeModel", "三极管模型", TriodeModel,
@@ -96,8 +114,25 @@ public static class AnalogComponentCatalog
             [new("optocouplerModel", "光耦模型", "json", DefaultJson: OptocouplerModel)]),
     ];
 
+    private static IReadOnlyList<AnalogComponentDescriptor> LegacyComponents { get; } =
+    [
+        Component("bjt", "双极型三极管（BJT）", "半导体", ["collector", "base", "emitter"],
+            ModelProperties("bjtModel", "BJT 模型", BjtModel,
+                "solorig.cleanroom.bjt.npn.v1", "solorig.cleanroom.bjt.pnp.v1",
+                "solorig.cleanroom.bjt.dynamic.npn.v2", "solorig.cleanroom.bjt.dynamic.pnp.v2")),
+        Component("jfet", "结型场效应管（JFET）", "半导体", ["drain", "gate", "source"],
+            ModelProperties("jfetModel", "JFET 模型", JfetModel,
+                "solorig.cleanroom.jfet.n-channel.v1", "solorig.cleanroom.jfet.p-channel.v1",
+                "solorig.cleanroom.jfet.dynamic.n.v2", "solorig.cleanroom.jfet.dynamic.p.v2")),
+        Component("mosfet", "金属氧化物场效应管（MOSFET）", "半导体", ["drain", "gate", "source"],
+            ModelProperties("mosfetModel", "MOSFET 模型", MosfetModel,
+                "solorig.cleanroom.mosfet.n-channel.v1", "solorig.cleanroom.mosfet.p-channel.v1",
+                "solorig.cleanroom.mosfet.n-channel.dynamic.v2",
+                "solorig.cleanroom.mosfet.p-channel.dynamic.v2")),
+    ];
+
     private static readonly IReadOnlyDictionary<string, AnalogComponentDescriptor> ByType =
-        Components.ToDictionary(component => component.Type, StringComparer.Ordinal);
+        Components.Concat(LegacyComponents).ToDictionary(component => component.Type, StringComparer.Ordinal);
 
     public static bool TryGet(string type, out AnalogComponentDescriptor descriptor) =>
         ByType.TryGetValue(type, out descriptor!);
@@ -119,9 +154,115 @@ public static class AnalogComponentCatalog
         string displayName,
         string category,
         IReadOnlyList<string> pins,
-        IReadOnlyList<AnalogPropertyDescriptor> properties) =>
-        new(type, displayName, category,
-            pins.Select(pin => new AnalogPinDescriptor(pin, PinDisplayName(pin))).ToArray(), properties);
+        IReadOnlyList<AnalogPropertyDescriptor> properties)
+    {
+        var runtimeType = RuntimeType(type);
+        var symbolKind = SymbolKind(type);
+        var (width, height) = SymbolSize(symbolKind);
+        return new AnalogComponentDescriptor(type, displayName, category,
+            pins.Select((pin, index) => PinDescriptor(symbolKind, pin, index, pins.Count, width, height)).ToArray(),
+            properties, runtimeType, symbolKind, SymbolPath(symbolKind), width, height);
+    }
+
+    private static string RuntimeType(string type) => type switch
+    {
+        "bjt-npn" or "bjt-pnp" => "bjt",
+        "jfet-n" or "jfet-p" => "jfet",
+        "mosfet-n" or "mosfet-p" => "mosfet",
+        _ => type,
+    };
+
+    private static string SymbolKind(string type) => type switch
+    {
+        "bjt" or "bjt-npn" => "bjt-npn",
+        "bjt-pnp" => "bjt-pnp",
+        "jfet" or "jfet-n" => "jfet-n",
+        "jfet-p" => "jfet-p",
+        "mosfet" or "mosfet-n" => "mosfet-n",
+        "mosfet-p" => "mosfet-p",
+        "ideal-op-amp" or "opamp" or "ota" or "vccs" => "amplifier",
+        "coupled-inductor" => "transformer",
+        "speaker-load" => "speaker",
+        _ => type,
+    };
+
+    private static (double Width, double Height) SymbolSize(string symbolKind) => symbolKind switch
+    {
+        "amplifier" or "transformer" or "relay" or "optocoupler" or "pentode" or "beam-tetrode" => (160.0, 112.0),
+        "potentiometer" or "bjt-npn" or "bjt-pnp" or "jfet-n" or "jfet-p" or "mosfet-n" or "mosfet-p" or
+            "triode" or "vari-mu" => (144.0, 112.0),
+        _ => (144.0, 96.0),
+    };
+
+    private static AnalogPinDescriptor PinDescriptor(
+        string symbolKind, string id, int index, int count, double width, double height)
+    {
+        var (x, y, side) = PinAnchor(symbolKind, id, index, count, width, height);
+        return new AnalogPinDescriptor(id, PinDisplayName(id), x, y, side, PinRole(id));
+    }
+
+    private static (double X, double Y, string Side) PinAnchor(
+        string symbolKind, string id, int index, int count, double width, double height)
+    {
+        if (id is "base" or "gate" or "grid" or "non-inverting" or "inverting" or "control+" or "control-")
+        {
+            var y = id is "inverting" or "control-" ? height * 0.68 : height * 0.42;
+            return (0.0, y, "left");
+        }
+        if (id is "collector" or "drain" or "plate" or "out+")
+        {
+            return (width, height * 0.36, "right");
+        }
+        if (id is "emitter" or "source" or "cathode" or "out-")
+        {
+            return (width, height * 0.72, "right");
+        }
+        if (id == "wiper")
+        {
+            return (width * 0.5, height, "bottom");
+        }
+        if (count == 4)
+        {
+            var left = index < 2;
+            return (left ? 0.0 : width, index % 2 == 0 ? height * 0.36 : height * 0.72, left ? "left" : "right");
+        }
+        return index == 0 ? (0.0, height * 0.56, "left") : (width, height * 0.56, "right");
+    }
+
+    private static string SymbolPath(string symbolKind) => symbolKind switch
+    {
+        "resistor" => "M 0 54 L 26 54 L 34 42 L 46 66 L 58 42 L 70 66 L 82 42 L 94 66 L 106 42 L 114 54 L 144 54",
+        "capacitor" => "M 0 54 L 60 54 M 60 34 L 60 74 M 84 34 L 84 74 M 84 54 L 144 54",
+        "inductor" => "M 0 54 L 30 54 C 30 34 50 34 50 54 C 50 34 70 34 70 54 C 70 34 90 34 90 54 C 90 34 110 34 110 54 L 144 54",
+        "diode" => "M 0 54 L 48 54 L 48 34 L 84 54 L 48 74 Z M 88 32 L 88 76 M 88 54 L 144 54",
+        "voltage-source" => "M 0 54 L 42 54 M 42 54 A 30 30 0 1 0 102 54 A 30 30 0 1 0 42 54 M 62 44 L 82 44 M 72 34 L 72 54 M 62 66 L 82 66 M 102 54 L 144 54",
+        "potentiometer" => "M 0 62 L 26 62 L 34 50 L 46 74 L 58 50 L 70 74 L 82 50 L 94 74 L 106 50 L 114 62 L 144 62 M 72 112 L 72 82 M 64 90 L 72 82 L 80 90",
+        "switch" => "M 0 54 L 52 54 M 52 54 L 94 34 M 94 54 L 144 54 M 48 54 A 4 4 0 1 0 56 54 A 4 4 0 1 0 48 54 M 90 54 A 4 4 0 1 0 98 54 A 4 4 0 1 0 90 54",
+        "bjt-npn" => "M 0 58 L 48 58 M 48 32 L 48 84 M 48 46 L 96 40 L 144 40 M 48 70 L 96 78 L 144 82 M 92 68 L 104 80 M 92 88 L 104 80",
+        "bjt-pnp" => "M 0 58 L 48 58 M 48 32 L 48 84 M 48 46 L 96 40 L 144 40 M 48 70 L 96 78 L 144 82 M 62 66 L 50 72 M 62 78 L 50 72",
+        "jfet-n" => "M 0 58 L 46 58 M 54 32 L 54 84 M 54 44 L 98 40 L 144 40 M 54 72 L 98 80 L 144 80 M 24 58 L 40 58 M 32 50 L 40 58 L 32 66",
+        "jfet-p" => "M 0 58 L 46 58 M 54 32 L 54 84 M 54 44 L 98 40 L 144 40 M 54 72 L 98 80 L 144 80 M 40 50 L 32 58 L 40 66",
+        "mosfet-n" => "M 0 58 L 38 58 M 46 30 L 46 86 M 58 38 L 58 52 M 58 64 L 58 78 M 58 44 L 102 40 L 144 40 M 58 72 L 102 80 L 144 80 M 70 58 L 86 58 M 78 50 L 86 58 L 78 66",
+        "mosfet-p" => "M 0 58 L 38 58 M 46 30 L 46 86 M 58 38 L 58 52 M 58 64 L 58 78 M 58 44 L 102 40 L 144 40 M 58 72 L 102 80 L 144 80 M 86 50 L 78 58 L 86 66",
+        "amplifier" => "M 0 46 L 34 46 M 0 76 L 34 76 M 34 24 L 34 94 L 126 59 Z M 126 46 L 160 40 M 126 72 L 160 80 M 44 46 L 56 46 M 50 40 L 50 52 M 44 76 L 56 76",
+        "transformer" => "M 0 40 L 28 40 M 0 80 L 28 80 M 28 40 C 50 40 50 54 28 54 C 50 54 50 68 28 68 C 50 68 50 80 28 80 M 76 28 L 76 92 M 84 28 L 84 92 M 132 40 C 110 40 110 54 132 54 C 110 54 110 68 132 68 C 110 68 110 80 132 80 M 132 40 L 160 40 M 132 80 L 160 80",
+        "speaker" => "M 0 54 L 48 54 M 48 36 L 78 36 L 108 18 L 108 90 L 78 72 L 48 72 Z M 108 54 L 144 54",
+        "triode" or "vari-mu" => "M 0 58 L 44 58 M 44 48 L 88 48 M 44 58 L 88 58 M 72 28 L 72 42 M 52 76 C 72 92 92 76 92 76 M 92 76 L 144 82 M 72 28 L 144 40",
+        "pentode" or "beam-tetrode" => "M 0 58 L 36 58 M 36 44 L 92 44 M 36 54 L 92 54 M 36 64 L 92 64 M 72 24 L 72 38 M 54 80 C 72 92 90 80 90 80 M 90 80 L 160 82 M 72 24 L 160 40",
+        "relay" => "M 0 40 L 28 40 C 28 26 48 26 48 40 C 48 26 68 26 68 40 L 80 40 M 0 80 L 80 80 M 96 80 L 126 54 M 126 80 L 160 80 M 126 54 L 160 40",
+        "optocoupler" => "M 0 40 L 34 40 L 58 52 L 34 64 Z M 62 34 L 62 70 M 62 52 L 80 52 M 82 40 L 104 50 M 82 60 L 104 50 M 104 32 L 126 32 L 126 80 L 104 80 M 126 32 L 160 40 M 126 80 L 160 80",
+        _ => "M 0 54 L 42 54 L 42 30 L 102 30 L 102 78 L 42 78 L 42 54 M 102 54 L 144 54",
+    };
+
+    private static string PinRole(string id) => id switch
+    {
+        "positive" or "anode" or "collector" or "drain" or "plate" or "out+" or "coil+" or "contact+" or
+            "emitter+" or "resistor+" or "primary-dot" or "secondary-dot" => "positive",
+        "negative" or "cathode" or "emitter" or "source" or "out-" or "coil-" or "contact-" or
+            "emitter-" or "resistor-" => "negative",
+        "base" or "gate" or "grid" or "non-inverting" or "inverting" or "control+" or "control-" or "wiper" => "control",
+        _ => "passive",
+    };
 
     private static IReadOnlyList<AnalogPropertyDescriptor> ModelProperties(
         string inlineId, string inlineName, string inlineDefault, params string[] modelIds) =>
@@ -149,12 +290,24 @@ public static class AnalogComponentCatalog
         "{\"kind\":\"ebers-moll\",\"modelVersion\":1,\"polarity\":\"npn\"," +
         "\"saturationCurrent\":1e-15,\"forwardBeta\":100.0,\"reverseBeta\":1.0," +
         "\"thermalVoltage\":0.02585,\"maxCurrent\":0.01,\"maxStep\":0.5}";
+    private const string PnpBjtModel =
+        "{\"kind\":\"ebers-moll\",\"modelVersion\":1,\"polarity\":\"pnp\"," +
+        "\"saturationCurrent\":1e-15,\"forwardBeta\":100.0,\"reverseBeta\":1.0," +
+        "\"thermalVoltage\":0.02585,\"maxCurrent\":0.01,\"maxStep\":0.5}";
     private const string JfetModel =
         "{\"kind\":\"square-law\",\"modelVersion\":1,\"polarity\":\"n-channel\"," +
         "\"pinchOffVoltage\":1.0,\"transconductanceParameter\":0.001," +
         "\"maxCurrent\":0.01,\"maxStep\":0.5}";
+    private const string PChannelJfetModel =
+        "{\"kind\":\"square-law\",\"modelVersion\":1,\"polarity\":\"p-channel\"," +
+        "\"pinchOffVoltage\":1.0,\"transconductanceParameter\":0.001," +
+        "\"maxCurrent\":0.01,\"maxStep\":0.5}";
     private const string MosfetModel =
         "{\"kind\":\"enhancement-square-law\",\"modelVersion\":1,\"polarity\":\"n-channel\"," +
+        "\"thresholdVoltage\":1.0,\"transconductanceParameter\":0.001," +
+        "\"maxCurrent\":0.01,\"maxStep\":0.5}";
+    private const string PChannelMosfetModel =
+        "{\"kind\":\"enhancement-square-law\",\"modelVersion\":1,\"polarity\":\"p-channel\"," +
         "\"thresholdVoltage\":1.0,\"transconductanceParameter\":0.001," +
         "\"maxCurrent\":0.01,\"maxStep\":0.5}";
     private const string TriodeModel =

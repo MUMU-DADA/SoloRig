@@ -143,6 +143,23 @@ internal struct NativeNodeSkinParameterLayoutView
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct NativeNodeSkinElementView
+{
+    public IntPtr Id;
+    public IntPtr Type;
+    public IntPtr Binding;
+    public double X;
+    public double Y;
+    public double Width;
+    public double Height;
+    public double Rotation;
+    public int Detents;
+    public int ZIndex;
+    public IntPtr Label;
+    public IntPtr Style;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal struct NativeNodeBatchEntry
 {
     public IntPtr InstanceId;
@@ -397,6 +414,14 @@ internal static class NativeMethods
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_snapshot_node_skin_parameter_layout(
         IntPtr snapshot, uint nodeIndex, uint layoutIndex, out NativeNodeSkinParameterLayoutView layout);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_snapshot_node_skin_element_count(
+        IntPtr snapshot, uint nodeIndex, out uint count);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NativeStatus solorig_snapshot_node_skin_element(
+        IntPtr snapshot, uint nodeIndex, uint elementIndex, out NativeNodeSkinElementView element);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NativeStatus solorig_snapshot_parameter(
@@ -678,6 +703,55 @@ public sealed record ParameterSnapshot(string Id, float Value, float Minimum = 0
 
 public sealed record NodeSkinParameterPlacementSnapshot(string ParameterId, double X, double Y);
 
+public sealed record NodeSkinElementSnapshot(
+    string Id,
+    string Type,
+    string Binding,
+    double X,
+    double Y,
+    double Width,
+    double Height,
+    double Rotation,
+    int Detents,
+    int ZIndex,
+    string Label,
+    string Style)
+{
+    public bool IsKnob => Type.StartsWith("knob.", StringComparison.Ordinal);
+    public bool IsFader => Type.StartsWith("fader.", StringComparison.Ordinal);
+    public bool IsSwitch => Type == "switch.toggle";
+    public bool IsButton => Type.StartsWith("button.", StringComparison.Ordinal);
+    public bool IsFootswitch => Type == "footswitch";
+    public bool IsLed => Type == "indicator.led";
+    public bool IsConnector => Type.StartsWith("connector.", StringComparison.Ordinal) || Type == "selector.impedance";
+    public bool IsLabel => Type == "label";
+    public bool IsRuntimeInteractive => (IsKnob || IsFader || IsSwitch || IsButton || IsFootswitch) &&
+                                        (IsFootswitch || !string.IsNullOrWhiteSpace(Binding));
+    public float? RuntimeValue { get; init; }
+    public float RuntimeMinimum { get; init; }
+    public float RuntimeMaximum { get; init; } = 1.0F;
+    public bool IsActive => RuntimeValue.HasValue && float.IsFinite(RuntimeValue.Value) &&
+                            float.IsFinite(RuntimeMinimum) && float.IsFinite(RuntimeMaximum) &&
+                            RuntimeMaximum > RuntimeMinimum &&
+                            RuntimeValue.Value > RuntimeMinimum + (RuntimeMaximum - RuntimeMinimum) * 0.5F;
+    public string IndicatorColor => IsActive ? "#FF5B57" : "#45515E";
+    public string DisplayName => Type switch
+    {
+        "knob.continuous" => "无级旋钮",
+        "knob.detented" => "档位旋钮",
+        "fader.continuous" => "无级推子",
+        "fader.detented" => "档位推子",
+        "switch.toggle" => "拨档开关",
+        "button.momentary" => "瞬时按钮",
+        "button.latching" => "自锁按钮",
+        "footswitch" => "踩钉",
+        "indicator.led" => "LED 指示灯",
+        "label" => "文字标签",
+        _ when IsConnector => "接口",
+        _ => Type,
+    };
+}
+
 public sealed record NodeSkinSnapshot(
     string Id,
     string KnobId,
@@ -697,11 +771,13 @@ public sealed record NodeSkinSnapshot(
     double FootswitchX,
     double FootswitchY)
 {
+    public IReadOnlyList<NodeSkinElementSnapshot> Elements { get; init; } = [];
+    public bool HasElements => Elements.Count > 0;
     public bool HasKnobImage => !string.IsNullOrWhiteSpace(KnobImagePath);
     public bool HasToggleImage => !string.IsNullOrWhiteSpace(ToggleImagePath);
     public bool HasButtonImage => !string.IsNullOrWhiteSpace(ButtonImagePath);
     public bool HasFootswitchImage => !string.IsNullOrWhiteSpace(FootswitchImagePath);
-    public bool HasCustomLayout => ParameterPlacements.Count > 0 || HasFootswitchPosition ||
+    public bool HasCustomLayout => Elements.Count > 0 || ParameterPlacements.Count > 0 || HasFootswitchPosition ||
                                    !string.IsNullOrWhiteSpace(BackgroundColor) ||
                                    Math.Abs(Width - 196.0) > 0.001 || Math.Abs(Height - 154.0) > 0.001;
 }
@@ -1079,6 +1155,20 @@ public sealed class BackendSession : IDisposable
                     skinParameterLayouts.Add(new NodeSkinParameterPlacementSnapshot(
                         NativeMethods.Utf8(skinParameterLayout.ParameterId), skinParameterLayout.X, skinParameterLayout.Y));
                 }
+                Ensure(NativeMethods.solorig_snapshot_node_skin_element_count(snapshot, nodeIndex,
+                    out var skinElementCount), "snapshot node skin element count");
+                var skinElements = new List<NodeSkinElementSnapshot>((int)skinElementCount);
+                for (uint elementIndex = 0; elementIndex < skinElementCount; elementIndex++)
+                {
+                    Ensure(NativeMethods.solorig_snapshot_node_skin_element(snapshot, nodeIndex, elementIndex,
+                        out var skinElement), "snapshot node skin element");
+                    skinElements.Add(new NodeSkinElementSnapshot(
+                        NativeMethods.Utf8(skinElement.Id), NativeMethods.Utf8(skinElement.Type),
+                        NativeMethods.Utf8(skinElement.Binding), skinElement.X, skinElement.Y,
+                        skinElement.Width, skinElement.Height, skinElement.Rotation,
+                        skinElement.Detents, skinElement.ZIndex,
+                        NativeMethods.Utf8(skinElement.Label), NativeMethods.Utf8(skinElement.Style)));
+                }
                 nodes.Add(new NodeSnapshot(
                     NativeMethods.Utf8(node.InstanceId), NativeMethods.Utf8(node.ModuleId), node.LayoutX, node.LayoutY,
                     node.Selected != 0, node.Unresolved != 0, node.Bypassed != 0, NativeMethods.Utf8(node.Diagnostic), parameters,
@@ -1093,7 +1183,10 @@ public sealed class BackendSession : IDisposable
                         NativeMethods.Utf8(node.FootswitchImagePath), skinLayout.Width, skinLayout.Height,
                         NativeMethods.Utf8(skinLayout.BackgroundColor), NativeMethods.Utf8(skinLayout.LabelColor),
                         skinParameterLayouts, skinLayout.HasFootswitchPosition != 0,
-                        skinLayout.FootswitchX, skinLayout.FootswitchY),
+                        skinLayout.FootswitchX, skinLayout.FootswitchY)
+                    {
+                        Elements = skinElements,
+                    },
                     node.DeclaredLatencySamples, node.EstimatedCpuPercent, node.MeasuredCpuPercent,
                     node.PeakCpuPercent, node.MeasurementAvailable != 0));
             }

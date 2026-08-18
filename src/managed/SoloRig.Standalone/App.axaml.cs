@@ -38,7 +38,8 @@ public sealed class App : Application
                     var themeSwitch = externalTheme && RunVisualProbe("theme switch", mainWindow.ProbeThemeSwitch);
                     var parameterBinding = themeSwitch && RunVisualProbe("parameter binding", mainWindow.ProbeParameterBinding);
                     var parameterEditing = parameterBinding && RunVisualProbe("parameter editing", mainWindow.ProbeParameterEditingWorkflow);
-                    var dpiScaling = parameterEditing && RunVisualProbe("DPI scaling", mainWindow.ProbeDpiScaling);
+                    var runtimeControls = parameterEditing && RunVisualProbe("runtime control interaction", mainWindow.ProbeRuntimeControlInteraction);
+                    var dpiScaling = runtimeControls && RunVisualProbe("DPI scaling", mainWindow.ProbeDpiScaling);
                     var canvasNavigation = dpiScaling && RunVisualProbe("canvas navigation", mainWindow.ProbeCanvasNavigation);
                     var responsiveWorkspace = canvasNavigation && RunVisualProbe("responsive workspace", mainWindow.ProbeResponsiveWorkspace);
                     var renderedSurface = responsiveWorkspace && RunVisualProbe("rendered surface", mainWindow.ProbeRenderedSurface);
@@ -56,7 +57,7 @@ public sealed class App : Application
                     var presetLibrary = moduleInsertion && RunVisualProbe("preset library", mainWindow.ProbePresetLibrary);
                     var undoRedo = presetLibrary && RunVisualProbe("undo/redo", mainWindow.ProbeUndoRedo);
                     var workshop = undoRedo && RunVisualProbe("DIY effect workshop", mainWindow.ProbeWorkshopWorkspace);
-                    if (visualContent && deviceAvailability && externalTheme && themeSwitch && parameterBinding && parameterEditing && dpiScaling && canvasNavigation && responsiveWorkspace && renderedSurface &&
+                    if (visualContent && deviceAvailability && externalTheme && themeSwitch && parameterBinding && parameterEditing && runtimeControls && dpiScaling && canvasNavigation && responsiveWorkspace && renderedSurface &&
                         keyboardShortcuts && keyboardAccessibility && selectionState && inspectorDetails && connectionSelection && topologyEditor && documentStatus && actionGates && nodeNavigator && moduleDragPreview &&
                         moduleInsertion && presetLibrary && undoRedo && workshop)
                     {

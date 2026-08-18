@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ui="using:SoloRig.Ui"
+             xmlns:local="using:SoloRig.Ui.Avalonia"
              x:Class="SoloRig.Ui.Avalonia.PedalWorkshopView"
              x:Name="WorkshopRoot"
              MinWidth="760"
@@ -20,7 +21,9 @@
     <SolidColorBrush x:Key="WorkshopMutedBrush" Color="#9AA8B8" />
     <SolidColorBrush x:Key="WorkshopAccentBrush" Color="#4DD6A4" />
     <SolidColorBrush x:Key="WorkshopAccentTextBrush" Color="#10261F" />
+    <SolidColorBrush x:Key="WorkshopWarningBrush" Color="#FFD166" />
     <SolidColorBrush x:Key="WorkshopErrorBrush" Color="#FF7B72" />
+    <local:SchematicGeometryConverter x:Key="SchematicGeometryConverter" />
   </UserControl.Resources>
 
   <UserControl.Styles>
@@ -88,6 +91,29 @@
       <Setter Property="Foreground" Value="{DynamicResource WorkshopAccentBrush}" />
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
+    <Style Selector="Border.validation-issue">
+      <Setter Property="Background" Value="{DynamicResource WorkshopPanelBrush}" />
+      <Setter Property="BorderThickness" Value="3,0,0,0" />
+      <Setter Property="Padding" Value="12,9" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+    <Style Selector="Border.validation-issue.warning">
+      <Setter Property="BorderBrush" Value="{DynamicResource WorkshopWarningBrush}" />
+    </Style>
+    <Style Selector="Border.validation-issue.error">
+      <Setter Property="BorderBrush" Value="{DynamicResource WorkshopErrorBrush}" />
+    </Style>
+    <Style Selector="TextBlock.validation-severity">
+      <Setter Property="FontSize" Value="9" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Margin" Value="0,0,8,3" />
+    </Style>
+    <Style Selector="TextBlock.validation-severity.warning, TextBlock.validation-message.warning">
+      <Setter Property="Foreground" Value="{DynamicResource WorkshopWarningBrush}" />
+    </Style>
+    <Style Selector="TextBlock.validation-severity.error, TextBlock.validation-message.error">
+      <Setter Property="Foreground" Value="{DynamicResource WorkshopErrorBrush}" />
+    </Style>
   </UserControl.Styles>
 
   <Border Background="{DynamicResource WorkshopWindowBrush}"
@@ -107,8 +133,17 @@
           </StackPanel>
           <WrapPanel x:Name="WorkshopActions" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
                      HorizontalAlignment="Right">
-            <ComboBox x:Name="TemplateSelector" Classes="workshop-input" Width="150" Margin="0,0,8,0"
-                      AutomationProperties.Name="新建模块模板">
+            <ComboBox x:Name="ProjectKindSelector" Classes="workshop-input" Width="146" Margin="0,0,6,0"
+                      SelectionChanged="ProjectKindSelectionChanged"
+                      AutomationProperties.Name="新建项目类型">
+              <ComboBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding DisplayName}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <ComboBox x:Name="TemplateSelector" Classes="workshop-input" Width="168" Margin="0,0,8,0"
+                      AutomationProperties.Name="新建起始模板">
               <ComboBox.ItemTemplate>
                 <DataTemplate>
                   <TextBlock Text="{Binding DisplayName}" />
@@ -352,7 +387,11 @@
                                    Minimum="1" Maximum="16" Increment="1" />
                   </StackPanel>
                 </Grid>
-                <TabControl Grid.Row="1" x:Name="AnalogConfigurationTabs" Height="230" Margin="0,0,0,12"
+                <Expander Grid.Row="1" x:Name="AnalogConfigurationExpander" Header="电路工程设置"
+                          IsExpanded="False" Margin="0,0,0,12"
+                          Foreground="{DynamicResource WorkshopTextBrush}"
+                          AutomationProperties.Name="展开模拟电路工程设置">
+                <TabControl x:Name="AnalogConfigurationTabs" MaxHeight="280" Margin="0,8,0,0"
                             AutomationProperties.Name="模拟电路配置页面">
                   <TabItem Header="端口">
                     <Grid Margin="10" RowDefinitions="Auto,*">
@@ -509,29 +548,51 @@
                     </ScrollViewer>
                   </TabItem>
                 </TabControl>
-                <Grid Grid.Row="2" ColumnDefinitions="*,210,Auto,36,36,58" Margin="0,0,0,10">
-                  <StackPanel Grid.Column="0" Spacing="2">
+                </Expander>
+                <WrapPanel x:Name="CircuitToolbarPanel" Grid.Row="2" Orientation="Horizontal"
+                           VerticalAlignment="Center" Margin="0,0,0,10">
+                  <StackPanel Width="150" Spacing="2" Margin="0,0,10,6">
                     <TextBlock Text="电路元件" Classes="workshop-text" FontSize="13" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding AnalogCircuit.Components.Count, StringFormat='{}{0} 个元件'}"
                                Classes="workshop-muted" FontSize="10" />
-                    <TextBlock x:Name="CircuitSelectionText" Text="未选择" Classes="workshop-muted" FontSize="9" />
+                    <TextBlock x:Name="CircuitSelectionText" Text="未选择" Classes="workshop-muted" FontSize="9"
+                               TextTrimming="CharacterEllipsis" />
                   </StackPanel>
-                  <ComboBox Grid.Column="1" x:Name="AnalogAddTypeSelector" Classes="workshop-input"
-                            ItemsSource="{x:Static ui:ModuleAuthoringDocument.AnalogComponentTypes}"
-                            SelectedIndex="0" Margin="0,0,8,0"
-                            AutomationProperties.Name="待添加模拟元件类型" />
-                  <Button Grid.Column="2" Classes="workshop-button" Content="添加元件" Click="AddAnalogComponentClick"
+                  <ComboBox x:Name="AnalogAddTypeSelector" Classes="workshop-input" Width="170"
+                            ItemsSource="{x:Static ui:AnalogComponentCatalog.Components}"
+                            SelectedIndex="0" Margin="0,0,8,6"
+                            AutomationProperties.Name="待添加模拟元件类型">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate><TextBlock Text="{Binding DisplayName}" /></DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <Button Classes="workshop-button" Content="添加元件" Margin="0,0,0,6" Click="AddAnalogComponentClick"
                           AutomationProperties.Name="添加选中的模拟元件" />
-                  <Button Grid.Column="3" Classes="workshop-button workshop-icon" Content="−" Margin="6,0,0,0"
+                  <Button Classes="workshop-button workshop-icon" Content="−" Margin="6,0,0,6"
                           ToolTip.Tip="缩小原理图" AutomationProperties.Name="缩小模拟电路原理图" Click="CircuitZoomOutClick" />
-                  <Button Grid.Column="4" Classes="workshop-button workshop-icon" Content="+" Margin="6,0,0,0"
+                  <Button Classes="workshop-button workshop-icon" Content="+" Margin="6,0,0,6"
                           ToolTip.Tip="放大原理图" AutomationProperties.Name="放大模拟电路原理图" Click="CircuitZoomInClick" />
-                  <Button Grid.Column="5" x:Name="CircuitZoomText" Classes="workshop-button" Content="100%"
-                          Margin="6,0,0,0" ToolTip.Tip="适应全部元件" AutomationProperties.Name="适应全部模拟元件"
+                  <Button x:Name="CircuitZoomText" Classes="workshop-button" Content="100%"
+                          Margin="6,0,0,6" ToolTip.Tip="适应全部元件" AutomationProperties.Name="适应全部模拟元件"
                           Click="CircuitFitClick" />
-                </Grid>
-                <Grid Grid.Row="3" ColumnDefinitions="170,1.35*,*">
-                  <Border Grid.Column="0" Background="{DynamicResource WorkshopPanelBrush}"
+                  <CheckBox x:Name="CircuitSnapToggle" Content="吸附" IsChecked="True"
+                            VerticalAlignment="Center" Margin="8,0,2,6"
+                            ToolTip.Tip="移动元件和折点时吸附到网格" AutomationProperties.Name="切换原理图网格吸附" />
+                  <Button x:Name="CircuitPaletteToggleButton" Classes="workshop-button"
+                          Content="元件库" Margin="6,0,0,6" IsVisible="False"
+                          Click="CircuitPaletteToggleClick" AutomationProperties.Name="打开或关闭模拟元件库" />
+                  <Button x:Name="CircuitInspectorToggleButton" Classes="workshop-button"
+                          Content="属性" Margin="6,0,0,6" IsVisible="False"
+                          Click="CircuitInspectorToggleClick" AutomationProperties.Name="打开或关闭模拟元件属性" />
+                  <Button x:Name="CircuitAddRoutePointButton" Classes="workshop-button"
+                          Content="添加折点" Margin="6,0,0,6" IsVisible="False" IsEnabled="False"
+                          Click="CircuitAddRoutePointClick" AutomationProperties.Name="为所选网络添加布线折点" />
+                  <Button x:Name="CircuitClearRouteButton" Classes="workshop-button"
+                          Content="自动布线" Margin="6,0,0,6" IsVisible="False" IsEnabled="False"
+                          Click="CircuitClearRouteClick" AutomationProperties.Name="清除所选网络人工布线" />
+                </WrapPanel>
+                <Grid Grid.Row="3" x:Name="CircuitWorkspaceGrid" ColumnDefinitions="190,*,340" MinHeight="300">
+                  <Border x:Name="CircuitPalettePanel" Grid.Column="0" Background="{DynamicResource WorkshopPanelBrush}"
                           BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
                           CornerRadius="4" Padding="8" Margin="0,0,12,0">
                     <Grid RowDefinitions="Auto,*">
@@ -571,6 +632,8 @@
                     <Grid ClipToBounds="True">
                       <Canvas x:Name="CircuitGridLayer" Width="2400" Height="1600" IsHitTestVisible="False" />
                       <Canvas x:Name="CircuitWireLayer" Width="2400" Height="1600" />
+                      <Canvas x:Name="CircuitCrossingLayer" Width="2400" Height="1600" IsHitTestVisible="False" />
+                      <Canvas x:Name="CircuitJunctionLayer" Width="2400" Height="1600" />
                       <ItemsControl x:Name="CircuitNodeLayer" Width="2400" Height="1600"
                                     ItemsSource="{Binding AnalogCircuit.Components}">
                         <ItemsControl.ItemsPanel>
@@ -584,36 +647,51 @@
                         </ItemsControl.Styles>
                         <ItemsControl.ItemTemplate>
                           <DataTemplate>
-                            <Border Width="190" Height="140" Tag="{Binding}"
+                            <Border Width="{Binding Descriptor.SymbolWidth}" Height="{Binding Descriptor.SymbolHeight}"
+                                    Tag="{Binding}" ToolTip.Tip="{Binding Descriptor.DisplayName}"
+                                    Focusable="True" IsTabStop="True"
+                                    AutomationProperties.Name="{Binding Id}"
+                                    AutomationProperties.HelpText="{Binding Descriptor.DisplayName}"
                                     Background="{DynamicResource WorkshopControlBrush}"
                                     BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
-                                    CornerRadius="4" Padding="10" PointerPressed="CircuitComponentPointerPressed">
-                              <Grid RowDefinitions="Auto,Auto,*">
-                                <TextBlock Text="{Binding Id}" Classes="workshop-text" FontWeight="SemiBold"
-                                           TextTrimming="CharacterEllipsis" />
-                                <TextBlock Grid.Row="1" Text="{Binding Descriptor.DisplayName}" Classes="workshop-muted"
-                                           FontSize="10" Margin="0,1,0,7" />
-                                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-                                  <ItemsControl ItemsSource="{Binding Pins}">
-                                    <ItemsControl.ItemTemplate>
-                                      <DataTemplate>
-                                        <Grid ColumnDefinitions="10,64,*" Margin="0,0,0,4">
-                                          <Ellipse Width="10" Height="10" Tag="{Binding}"
-                                                   Fill="{DynamicResource WorkshopAccentBrush}"
-                                                   Stroke="{DynamicResource WorkshopBorderBrush}" StrokeThickness="1"
-                                                   VerticalAlignment="Center" Cursor="Hand"
-                                                   ToolTip.Tip="连接或断开此引脚"
-                                                   PointerPressed="CircuitPinPointerPressed" />
-                                          <TextBlock Grid.Column="1" Text="{Binding DisplayName}" Classes="workshop-muted"
-                                                     FontSize="9" TextTrimming="CharacterEllipsis" />
-                                          <TextBlock Grid.Column="2" Text="{Binding Node}" Classes="workshop-text"
-                                                     FontSize="9" TextTrimming="CharacterEllipsis" />
-                                        </Grid>
-                                      </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                  </ItemsControl>
-                                </ScrollViewer>
-                              </Grid>
+                                    CornerRadius="3" PointerPressed="CircuitComponentPointerPressed"
+                                    KeyDown="CircuitComponentKeyDown">
+                              <Canvas Width="{Binding Descriptor.SymbolWidth}" Height="{Binding Descriptor.SymbolHeight}"
+                                      ClipToBounds="False">
+                                <TextBlock Canvas.Left="8" Canvas.Top="4" MaxWidth="112"
+                                           Text="{Binding Id}" Classes="workshop-text" FontSize="10"
+                                           FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                <Path Data="{Binding Descriptor.SymbolPath, Converter={StaticResource SchematicGeometryConverter}}"
+                                      Stroke="{DynamicResource WorkshopTextBrush}" StrokeThickness="2"
+                                      StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent"
+                                      IsHitTestVisible="False" />
+                                <ItemsControl Width="{Binding Descriptor.SymbolWidth}" Height="{Binding Descriptor.SymbolHeight}"
+                                              ItemsSource="{Binding Pins}">
+                                  <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
+                                  </ItemsControl.ItemsPanel>
+                                  <ItemsControl.Styles>
+                                    <Style Selector="ContentPresenter">
+                                      <Setter Property="Canvas.Left" Value="{Binding VisualLeft}" />
+                                      <Setter Property="Canvas.Top" Value="{Binding VisualTop}" />
+                                    </Style>
+                                  </ItemsControl.Styles>
+                                  <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                      <Ellipse Width="14" Height="14" Tag="{Binding}"
+                                               Fill="{DynamicResource WorkshopCanvasBrush}"
+                                               Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="2"
+                                               Cursor="Hand" ToolTip.Tip="{Binding DisplayName}"
+                                               Focusable="True" IsTabStop="True"
+                                               AutomationProperties.Name="{Binding DisplayName}"
+                                               PointerEntered="CircuitPinPointerEntered"
+                                               PointerExited="CircuitPinPointerExited"
+                                               PointerPressed="CircuitPinPointerPressed"
+                                               KeyDown="CircuitPinKeyDown" />
+                                    </DataTemplate>
+                                  </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                              </Canvas>
                             </Border>
                           </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -622,9 +700,15 @@
                         <Rectangle x:Name="CircuitSelectionRectangle" IsVisible="False"
                                    Fill="#244DD6A4" Stroke="{DynamicResource WorkshopAccentBrush}"
                                    StrokeThickness="1" />
-                        <Line x:Name="CircuitWirePreview" IsVisible="False"
-                              Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="2"
-                              StrokeDashArray="5,3" />
+                        <Path x:Name="CircuitWirePreviewHalo" IsVisible="False"
+                              Stroke="{DynamicResource WorkshopCanvasBrush}" StrokeThickness="9"
+                              Opacity="0.92" StrokeLineCap="Round" StrokeJoin="Round" />
+                        <Path x:Name="CircuitWirePreview" IsVisible="False"
+                              Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="3"
+                              StrokeDashArray="6,4" StrokeLineCap="Round" StrokeJoin="Round" />
+                        <Ellipse x:Name="CircuitWirePreviewTarget" Width="18" Height="18" IsVisible="False"
+                                 Fill="{DynamicResource WorkshopCanvasBrush}"
+                                 Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="3" />
                         <Border x:Name="CircuitPaletteDragPreview" IsVisible="False"
                                 Width="150" Height="54" IsHitTestVisible="False"
                                 Background="{DynamicResource WorkshopControlBrush}"
@@ -636,20 +720,64 @@
                       </Canvas>
                     </Grid>
                   </Border>
-                  <ScrollViewer Grid.Column="2" HorizontalScrollBarVisibility="Auto" Margin="12,0,0,0">
-                  <ItemsControl x:Name="AnalogComponentList" ItemsSource="{Binding AnalogCircuit.Components}">
+                  <ScrollViewer x:Name="CircuitInspectorPanel" Grid.Column="2"
+                                HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                                Background="{DynamicResource WorkshopPanelBrush}"
+                                BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
+                                Padding="8" Margin="12,0,0,0">
+                  <Grid MinHeight="180">
+                    <Border x:Name="CircuitInspectorEmptyState"
+                            Background="{DynamicResource WorkshopControlBrush}"
+                            BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
+                            CornerRadius="4" Padding="16"
+                            AutomationProperties.Name="原理图检查器未选择状态">
+                      <StackPanel Spacing="5" VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <TextBlock Text="未选择元件" Classes="workshop-text" FontSize="14"
+                                   FontWeight="SemiBold" HorizontalAlignment="Center" />
+                        <TextBlock Text="元件属性将在此处显示" Classes="workshop-muted" FontSize="10"
+                                   HorizontalAlignment="Center" />
+                      </StackPanel>
+                    </Border>
+                    <Border x:Name="CircuitInspectorNetworkState" IsVisible="False"
+                            Background="{DynamicResource WorkshopControlBrush}"
+                            BorderBrush="{DynamicResource WorkshopAccentBrush}" BorderThickness="3,0,0,0"
+                            CornerRadius="4" Padding="14"
+                            AutomationProperties.Name="原理图网络检查状态">
+                      <StackPanel Spacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="已选择网络" Classes="workshop-label" />
+                        <TextBlock x:Name="CircuitInspectorNetworkText" Classes="workshop-text"
+                                   FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Border>
+                    <Border x:Name="CircuitInspectorMultiState" IsVisible="False"
+                            Background="{DynamicResource WorkshopControlBrush}"
+                            BorderBrush="{DynamicResource WorkshopAccentBrush}" BorderThickness="1"
+                            CornerRadius="4" Padding="16"
+                            AutomationProperties.Name="原理图多选检查状态">
+                      <StackPanel Spacing="5" VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <TextBlock Text="已选择多个元件" Classes="workshop-text" FontSize="14"
+                                   FontWeight="SemiBold" HorizontalAlignment="Center" />
+                        <TextBlock x:Name="CircuitInspectorMultiSelectionText" Classes="workshop-muted"
+                                   FontSize="10" HorizontalAlignment="Center" />
+                      </StackPanel>
+                    </Border>
+                    <ItemsControl x:Name="AnalogComponentList" IsVisible="False">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
                         <Border Background="{DynamicResource WorkshopControlBrush}"
                                 BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
-                                CornerRadius="4" Padding="12" Margin="0,0,0,10" MinWidth="760">
+                                CornerRadius="4" Padding="10" Margin="0,0,0,10">
                           <StackPanel Spacing="10">
-                            <Grid ColumnDefinitions="*,220,42">
+                            <Grid ColumnDefinitions="*,120,42">
                               <TextBox Grid.Column="0" Classes="workshop-input" Text="{Binding Id, Mode=TwoWay}"
                                        Watermark="元件 ID" Margin="0,0,8,0" />
                               <ComboBox Grid.Column="1" Classes="workshop-input"
-                                        ItemsSource="{x:Static ui:ModuleAuthoringDocument.AnalogComponentTypes}"
-                                        SelectedItem="{Binding Type, Mode=TwoWay}" Margin="0,0,8,0" />
+                                        ItemsSource="{x:Static ui:AnalogComponentCatalog.Components}"
+                                        SelectedItem="{Binding SelectedDescriptor, Mode=TwoWay}" Margin="0,0,8,0">
+                                <ComboBox.ItemTemplate>
+                                  <DataTemplate><TextBlock Text="{Binding DisplayName}" /></DataTemplate>
+                                </ComboBox.ItemTemplate>
+                              </ComboBox>
                               <Button Grid.Column="2" Classes="workshop-button workshop-icon" Content="×" Tag="{Binding}"
                                       ToolTip.Tip="删除模拟元件" AutomationProperties.Name="删除模拟元件"
                                       Click="RemoveAnalogComponentClick" />
@@ -657,7 +785,7 @@
                             <ItemsControl ItemsSource="{Binding Pins}">
                               <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                  <Grid ColumnDefinitions="150,*" Margin="0,0,0,6">
+                                  <Grid ColumnDefinitions="96,*" Margin="0,0,0,6">
                                     <TextBlock Text="{Binding DisplayName}" Classes="workshop-label"
                                                VerticalAlignment="Center" />
                                     <TextBox Grid.Column="1" Classes="workshop-input" Text="{Binding Node, Mode=TwoWay}"
@@ -669,7 +797,7 @@
                             <ItemsControl ItemsSource="{Binding Properties}">
                               <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                  <Grid ColumnDefinitions="150,*" Margin="0,0,0,6">
+                                  <Grid ColumnDefinitions="96,*" Margin="0,0,0,6">
                                     <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                                       <TextBlock Text="{Binding DisplayName}" Classes="workshop-label" />
                                       <TextBlock Text="{Binding Unit}" Classes="workshop-muted" FontSize="9" />
@@ -701,7 +829,7 @@
                                       <ItemsControl ItemsSource="{Binding JsonFields}">
                                         <ItemsControl.ItemTemplate>
                                           <DataTemplate>
-                                            <Grid ColumnDefinitions="150,*" Margin="0,0,0,4">
+                                            <Grid ColumnDefinitions="96,*" Margin="0,0,0,4">
                                               <TextBlock Text="{Binding Name}" Classes="workshop-muted" FontSize="9"
                                                          VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                               <NumericUpDown Grid.Column="1" Classes="workshop-input"
@@ -735,7 +863,8 @@
                         </Border>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
-                  </ItemsControl>
+                    </ItemsControl>
+                  </Grid>
                 </ScrollViewer>
                 </Grid>
               </Grid>
@@ -878,6 +1007,73 @@
                     </ItemsControl>
                   </StackPanel>
                 </Border>
+                <Border Background="{DynamicResource WorkshopPanelBrush}" BorderBrush="{DynamicResource WorkshopBorderBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="12" IsEnabled="{Binding CustomSkinEnabled}">
+                  <StackPanel Spacing="9">
+                    <TextBlock Text="矢量元件库" Classes="workshop-text" FontWeight="SemiBold" />
+                    <TextBlock Text="添加后可在画布拖动，并在属性区精确编辑" Classes="workshop-muted" FontSize="10" />
+                    <ItemsControl ItemsSource="{x:Static ui:PedalControlCatalog.Controls}">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Button Classes="workshop-button" Content="{Binding DisplayName}" Tag="{Binding}"
+                                  Click="AddSkinElementClick" Margin="0,0,6,6"
+                                  AutomationProperties.Name="添加踏板矢量元件" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+                <Border Background="{DynamicResource WorkshopPanelBrush}" BorderBrush="{DynamicResource WorkshopBorderBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="12" IsEnabled="{Binding CustomSkinEnabled}">
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="元件属性" Classes="workshop-text" FontWeight="SemiBold" />
+                    <TextBlock x:Name="SkinElementEmptyText" Text="选择画布中的矢量元件后编辑属性" Classes="workshop-muted" FontSize="10" />
+                    <StackPanel x:Name="SkinElementInspector" Spacing="7" IsVisible="False">
+                      <Grid ColumnDefinitions="86,*">
+                        <TextBlock Text="类型" Classes="workshop-label" VerticalAlignment="Center" />
+                        <ComboBox x:Name="SkinElementTypeSelector" Grid.Column="1" Classes="workshop-input"
+                                  ItemsSource="{x:Static ui:PedalControlCatalog.Controls}"
+                                  SelectionChanged="SkinElementTypeChanged">
+                          <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayName}" /></DataTemplate></ComboBox.ItemTemplate>
+                        </ComboBox>
+                      </Grid>
+                      <Grid ColumnDefinitions="86,*">
+                        <TextBlock Text="元素 ID" Classes="workshop-label" VerticalAlignment="Center" />
+                        <TextBox x:Name="SkinElementIdEditor" Grid.Column="1" Classes="workshop-input"
+                                 TextChanged="SkinElementIdChanged" />
+                      </Grid>
+                      <Grid ColumnDefinitions="86,*">
+                        <TextBlock Text="绑定参数/端口" Classes="workshop-label" VerticalAlignment="Center" />
+                        <TextBox x:Name="SkinElementBindingEditor" Grid.Column="1" Classes="workshop-input"
+                                 Watermark="可留空" TextChanged="SkinElementBindingChanged" />
+                      </Grid>
+                      <Grid ColumnDefinitions="*,*">
+                        <StackPanel Spacing="3"><TextBlock Text="X" Classes="workshop-label" /><NumericUpDown x:Name="SkinElementX" Tag="x" Classes="workshop-input" Minimum="0" Maximum="520" ValueChanged="SkinElementNumberChanged" /></StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="Y" Classes="workshop-label" /><NumericUpDown x:Name="SkinElementY" Tag="y" Classes="workshop-input" Minimum="0" Maximum="520" ValueChanged="SkinElementNumberChanged" /></StackPanel>
+                      </Grid>
+                      <Grid ColumnDefinitions="*,*">
+                        <StackPanel Spacing="3"><TextBlock Text="宽度" Classes="workshop-label" /><NumericUpDown x:Name="SkinElementWidth" Tag="width" Classes="workshop-input" Minimum="1" Maximum="520" ValueChanged="SkinElementNumberChanged" /></StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="高度" Classes="workshop-label" /><NumericUpDown x:Name="SkinElementHeight" Tag="height" Classes="workshop-input" Minimum="1" Maximum="520" ValueChanged="SkinElementNumberChanged" /></StackPanel>
+                      </Grid>
+                      <Grid ColumnDefinitions="*,*">
+                        <StackPanel Spacing="3"><TextBlock Text="旋转" Classes="workshop-label" /><NumericUpDown x:Name="SkinElementRotation" Tag="rotation" Classes="workshop-input" Minimum="-360" Maximum="360" ValueChanged="SkinElementNumberChanged" /></StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="档位数" Classes="workshop-label" /><NumericUpDown x:Name="SkinElementDetents" Tag="detents" Classes="workshop-input" Minimum="0" Maximum="128" ValueChanged="SkinElementNumberChanged" /></StackPanel>
+                      </Grid>
+                      <Grid ColumnDefinitions="86,*">
+                        <TextBlock Text="层级" Classes="workshop-label" VerticalAlignment="Center" />
+                        <NumericUpDown x:Name="SkinElementZIndex" Grid.Column="1" Tag="z-index" Classes="workshop-input" Minimum="-100000" Maximum="100000" ValueChanged="SkinElementNumberChanged" />
+                      </Grid>
+                      <Grid ColumnDefinitions="86,*">
+                        <TextBlock Text="标签" Classes="workshop-label" VerticalAlignment="Center" />
+                        <TextBox x:Name="SkinElementLabelEditor" Grid.Column="1" Classes="workshop-input"
+                                 TextChanged="SkinElementLabelChanged" />
+                      </Grid>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
                 <TextBlock Text="{Binding SkinFile, FallbackValue=ui/pedal.json}" Classes="workshop-muted" FontSize="10" />
               </StackPanel>
             </ScrollViewer>
@@ -924,6 +1120,53 @@
                       <TextBlock Canvas.Left="14" Canvas.Top="12" MaxWidth="170" Text="{Binding DisplayName}"
                                  Foreground="{Binding Skin.PreviewLabelColor}" FontSize="13" FontWeight="SemiBold"
                                  TextTrimming="CharacterEllipsis" />
+                      <ItemsControl x:Name="SkinElementLayer" Width="{Binding Skin.Width}" Height="{Binding Skin.Height}"
+                                    ItemsSource="{Binding Skin.Elements}" Foreground="{Binding Skin.PreviewLabelColor}" ZIndex="1">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.Styles>
+                          <Style Selector="ContentPresenter">
+                            <Setter Property="Canvas.Left" Value="{Binding X}" />
+                            <Setter Property="Canvas.Top" Value="{Binding Y}" />
+                            <Setter Property="Panel.ZIndex" Value="{Binding ZIndex}" />
+                          </Style>
+                        </ItemsControl.Styles>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Border Width="{Binding Width}" Height="{Binding Height}" Tag="{Binding}"
+                                    Background="Transparent" BorderBrush="{DynamicResource WorkshopAccentBrush}"
+                                    BorderThickness="1" CornerRadius="3" PointerPressed="SkinElementPointerPressed"
+                                    RenderTransformOrigin="50%,50%">
+                              <Border.RenderTransform>
+                                <RotateTransform Angle="{Binding Rotation}" />
+                              </Border.RenderTransform>
+                              <Grid>
+                                <Ellipse IsVisible="{Binding IsKnob}" Width="{Binding Width}" Height="{Binding Width}"
+                                         Fill="#10151A" Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="2" />
+                                <Rectangle IsVisible="{Binding IsFader}" Width="8" Height="{Binding Height}"
+                                           Fill="#10151A" Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="2" />
+                                <Border IsVisible="{Binding IsSwitch}" Width="{Binding Width}" Height="{Binding Height}"
+                                        Background="#25384A" BorderBrush="{DynamicResource WorkshopAccentBrush}" BorderThickness="2"
+                                        CornerRadius="4" />
+                                <Ellipse IsVisible="{Binding IsButton}" Width="{Binding Width}" Height="{Binding Height}"
+                                         Fill="#25384A" Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="2" />
+                                <Ellipse IsVisible="{Binding IsFootswitch}" Width="{Binding Width}" Height="{Binding Height}"
+                                         Fill="#1D2A38" Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="3" />
+                                <Ellipse IsVisible="{Binding IsLed}" Width="{Binding Width}" Height="{Binding Height}"
+                                         Fill="#FF5B57" Stroke="#FFD6D2" StrokeThickness="1" />
+                                <Border IsVisible="{Binding IsConnector}" Width="{Binding Width}" Height="{Binding Height}"
+                                        Background="#17212B" BorderBrush="{DynamicResource WorkshopAccentBrush}" BorderThickness="2"
+                                        CornerRadius="50" />
+                                <TextBlock IsVisible="{Binding IsLabel}" Text="{Binding Label}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Label}" IsVisible="{Binding !IsLabel}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Bottom" FontSize="8" TextTrimming="CharacterEllipsis" />
+                              </Grid>
+                            </Border>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
                       <ItemsControl x:Name="SkinPlacementLayer" Width="{Binding Skin.Width}" Height="{Binding Skin.Height}"
                                     ItemsSource="{Binding Skin.ParameterPlacements}"
                                     Foreground="{Binding Skin.PreviewLabelColor}" ZIndex="2">
@@ -984,9 +1227,11 @@
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
           <StackPanel Margin="24" Spacing="12">
             <Grid ColumnDefinitions="*,Auto">
-              <StackPanel Grid.Column="0" Spacing="2">
-                <TextBlock Text="{Binding ValidationSummary}" Classes="workshop-text" FontSize="16" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding FileStatus}" Classes="workshop-muted" FontSize="10" />
+              <StackPanel Grid.Column="0" Spacing="2" MinWidth="0" Margin="0,0,10,0">
+                <TextBlock Text="{Binding ValidationSummary}" Classes="workshop-text" FontSize="16"
+                           FontWeight="SemiBold" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding FileStatus}" Classes="workshop-muted" FontSize="10"
+                           TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
               </StackPanel>
               <Button Grid.Column="1" Classes="workshop-button primary" Content="重新校验" Click="ValidateProjectClick" />
             </Grid>
@@ -994,6 +1239,14 @@
                     BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1" CornerRadius="6"
                     Padding="14">
               <StackPanel Spacing="12">
+                <StackPanel Spacing="4">
+                  <TextBlock Text="白盒运行时状态" Classes="workshop-text" FontSize="13" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding WhiteboxGraphStatus}" Classes="workshop-muted" FontSize="10" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding WhiteboxRuntimeStatus}" Classes="workshop-muted" FontSize="10" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding WhiteboxRealtimeStatus}" Classes="workshop-muted" FontSize="10" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding WhiteboxEvidenceStatus}" Classes="workshop-muted" FontSize="10" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding WhiteboxDiagnostic}" Classes="workshop-muted" FontSize="10" TextWrapping="Wrap" />
+                </StackPanel>
                 <Grid ColumnDefinitions="*,Auto">
                   <StackPanel Grid.Column="0" Spacing="3">
                     <TextBlock Text="{Binding AuditionSummary}" Classes="workshop-text" FontSize="13" FontWeight="SemiBold" />
@@ -1146,26 +1399,46 @@
                 </Grid>
               </StackPanel>
             </Border>
-            <ListBox x:Name="ValidationList" ItemsSource="{Binding ValidationIssues}"
-                     Background="Transparent" BorderThickness="0"
-                     SelectionChanged="ValidationIssueSelected"
-                     AutomationProperties.Name="工坊问题列表">
-              <ListBox.ItemTemplate>
-                <DataTemplate>
-                  <Border BorderBrush="{DynamicResource WorkshopErrorBrush}" BorderThickness="3,0,0,0"
-                          Background="{DynamicResource WorkshopPanelBrush}" Padding="12,9" Margin="0,0,0,6">
-                    <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*">
-                      <TextBlock Text="{Binding SeverityText}" Foreground="{DynamicResource WorkshopErrorBrush}"
-                                 FontSize="9" FontWeight="Bold" Margin="0,0,8,3" />
-                      <TextBlock Grid.Column="1" Text="{Binding LocationText}" Classes="workshop-muted"
-                                 FontSize="9" Margin="0,0,0,3" />
-                      <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Message}"
-                                 Foreground="{DynamicResource WorkshopErrorBrush}" TextWrapping="Wrap" />
-                    </Grid>
-                  </Border>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
+            <Grid x:Name="ValidationStateGrid" MinHeight="132">
+              <Border x:Name="ValidationEmptyState" IsVisible="{Binding HasNoValidationIssues}"
+                      Background="{DynamicResource WorkshopPanelBrush}"
+                      BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
+                      CornerRadius="6" Padding="18"
+                      AutomationProperties.Name="项目校验通过">
+                <StackPanel Spacing="5" VerticalAlignment="Center" HorizontalAlignment="Center">
+                  <TextBlock Text="当前没有发现问题" Classes="workshop-text"
+                             FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                  <TextBlock Text="项目结构和连线校验均通过" Classes="workshop-muted"
+                             FontSize="10" HorizontalAlignment="Center" />
+                </StackPanel>
+              </Border>
+              <ListBox x:Name="ValidationList" ItemsSource="{Binding ValidationIssues}"
+                       IsVisible="{Binding HasValidationIssues}"
+                       Background="Transparent" BorderThickness="0"
+                       SelectionChanged="ValidationIssueSelected"
+                       AutomationProperties.Name="工坊问题列表">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <Border Tag="{Binding}" Classes="validation-issue"
+                            Classes.warning="{Binding IsWarning}"
+                            Classes.error="{Binding IsError}">
+                      <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*">
+                        <TextBlock Text="{Binding SeverityText}" Classes="validation-severity"
+                                   Classes.warning="{Binding IsWarning}"
+                                   Classes.error="{Binding IsError}" />
+                        <TextBlock Grid.Column="1" Text="{Binding LocationText}" Classes="workshop-muted"
+                                   FontSize="9" Margin="0,0,0,3" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+                                   MinWidth="0" />
+                        <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Message}"
+                                   Classes="validation-message"
+                                   Classes.warning="{Binding IsWarning}"
+                                   Classes.error="{Binding IsError}" TextWrapping="Wrap" />
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Grid>
           </StackPanel>
           </ScrollViewer>
         </TabItem>

@@ -6,11 +6,41 @@ var authoringWorkflowDirectory = Path.Combine(Path.GetTempPath(), $"solorig-auth
 try
 {
     var authoring = new ModuleAuthoringDocument();
-    Require(authoring.Kind == ModuleAuthoringKind.DigitalAlgorithm && authoring.IsValid && !authoring.IsDirty,
+    Require(authoring.Kind == ModuleAuthoringKind.DigitalAlgorithm && authoring.IsValid && !authoring.IsDirty &&
+            authoring.HasNoValidationIssues && !authoring.HasValidationIssues,
         "DIY authoring starts with a clean, structurally valid digital template");
+    Require(ConnectionFeedback.Neutral("待选择").Kind == ConnectionFeedbackKind.Neutral &&
+            ConnectionFeedback.Allowed("可连接").IsAllowed &&
+            ConnectionFeedback.Blocked("禁止").Kind == ConnectionFeedbackKind.Blocked &&
+            ConnectionFeedback.Diagnostic("诊断").Kind == ConnectionFeedbackKind.Diagnostic,
+        "connection feedback exposes shared neutral, allowed, blocked and diagnostic states");
+    Require(ModuleAuthoringDocument.KindOptions.Select(option => option.DisplayName).SequenceEqual(
+            ["数字效果器", "白盒模拟电路", "NAM / NAM A2", "IR 箱体"]) &&
+            ModuleAuthoringDocument.TemplatesForKind(ModuleAuthoringKind.DigitalAlgorithm).Count == 3 &&
+            ModuleAuthoringDocument.TemplatesForKind(ModuleAuthoringKind.AnalogCircuit).Count == 3,
+        "workshop exposes project types separately from starter templates");
+    var blankDigitalTemplate = new ModuleAuthoringDocument();
+    blankDigitalTemplate.NewProjectFromTemplate("digital-blank");
+    Require(blankDigitalTemplate.IsValid && !blankDigitalTemplate.IsDirty &&
+            blankDigitalTemplate.Parameters.Count == 0 &&
+            blankDigitalTemplate.DigitalOperations.Count == 1 &&
+            blankDigitalTemplate.DigitalOperations[0].Type == "bypass" &&
+            blankDigitalTemplate.AlgorithmId == "solorig.custom",
+        "blank digital template starts from a valid pass-through algorithm instead of the gain example");
+    var blankAnalogTemplate = new ModuleAuthoringDocument();
+    blankAnalogTemplate.NewProjectFromTemplate("analog-blank");
+    Require(blankAnalogTemplate.Kind == ModuleAuthoringKind.AnalogCircuit &&
+            !blankAnalogTemplate.IsDirty && blankAnalogTemplate.AnalogCircuit.Components.Count == 0,
+        "blank whitebox template starts without example components");
+    blankAnalogTemplate.ModuleId = "org.mumu-dada.solorig.blank-whitebox";
+    blankAnalogTemplate.DisplayName = "Blank Whitebox";
+    var blankAnalogDirectory = Path.Combine(authoringDirectory, "blank-whitebox-project");
+    Require(blankAnalogTemplate.SaveToDirectory(blankAnalogDirectory) &&
+            new ModuleAuthoringDocument().OpenFromDirectory(blankAnalogDirectory),
+        "blank whitebox projects save and reopen in structured mode without example components");
     var delayTemplate = new ModuleAuthoringDocument();
     delayTemplate.NewProjectFromTemplate("digital-delay");
-    Require(ModuleAuthoringDocument.TemplateOptions.Count >= 6 && delayTemplate.IsValid && !delayTemplate.IsDirty &&
+    Require(ModuleAuthoringDocument.TemplateOptions.Count >= 8 && delayTemplate.IsValid && !delayTemplate.IsDirty &&
             delayTemplate.Parameters.Select(parameter => parameter.Id).SequenceEqual(["time", "feedback", "mix"]) &&
             delayTemplate.DigitalOperations.Select(operation => operation.Type)
                 .SequenceEqual(["delay", "feedback", "mix"]),
@@ -33,9 +63,10 @@ try
         "DIY authoring undo and redo restore complete document metadata snapshots");
     var duplicatePort = authoring.AddPort("input");
     duplicatePort.Id = "input";
-    Require(!authoring.IsValid && authoring.ValidationMessages.Any(message => message.Contains("端口 ID 重复", StringComparison.Ordinal)),
+    Require(!authoring.IsValid && authoring.HasValidationIssues && !authoring.HasNoValidationIssues &&
+            authoring.ValidationMessages.Any(message => message.Contains("端口 ID 重复", StringComparison.Ordinal)),
         "DIY authoring rejects duplicate port identifiers before saving");
-    Require(authoring.RemovePort(duplicatePort) && authoring.IsValid,
+    Require(authoring.RemovePort(duplicatePort) && authoring.IsValid && authoring.HasNoValidationIssues,
         "removing the duplicate port restores structural validity");
     var extraParameter = authoring.AddParameter();
     extraParameter.Id = "tone";
@@ -69,11 +100,26 @@ try
     Require(liveTonePlacement.IsToggle && liveTonePlacement.ControlKindDisplay == "拨档",
         "pedal designer projects parameter control kinds into the matching canvas control");
     liveToneParameter.ControlKind = "knob";
+    var toneElement = new PedalSkinElementDraft("tone-control", "knob.continuous", "tone", 172, 92);
+    authoring.Skin.Elements.Add(toneElement);
+    toneElement.Type = "knob.detented";
+    toneElement.Width = 52;
+    toneElement.Height = 52;
+    toneElement.Detents = 11;
+    toneElement.Rotation = 15;
+    toneElement.ZIndex = 3;
+    toneElement.Label = "Tone";
+    toneElement.Style = "{\"accent\":\"#F2B84B\"}";
     Require(authoring.SaveToDirectory(authoringDirectory) && !authoring.IsDirty &&
             File.Exists(Path.Combine(authoringDirectory, "manifest.json")) &&
             File.Exists(Path.Combine(authoringDirectory, "logic", "algorithm.json")) &&
             File.Exists(Path.Combine(authoringDirectory, "ui", "pedal.json")),
         "DIY authoring saves package-shaped manifest, logic and custom appearance files atomically");
+    var savedSkinJson = File.ReadAllText(Path.Combine(authoringDirectory, "ui", "pedal.json"));
+    Require(savedSkinJson.Contains("\"schemaVersion\": 2", StringComparison.Ordinal) &&
+            savedSkinJson.Contains("\"elements\"", StringComparison.Ordinal) &&
+            savedSkinJson.Contains("knob.detented", StringComparison.Ordinal),
+        "DIY authoring writes v2 vector skin elements while retaining the legacy controls section");
     Directory.CreateDirectory(authoringWorkflowDirectory);
     var importedSkinSource = Path.Combine(authoringWorkflowDirectory, "custom-knob.bmp");
     File.WriteAllBytes(importedSkinSource, OneByOneBmp());
@@ -177,20 +223,46 @@ try
                 authoringRig.AddModule(authoring.ModuleId, "contract-diy-1", 520, 180),
             "DIY authoring installs its exported package into the current module catalog and rig");
         var installedNode = authoringRig.CanvasNodes.Single(node => node.InstanceId == "contract-diy-1");
-        Require(installedNode.Skin.Id == "contract.diy-skin" && installedNode.Skin.KnobId == "contract-knob" &&
-                installedNode.Skin.FootswitchId == "contract-footswitch" &&
-                installedNode.Width == 248 && installedNode.Height == 188 &&
+    var installedToneControl = installedNode.Controls.FirstOrDefault(control => control.Id == "tone");
+    var installedBypassControl = installedNode.Controls.FirstOrDefault(control => control.IsBypass);
+    Require(installedNode.Skin.Id == "contract.diy-skin" && installedNode.Skin.KnobId == "contract-knob" &&
+            installedNode.Skin.FootswitchId == "contract-footswitch" &&
+            installedNode.Skin.Elements.Any(element => element.Id == "tone-control" &&
+                element.Type == "knob.detented" && element.Binding == "tone" &&
+                element.Width == 52 && element.Detents == 11 && element.ZIndex == 3) &&
+            installedNode.Width == 248 && installedNode.Height == 188 &&
                 installedNode.CardBackground == "#173B4A" && installedNode.LabelForeground == "#F4F7FA" &&
-                 installedNode.Controls.Single(control => control.Id == "tone") is { X: 172, Y: 92 } &&
+                 installedToneControl is
+                    { X: 172, Y: 92, IsElement: true, ElementType: "knob.detented", Detents: 11,
+                      ControlWidth: 52, ControlHeight: 52 } &&
+                 installedBypassControl is { IsBypass: true, IsFootswitch: true, IsElement: true } &&
                  installedNode.HasCustomFootswitchPosition &&
                  installedNode.FootswitchCanvasLeft == 113 && installedNode.FootswitchCanvasTop == 147,
             $"DIY custom layout reaches the shared renderer with exact size, colors and control coordinates; " +
             $"skin={installedNode.Skin.Id}/{installedNode.Skin.KnobId}/{installedNode.Skin.FootswitchId}, " +
             $"size={installedNode.Width}x{installedNode.Height}, colors={installedNode.CardBackground}/{installedNode.LabelForeground}, " +
-            $"tone={installedNode.Controls.Single(control => control.Id == "tone").X}," +
-            $"{installedNode.Controls.Single(control => control.Id == "tone").Y}, " +
+            $"tone={installedToneControl?.Id}/{installedToneControl?.ElementType}/{installedToneControl?.X},{installedToneControl?.Y}, " +
+            $"controls={string.Join("|", installedNode.Controls.Select(control => control.Id + ":" + control.Target))}, " +
             $"foot={installedNode.HasCustomFootswitchPosition}/" +
             $"{installedNode.FootswitchCanvasLeft},{installedNode.FootswitchCanvasTop}");
+    }
+
+    using (var runtimeControlProbe = new RigEditorViewModel())
+    {
+        Require(runtimeControlProbe.SelectNode("drive-1"),
+            "shared runtime control probe can select the default effect node");
+        var driveControl = runtimeControlProbe.CanvasNodes.Single(node => node.InstanceId == "drive-1")
+            .Controls.Single(control => control.Id == "drive");
+        var minimum = driveControl.Minimum;
+        var maximum = driveControl.Maximum;
+        Require(runtimeControlProbe.ToggleParameter(driveControl.Target) &&
+                runtimeControlProbe.CanvasNodes.Single(node => node.InstanceId == "drive-1").Controls
+                    .Single(control => control.Id == "drive").Value == maximum &&
+                runtimeControlProbe.ToggleParameter(driveControl.Target) &&
+                runtimeControlProbe.CanvasNodes.Single(node => node.InstanceId == "drive-1").Controls
+                    .Single(control => control.Id == "drive").Value == minimum &&
+                runtimeControlProbe.RestoreDocumentState(false) && runtimeControlProbe.ClearHistory(),
+            "shared runtime control model toggles bounded parameters and restores clean history");
     }
 
     var reopenedAuthoring = new ModuleAuthoringDocument();
@@ -206,6 +278,8 @@ try
             reopenedAuthoring.Skin.UseCustomFootswitchPosition && reopenedAuthoring.Skin.FootswitchX == 124 &&
             reopenedAuthoring.Skin.FootswitchY == 158 &&
             reopenedAuthoring.Skin.ParameterPlacements.Single() is { ParameterId: "tone", X: 172, Y: 92 } &&
+            reopenedAuthoring.Skin.Elements.Single(element => element.Binding == "tone") is
+                { Type: "knob.detented", Width: 52, Height: 52, Detents: 11, Rotation: 15, ZIndex: 3, Label: "Tone" } &&
             reopenedAuthoring.LogicSource.Contains("digital-algorithm", StringComparison.Ordinal),
         "DIY authoring reopens metadata, operations and complete pedal layout without data loss");
     reopenedAuthoring.Skin.ParameterPlacements[0].X = 999;
@@ -297,6 +371,14 @@ try
             AnalogComponentCatalog.Get("bjt").Pins.Count == 3 &&
             AnalogComponentCatalog.Get("opamp").Pins.Count == 4,
         "analog DIY component catalog exposes the complete current Circuit v2 runtime families");
+    Require(AnalogComponentCatalog.Components.Any(component =>
+                component.Type == "bjt-npn" && component.DisplayName == "NPN 三极管") &&
+            AnalogComponentCatalog.Components.Any(component =>
+                component.Type == "bjt-pnp" && component.DisplayName == "PNP 三极管") &&
+            AnalogComponentCatalog.Components.All(component => component.DisplayName != "BJT") &&
+            AnalogComponentCatalog.Get("bjt-npn").RuntimeType == "bjt" &&
+            AnalogComponentCatalog.Get("bjt-pnp").Pins.Select(pin => pin.AnchorX).Distinct().Count() > 1,
+        "component palette exposes explicit transistor polarities with schematic pin anchors");
     var inlineDefaultTypes = new[]
     {
         "diode", "vccs", "ideal-op-amp", "opamp", "ota", "bjt", "jfet", "mosfet", "triode",
@@ -331,7 +413,8 @@ try
             bjt.Model == "contract-bjt" &&
             bjt.Properties.Single(property => property.Id == "bjtModel").IsJson,
         "component inspector descriptors expose typed number, model text and nested JSON editors");
-    Require(componentAuthoring.IsValid && componentAuthoring.ValidationIssues.Any(issue =>
+    Require(componentAuthoring.IsValid && componentAuthoring.HasValidationIssues &&
+            !componentAuthoring.HasNoValidationIssues && componentAuthoring.ValidationIssues.Any(issue =>
                 issue is { IsWarning: true, Target: ModuleAuthoringIssueTarget.AnalogProperty, FieldId: "model" } &&
                 ReferenceEquals(issue.TargetObject, bjt)),
         "audited model references remain saveable but expose a targeted runtime authorization warning");
@@ -350,7 +433,7 @@ try
         "component-level analog project reopens in structured mode");
     var reopenedBjt = reopenedComponentAuthoring.AnalogCircuit.Components.Single(component =>
         component.Id == "gain-stage");
-    Require(reopenedBjt.Type == "bjt" && reopenedBjt.Pins.Count == 3 &&
+    Require(reopenedBjt.Type == "bjt-npn" && reopenedBjt.Pins.Count == 3 &&
             reopenedBjt.Pins[0].Node == "out" && reopenedBjt.Pins[1].Node == "in" &&
             reopenedBjt.Pins[2].Node == "0" && reopenedBjt.CanvasX == 320.0 && reopenedBjt.CanvasY == 180.0 &&
             reopenedBjt.TryGetProperty("bjtModel", out var reopenedBjtModel) &&
@@ -358,6 +441,23 @@ try
             reopenedBjt.Properties.Single(property => property.Id == "bjtModel").JsonFields
                 .Single(field => field.Name == "forwardBeta").NumberValue == 150.0,
         "component-level analog authoring preserves pins, nested model JSON and editor layout metadata");
+    var pnpAuthoringDirectory = Path.Combine(authoringDirectory, "pnp-authoring-project");
+    var pnpAuthoring = new ModuleAuthoringDocument();
+    pnpAuthoring.NewProject(ModuleAuthoringKind.AnalogCircuit);
+    pnpAuthoring.ModuleId = "org.mumu-dada.solorig.contract-pnp-authoring";
+    pnpAuthoring.DisplayName = "Contract PNP Authoring";
+    var pnp = pnpAuthoring.AddAnalogComponent("bjt-pnp", 520.0, 220.0);
+    pnp.Id = "pnp-stage";
+    pnp.Pins[0].Node = "out";
+    pnp.Pins[1].Node = "in";
+    pnp.Pins[2].Node = "0";
+    Require(pnpAuthoring.SaveToDirectory(pnpAuthoringDirectory) &&
+            File.ReadAllText(Path.Combine(pnpAuthoringDirectory, "logic", "circuit.json"))
+                .Contains("\"type\": \"bjt\"", StringComparison.Ordinal) &&
+            new ModuleAuthoringDocument() is var reopenedPnpDocument &&
+            reopenedPnpDocument.OpenFromDirectory(pnpAuthoringDirectory) &&
+            reopenedPnpDocument.AnalogCircuit.Components.Single(component => component.Id == "pnp-stage").Type == "bjt-pnp",
+        "PNP authoring uses the shared BJT runtime type and restores its explicit palette polarity");
 
     var defaultInlineDirectory = Path.Combine(authoringDirectory, "default-inline-model-project");
     var defaultInlineAuthoring = new ModuleAuthoringDocument();
@@ -547,6 +647,42 @@ try
                 component.CanvasX == groupedOriginalPositions[index].CanvasX &&
                 component.CanvasY == groupedOriginalPositions[index].CanvasY).All(restored => restored),
         "schematic multi-component movement is coalesced into one undo transaction");
+    var route = topologyAuthoring.GetOrCreateAnalogWireRoute("out");
+    topologyAuthoring.BeginEditTransaction();
+    route.Points.Add(new AnalogWirePointDraft(208.0, 96.0));
+    route.Points.Add(new AnalogWirePointDraft(304.0, 192.0));
+    topologyAuthoring.EndEditTransaction();
+    var routeDirectory = Path.Combine(authoringDirectory, "wire-route-project");
+    Require(topologyAuthoring.SaveToDirectory(routeDirectory) &&
+            new ModuleAuthoringDocument() is var reopenedRouteDocument &&
+            reopenedRouteDocument.OpenFromDirectory(routeDirectory) &&
+            reopenedRouteDocument.AnalogCircuit.WireRoutes.Single(route => route.Node == "out").Points
+                .Select(point => (point.X, point.Y)).SequenceEqual([(208.0, 96.0), (304.0, 192.0)]),
+        "manual schematic wire bend points persist independently of the runtime circuit netlist");
+
+    var ercAuthoring = new ModuleAuthoringDocument();
+    ercAuthoring.NewProject(ModuleAuthoringKind.AnalogCircuit);
+    var ercAmplifier = ercAuthoring.AddAnalogComponent("ideal-op-amp", 420.0, 180.0);
+    ercAmplifier.Id = "amp";
+    ercAmplifier.Pins[2].Node = "control-only";
+    ercAmplifier.Pins[3].Node = "control-only";
+    ercAuthoring.RefreshValidation();
+    Require(ercAuthoring.IsValid && ercAuthoring.ValidationIssues.Any(issue =>
+                issue is { IsWarning: true, Target: ModuleAuthoringIssueTarget.AnalogPin, TargetId: "amp" } &&
+                issue.Message.Contains("仅连接控制引脚", StringComparison.Ordinal) &&
+                ReferenceEquals(issue.TargetObject, ercAmplifier)),
+        "ERC reports control-only networks as targeted non-blocking warnings");
+    var ercTransistor = ercAuthoring.AddAnalogComponent("bjt-npn", 640.0, 180.0);
+    ercTransistor.Id = "shorted-transistor";
+    foreach (var pin in ercTransistor.Pins)
+    {
+        pin.Node = "shorted-transistor-net";
+    }
+    ercAuthoring.RefreshValidation();
+    Require(ercAuthoring.IsValid && ercAuthoring.ValidationIssues.Count(issue =>
+                issue is { IsWarning: true, Target: ModuleAuthoringIssueTarget.AnalogPin, TargetId: "shorted-transistor" } &&
+                issue.Message.Contains("角色短接", StringComparison.Ordinal)) >= ercTransistor.Pins.Count,
+        "ERC marks every pin in a multi-pin same-net role short as a targeted non-blocking warning");
 }
 finally
 {
@@ -744,12 +880,26 @@ Require(viewModel.SelectInspectorTab("参数") && viewModel.IsParameterInspector
     "inspector returns to parameter tab");
 viewModel.ConnectionSourceNodeId = "drive-1";
 viewModel.ConnectionDestinationNodeId = "delay-1";
+Require(viewModel.DisconnectNodes("drive-1", "delay-1") && viewModel.CanConnectNodes &&
+        viewModel.ConnectionCandidateStatusText.Contains("output", StringComparison.Ordinal) &&
+        viewModel.ConnectionCandidateStatusText.Contains("input", StringComparison.Ordinal) &&
+        viewModel.ConnectionCandidateStatusText.Contains("2ch", StringComparison.Ordinal),
+    "topology editor reports the compatible source output and destination input ports before creating an edge");
+Require(viewModel.ConnectConnectionCandidate(), "topology editor can create the compatible edge after port inspection");
+Require(viewModel.ClearConnectionSelection(), "topology editor can clear the selected edge before duplicate validation");
+viewModel.ConnectionSourceNodeId = "drive-1";
+viewModel.ConnectionDestinationNodeId = "delay-1";
 Require(!viewModel.CanConnectNodes && viewModel.ConnectionCandidateStatusText.Contains("已存在", StringComparison.Ordinal),
     "topology editor rejects a duplicate directed edge before calling the backend");
+Require(viewModel.CanvasNodes.First(node => node.InstanceId == "drive-1").IsConnectionSourceCandidate &&
+        viewModel.CanvasNodes.First(node => node.InstanceId == "delay-1").IsConnectionDestinationInvalid,
+    "duplicate connection visibly marks its source and invalid destination candidates");
 viewModel.ConnectionSourceNodeId = "delay-1";
 viewModel.ConnectionDestinationNodeId = "drive-1";
 Require(!viewModel.CanConnectNodes && viewModel.ConnectionCandidateStatusText.Contains("环路", StringComparison.Ordinal),
     "topology editor rejects a cycle before calling the backend");
+Require(viewModel.CanvasNodes.First(node => node.InstanceId == "drive-1").IsConnectionDestinationInvalid,
+    "cycle candidate visibly marks the invalid destination");
 viewModel.ConnectionDestinationNodeId = "delay-1";
 Require(!viewModel.CanConnectNodes && viewModel.ConnectionCandidateStatusText.Contains("自身", StringComparison.Ordinal),
     "topology editor rejects self-connections");
@@ -759,6 +909,10 @@ Require(viewModel.RealtimeContract.IsRealtimeSafe, "C ABI reports a C++-only, pr
 Require(viewModel.RealtimeContract.MaximumOversampling is >= 1 and <= 16, "realtime contract bounds oversampling");
 Require(viewModel.RealtimeStatus.Contains("C++ safe", StringComparison.Ordinal), "realtime status is visible to the shared ViewModel");
 Require(viewModel.WhiteboxStatus.Diagnostic.Contains("PedalKernel", StringComparison.Ordinal), "whitebox status keeps the clean-room boundary visible");
+Require(viewModel.WhiteboxStatus.GraphStatus.Contains("Circuit v2", StringComparison.Ordinal),
+    "whitebox graph status reports the current Circuit v2 boundary");
+Require(viewModel.WhiteboxStatus.RuntimeStatus.Contains("M30", StringComparison.Ordinal),
+    "whitebox runtime status reports the verified M30 device matrix");
 
 using (var lifecycleProbe = new BackendSession())
 {
@@ -1005,6 +1159,11 @@ try
     File.WriteAllBytes(Path.Combine(skinPackageDirectory, "ui", "images", "toggle.bmp"), OneByOneBmp());
     File.WriteAllBytes(Path.Combine(skinPackageDirectory, "ui", "images", "footswitch.bmp"), OneByOneBmp());
     const string skinPackageModuleId = "org.mumu-dada.solorig.contract-skin";
+    var migratedSkin = new ModuleAuthoringDocument();
+    Require(migratedSkin.OpenFromDirectory(skinPackageDirectory) &&
+            migratedSkin.Skin.Elements.Any(element => element.Type == "connector.ts") &&
+            migratedSkin.Skin.Elements.Any(element => element.Type == "footswitch"),
+        "legacy v1 pedal skins migrate to the v2 vector element defaults when reopened");
     Require(viewModel.ImportResource(skinPackageDirectory), "external package with a custom skin imports");
     Require(viewModel.AddModule(skinPackageModuleId, "contract-skin-1", 900, 160),
         "custom-skin module can be added to the shared graph");

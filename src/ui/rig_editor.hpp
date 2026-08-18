@@ -39,6 +39,21 @@ struct PedalSkinDefinition {
         double y{};
     };
 
+    struct Element {
+        std::string id;
+        std::string type;
+        std::string binding;
+        double x{};
+        double y{};
+        double width{};
+        double height{};
+        double rotation{};
+        int32_t detents{};
+        int32_t z_index{};
+        std::string label;
+        std::string style;
+    };
+
     std::string id;
     std::string knob;
     std::string toggle;
@@ -55,6 +70,7 @@ struct PedalSkinDefinition {
     std::string background_color;
     std::string label_color;
     std::vector<ParameterPlacement> parameter_placements;
+    std::vector<Element> elements;
     std::optional<EditorPoint> footswitch_position;
 };
 

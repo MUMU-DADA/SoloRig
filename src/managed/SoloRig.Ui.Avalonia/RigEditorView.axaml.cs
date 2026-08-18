@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using AvaloniaPath = Avalonia.Controls.Shapes.Path;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -44,6 +45,7 @@ public sealed partial class RigEditorView : UserControl
         string CardBorder,
         string Text,
         string Muted,
+        string Warning,
         string Error,
         string Accent,
         string AccentHover,
@@ -63,13 +65,13 @@ public sealed partial class RigEditorView : UserControl
     private static readonly ThemePalette DarkPalette = new(
         "#11151B", "#161B22", "#191F27", "#151C24", "#182029", "#222A34", "#2A3440",
         "#1B242D", "#1D2A38", "#282038", "#394655", "#3A4753", "#2C3946", "#EEF3F8",
-        "#9AA8B8", "#FF7B72", "#4DD6A4", "#69E2B5", "#10261F", "#66A7FF", "#E8F2FF", "#B889F5",
+        "#9AA8B8", "#FFD166", "#FF7B72", "#4DD6A4", "#69E2B5", "#10261F", "#66A7FF", "#E8F2FF", "#B889F5",
         "#FFF4FF", "#10151A", "#303C47", "#31414F", "#26313C", "#131820", "#D8FAED", "#637384");
 
     private static readonly ThemePalette LightPalette = new(
         "#F4F7FB", "#FFFFFF", "#EEF3F7", "#E6EDF4", "#DCE6EF", "#FFFFFF", "#E8F0F6",
         "#F8FAFC", "#EAF2F9", "#F1ECFB", "#C7D2DE", "#B5C2CF", "#C5D1DC", "#172033",
-        "#5F6B78", "#B42318", "#0F766E", "#0B5F59", "#FFFFFF", "#2F80ED", "#EAF2FF", "#7C3AED",
+        "#5F6B78", "#A16207", "#B42318", "#0F766E", "#0B5F59", "#FFFFFF", "#2F80ED", "#EAF2FF", "#7C3AED",
         "#F5F3FF", "#CBD5E1", "#E2E8F0", "#B7C5D4", "#DDE7F0", "#F5F8FB", "#D1FAE5", "#94A3B8");
 
     private static readonly FilePickerFileType SrigFileType = new("SoloRig preset")
@@ -97,6 +99,7 @@ public sealed partial class RigEditorView : UserControl
     private bool moduleDragOverCanvas;
     private const double MinimumCanvasZoom = 0.6;
     private const double MaximumCanvasZoom = 1.8;
+    private const double ConnectionSnapScreenRadius = 28.0;
     private double canvasZoom = 1.0;
     private double canvasPanX;
     private double canvasPanY;
@@ -104,15 +107,20 @@ public sealed partial class RigEditorView : UserControl
     private Point canvasPanPointerStart;
     private double canvasPanOriginX;
     private double canvasPanOriginY;
+    private bool draggingConnection;
+    private string? draggingConnectionSource;
     private bool compactWorkspace;
     private bool moduleDrawerOpen;
     private bool inspectorDrawerOpen;
     private int workspaceFocusIndex = -1;
     private readonly Dictionary<TextBox, string> parameterEditBaselines = [];
+    private readonly HashSet<string> pressedMomentaryTargets = [];
 
     public RigEditorView()
     {
         InitializeComponent();
+        CanvasConnectionLayer.ContainerPrepared += ConnectionContainerPrepared;
+        CanvasNodeLayer.ContainerPrepared += NodeContainerPrepared;
         ApplyTheme(ThemeSnapshot.Empty, true);
         ApplyCanvasTransform();
     }
@@ -349,7 +357,8 @@ public sealed partial class RigEditorView : UserControl
                 .Count(control => string.Equals(control.Tag as string, target, StringComparison.Ordinal));
             var chip = this.GetVisualDescendants().OfType<Button>().FirstOrDefault(control =>
                 control.Classes.Contains("srg-parameter-chip") &&
-                string.Equals(control.Tag as string, target, StringComparison.Ordinal));
+                control.Tag is NodeControlSnapshot runtimeControl &&
+                string.Equals(runtimeControl.Target, target, StringComparison.Ordinal));
             var capturePath = Environment.GetEnvironmentVariable("SOLO_RIG_PARAMETER_PROBE_CAPTURE");
             var captureReady = string.IsNullOrWhiteSpace(capturePath) || CaptureRenderedSurface(capturePath) is not null;
             var controlsReady = textBox is not null && slider is not null && nudgeButtons == 2 && chip is not null &&
@@ -433,6 +442,54 @@ public sealed partial class RigEditorView : UserControl
                          (Math.Abs(after.X - before.X) > 0.5 || Math.Abs(after.Y - before.Y) > 0.5) &&
                          Math.Abs(after.X - (firstNode.CanvasX * canvasZoom + canvasPanX)) < 1.0 &&
                          Math.Abs(after.Y - (firstNode.CanvasY * canvasZoom + canvasPanY)) < 1.0;
+            var zoomedLine = CanvasConnectionLayer.GetVisualDescendants().OfType<AvaloniaPath>()
+                .FirstOrDefault(path => path.Classes.Contains("srg-connection-line"));
+            var zoomedHit = CanvasConnectionLayer.GetVisualDescendants().OfType<AvaloniaPath>()
+                .FirstOrDefault(path => path.Classes.Contains("srg-connection-hit"));
+            var zoomedEndpoint = CanvasNodeLayer.GetVisualDescendants().OfType<Button>()
+                .FirstOrDefault(button => button.Classes.Contains("srg-endpoint"));
+            var zoomedCandidate = CanvasNodeLayer.GetVisualDescendants().OfType<Control>()
+                .FirstOrDefault(control => control.Classes.Contains("srg-endpoint-candidate"));
+            var renderScale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
+            var zoomedEndpointScaleValue = (zoomedEndpoint?.RenderTransform as ScaleTransform)?.ScaleX ?? double.NaN;
+            var zoomedCandidateScaleValue = (zoomedCandidate?.RenderTransform as ScaleTransform)?.ScaleX ?? double.NaN;
+            var zoomedConnectionStable = zoomedLine is not null && zoomedHit is not null &&
+                                         zoomedEndpoint?.RenderTransform is ScaleTransform zoomedEndpointScale &&
+                                         zoomedCandidate?.RenderTransform is ScaleTransform zoomedCandidateScale &&
+                                         Math.Abs(zoomedLine.StrokeThickness - 3.0 / 1.25) < 0.01 &&
+                                         Math.Abs(zoomedHit.StrokeThickness - 18.0 / 1.25) < 0.01 &&
+                                         Math.Abs(zoomedEndpointScale.ScaleX - 1.0 / 1.25) < 0.01 &&
+                                         Math.Abs(zoomedCandidateScale.ScaleX - 1.0 / 1.25) < 0.01;
+            var zoomedDpiInvariant = zoomedLine is not null && zoomedEndpoint is not null &&
+                                     renderScale > 0.0 &&
+                                     Math.Abs(zoomedLine.StrokeThickness * canvasZoom * renderScale - 3.0 * renderScale) < 0.05 &&
+                                     Math.Abs(zoomedEndpoint.Bounds.Width * zoomedEndpointScaleValue *
+                                              canvasZoom * renderScale - zoomedEndpoint.Bounds.Width * renderScale) < 0.05;
+            SetCanvasViewport(MinimumCanvasZoom, canvasPanX, canvasPanY);
+            var minimumEndpoint = CanvasNodeLayer.GetVisualDescendants().OfType<Button>()
+                .FirstOrDefault(button => button.Classes.Contains("srg-endpoint"));
+            var minimumCandidate = CanvasNodeLayer.GetVisualDescendants().OfType<Control>()
+                .FirstOrDefault(control => control.Classes.Contains("srg-endpoint-candidate"));
+            var minimumConnectionStable = CanvasConnectionLayer.GetVisualDescendants().OfType<AvaloniaPath>()
+                .Where(path => path.Classes.Contains("srg-connection-line"))
+                .All(path => Math.Abs(path.StrokeThickness - 3.0 / MinimumCanvasZoom) < 0.01) &&
+                minimumEndpoint?.RenderTransform is ScaleTransform minimumEndpointScale &&
+                minimumCandidate?.RenderTransform is ScaleTransform minimumCandidateScale &&
+                Math.Abs(minimumEndpointScale.ScaleX - 1.0 / MinimumCanvasZoom) < 0.01 &&
+                Math.Abs(minimumCandidateScale.ScaleX - 1.0 / MinimumCanvasZoom) < 0.01;
+            SetCanvasViewport(MaximumCanvasZoom, canvasPanX, canvasPanY);
+            var maximumEndpoint = CanvasNodeLayer.GetVisualDescendants().OfType<Button>()
+                .FirstOrDefault(button => button.Classes.Contains("srg-endpoint"));
+            var maximumCandidate = CanvasNodeLayer.GetVisualDescendants().OfType<Control>()
+                .FirstOrDefault(control => control.Classes.Contains("srg-endpoint-candidate"));
+            var maximumConnectionStable = CanvasConnectionLayer.GetVisualDescendants().OfType<AvaloniaPath>()
+                .Where(path => path.Classes.Contains("srg-connection-line"))
+                .All(path => Math.Abs(path.StrokeThickness - 3.0 / MaximumCanvasZoom) < 0.01) &&
+                maximumEndpoint?.RenderTransform is ScaleTransform maximumEndpointScale &&
+                maximumCandidate?.RenderTransform is ScaleTransform maximumCandidateScale &&
+                Math.Abs(maximumEndpointScale.ScaleX - 1.0 / MaximumCanvasZoom) < 0.01 &&
+                Math.Abs(maximumCandidateScale.ScaleX - 1.0 / MaximumCanvasZoom) < 0.01;
+            SetCanvasViewport(1.25, canvasPanX, canvasPanY);
             var panBeforeX = canvasPanX;
             var panBeforeY = canvasPanY;
             PanCanvasBy(24, 18);
@@ -441,7 +498,17 @@ public sealed partial class RigEditorView : UserControl
             FitCanvasToNodes();
             var fitted = canvasZoom is >= MinimumCanvasZoom and <= MaximumCanvasZoom &&
                           string.Equals(CanvasZoomText.Text, $"{canvasZoom * 100:0}%", StringComparison.Ordinal);
-            passed = zoomed && panned && fitted;
+            passed = zoomed && zoomedConnectionStable && zoomedDpiInvariant && minimumConnectionStable && maximumConnectionStable &&
+                     panned && fitted;
+            if (!passed)
+            {
+                Console.Error.WriteLine($"[standalone-visual-probe] canvas navigation detail: " +
+                                        $"zoomed={zoomed}, connection={zoomedConnectionStable}, dpi={zoomedDpiInvariant}, " +
+                                        $"minimum={minimumConnectionStable}, maximum={maximumConnectionStable}, " +
+                                        $"scale={renderScale:0.###}, line={zoomedLine?.StrokeThickness:0.###}, hit={zoomedHit?.StrokeThickness:0.###}, " +
+                                        $"endpoint={zoomedEndpoint?.Bounds.Width:0.###}/{zoomedEndpointScaleValue:0.###}, " +
+                                        $"candidate={zoomedCandidate?.Bounds.Width:0.###}/{zoomedCandidateScaleValue:0.###}, canvasZoom={canvasZoom:0.###}");
+            }
         }
         finally
         {
@@ -805,12 +872,16 @@ public sealed partial class RigEditorView : UserControl
                        selectedConnection.DestinationInstanceId == target.DestinationInstanceId &&
                        selectedConnection.Selected &&
                        viewModel.ConnectionSelectionText.Contains(target.SourceInstanceId, StringComparison.Ordinal);
+        UpdateLayout();
+        var renderedConnectionPaths = CanvasConnectionLayer?.GetVisualDescendants().OfType<AvaloniaPath>().ToArray() ?? [];
+        var hasArrowAndHitTarget = renderedConnectionPaths.Any(path => path.Data is StreamGeometry) &&
+                                   renderedConnectionPaths.Any(path => path.StrokeThickness >= target.HitTestThickness - 0.01);
         var restored = original is null
             ? viewModel.ClearConnectionSelection()
             : viewModel.SelectConnection(original.SourceInstanceId, original.DestinationInstanceId);
         viewModel.ConnectionSourceNodeId = originalSource;
         viewModel.ConnectionDestinationNodeId = originalDestination;
-        return selected && restored &&
+        return selected && hasArrowAndHitTarget && restored &&
                BuildVisualRegressionFingerprint() == originalFingerprint &&
                (viewModel.SelectedConnection?.SourceInstanceId ?? string.Empty) == (original?.SourceInstanceId ?? string.Empty);
     }
@@ -823,6 +894,11 @@ public sealed partial class RigEditorView : UserControl
         }
         var originalSource = viewModel.ConnectionSourceNodeId;
         var originalDestination = viewModel.ConnectionDestinationNodeId;
+        var originalDragging = draggingConnection;
+        var originalDraggingSource = draggingConnectionSource;
+        var originalZoom = canvasZoom;
+        var originalPanX = canvasPanX;
+        var originalPanY = canvasPanY;
         var originalFingerprint = BuildVisualRegressionFingerprint();
         var passed = false;
         try
@@ -830,19 +906,49 @@ public sealed partial class RigEditorView : UserControl
             viewModel.ConnectionSourceNodeId = "drive-1";
             viewModel.ConnectionDestinationNodeId = "delay-1";
             UpdateLayout();
+            var duplicateTarget = viewModel.CanvasNodes.FirstOrDefault(node => node.InstanceId == "delay-1");
             var duplicateRejected = ConnectionSourceSelector.SelectedItem as string == "drive-1" &&
                                     ConnectionDestinationSelector.SelectedItem as string == "delay-1" &&
                                     !CanvasConnectButton.IsEnabled &&
-                                    ConnectionCandidateStatusText.Text?.Contains("已存在", StringComparison.Ordinal) == true;
+                                    ConnectionCandidateStatusText.Text?.Contains("已存在", StringComparison.Ordinal) == true &&
+                                    duplicateTarget?.IsConnectionDestinationInvalid == true;
+            draggingConnection = true;
+            draggingConnectionSource = "drive-1";
+            UpdateConnectionPreview(GetInputEndpointPoint("delay-1"));
+            var duplicatePreviewMarker = ConnectionPreviewTarget.IsVisible &&
+                                          ConnectionPreviewTarget.Stroke == (Resources["SrgErrorBrush"] as IBrush) &&
+                                          ConnectionPreviewPath.IsVisible &&
+                                          ConnectionPreviewPath.Stroke == (Resources["SrgErrorBrush"] as IBrush) &&
+                                          ConnectionPreviewHalo.IsVisible &&
+                                          ConnectionPreviewHalo.Data is StreamGeometry;
+            SetCanvasViewport(MinimumCanvasZoom, canvasPanX, canvasPanY);
+            var targetPoint = GetInputEndpointPoint("delay-1");
+            var minimumRadius = ConnectionScreenScale(ConnectionSnapScreenRadius);
+            var minimumSnap = FindInputEndpoint(new Point(targetPoint.X + minimumRadius * 0.8, targetPoint.Y)) == "delay-1";
+            var minimumOutside = FindInputEndpoint(new Point(targetPoint.X + minimumRadius * 1.2, targetPoint.Y)) != "delay-1";
+            SetCanvasViewport(MaximumCanvasZoom, canvasPanX, canvasPanY);
+            targetPoint = GetInputEndpointPoint("delay-1");
+            var maximumRadius = ConnectionScreenScale(ConnectionSnapScreenRadius);
+            var maximumSnap = FindInputEndpoint(new Point(targetPoint.X + maximumRadius * 0.8, targetPoint.Y)) == "delay-1";
+            var maximumOutside = FindInputEndpoint(new Point(targetPoint.X + maximumRadius * 1.2, targetPoint.Y)) != "delay-1";
+            var snapInvariant = minimumSnap && minimumOutside && maximumSnap && maximumOutside;
+            SetCanvasViewport(1.0, canvasPanX, canvasPanY);
             viewModel.ConnectionSourceNodeId = "delay-1";
             viewModel.ConnectionDestinationNodeId = "drive-1";
             UpdateLayout();
             var cycleRejected = !CanvasConnectButton.IsEnabled &&
                                 ConnectionCandidateStatusText.Text?.Contains("环路", StringComparison.Ordinal) == true;
-            passed = duplicateRejected && cycleRejected;
+            passed = duplicateRejected && duplicatePreviewMarker && snapInvariant && cycleRejected;
         }
         finally
         {
+            draggingConnection = originalDragging;
+            draggingConnectionSource = originalDraggingSource;
+            if (!originalDragging)
+            {
+                HideConnectionPreview();
+            }
+            SetCanvasViewport(originalZoom, originalPanX, originalPanY);
             viewModel.ConnectionSourceNodeId = originalSource;
             viewModel.ConnectionDestinationNodeId = originalDestination;
             UpdateLayout();
@@ -1187,6 +1293,68 @@ public sealed partial class RigEditorView : UserControl
         }
     }
 
+    public bool ProbeRuntimeControlInteraction()
+    {
+        if (viewModel is null || CanvasNodeLayer is null)
+        {
+            return false;
+        }
+        var originalNodeId = viewModel.SelectedNode?.InstanceId;
+        var originalDirty = viewModel.IsDirty;
+        var node = viewModel.CanvasNodes.FirstOrDefault(candidate =>
+            candidate.Parameters.Any(parameter => parameter.IsValidRange));
+        if (node is null)
+        {
+            return false;
+        }
+        var parameter = node.Parameters.First(parameterValue => parameterValue.IsValidRange);
+        var target = $"{node.InstanceId}.{parameter.Id}";
+        var originalValue = parameter.Value;
+        try
+        {
+            if (!viewModel.SelectNode(node.InstanceId))
+            {
+                return false;
+            }
+            UpdateLayout();
+            var nodeControl = FindCanvasNodeControl(node.InstanceId);
+            var runtimeButtons = nodeControl?.GetVisualDescendants().OfType<Button>()
+                .Where(button => button.Tag is NodeControlSnapshot)
+                .ToArray() ?? [];
+            var runtimeControl = viewModel.CanvasNodes.Single(candidate => candidate.InstanceId == node.InstanceId)
+                .Controls.FirstOrDefault(control => control.Target == target);
+            var materialized = runtimeControl is not null && runtimeButtons.Any(button =>
+                button.Tag is NodeControlSnapshot control && control.Target == target &&
+                !string.IsNullOrWhiteSpace(button.GetValue(AutomationProperties.NameProperty)));
+            var toggled = runtimeControl is not null && viewModel.ToggleParameter(target);
+            var changed = toggled && Math.Abs(viewModel.CanvasNodes.Single(candidate => candidate.InstanceId == node.InstanceId)
+                .Controls.First(control => control.Target == target).Value - originalValue) > 0.00001F;
+            var restored = viewModel.SetParameter(target, originalValue, markDirty: false) &&
+                           viewModel.RestoreDocumentState(originalDirty);
+            var passed = materialized && changed && restored;
+            if (!passed)
+            {
+                Console.Error.WriteLine($"[standalone-visual-probe] runtime control detail: buttons={runtimeButtons.Length}, materialized={materialized}, changed={changed}, restored={restored}, element={runtimeControl?.IsElement}");
+            }
+            return passed;
+        }
+        finally
+        {
+            viewModel.SetParameter(target, originalValue, markDirty: false);
+            viewModel.RestoreDocumentState(originalDirty);
+            viewModel.ClearHistory();
+            if (originalNodeId is null)
+            {
+                viewModel.ClearSelection();
+            }
+            else
+            {
+                viewModel.SelectNode(originalNodeId);
+            }
+            UpdateLayout();
+        }
+    }
+
     public bool ProbeModuleDragPreview()
     {
         if (viewModel is null || ModuleDragPreview is null || ModuleDragPreviewTitle is null ||
@@ -1423,7 +1591,8 @@ public sealed partial class RigEditorView : UserControl
         var resources = string.Join(",", resourceKeys.Select(key =>
             $"{key}={(Resources[key] as SolidColorBrush)?.Color.ToString() ?? "missing"}"));
         var nodes = string.Join("|", viewModel.CanvasNodes.Select(node =>
-            $"{node.InstanceId}:{node.Selected}:{node.Unresolved}:{node.Bypassed}:{node.FootswitchText}:skin={node.Skin.Id}:" +
+            $"{node.InstanceId}:{node.Selected}:{node.Unresolved}:{node.Bypassed}:{node.FootswitchText}:" +
+            $"candidate={node.IsConnectionSourceCandidate},{node.IsConnectionDestinationValid},{node.IsConnectionDestinationInvalid}:skin={node.Skin.Id}:" +
             $"images={node.Skin.HasKnobImage},{node.Skin.HasToggleImage},{node.Skin.HasFootswitchImage}:" +
             string.Join(",", node.Controls.Select(control =>
                 $"{control.Id}:{control.Value:0.######}:{control.KnobAngle:0.###}:{control.IsToggle}"))));
@@ -1434,7 +1603,8 @@ public sealed partial class RigEditorView : UserControl
         var navigator = string.Join("|", viewModel.NodeNavigatorEntries.Select(entry =>
             $"{entry.InstanceId}:{entry.IsBatchSelected}:{entry.Node.Bypassed}"));
         var connections = string.Join("|", viewModel.CanvasConnections.Select(connection =>
-            $"{connection.SourceInstanceId}>{connection.DestinationInstanceId}:{connection.Selected}"));
+            $"{connection.SourceInstanceId}>{connection.DestinationInstanceId}:{connection.Selected}:" +
+            $"stroke={connection.StrokeThickness:0.###}:halo={connection.HaloThickness:0.###}:hit={connection.HitTestThickness:0.###}"));
         var inspectorDetails = viewModel.SelectedNode is null
             ? "none"
             : $"{viewModel.SelectedNode.InstanceId}:ports={string.Join(",", viewModel.SelectedPorts.Select(port => port.DisplayText))}:" +
@@ -1480,6 +1650,7 @@ public sealed partial class RigEditorView : UserControl
         editor.PropertyChanged += ViewModelPropertyChanged;
         ApplyTheme(editor.Theme, editor.DarkTheme);
         UpdateSelectionStyles();
+        UpdateConnectionCandidateFeedbackVisual();
         ResetCanvasViewport();
         StartRuntimeRefreshTimer();
     }
@@ -1678,6 +1849,18 @@ public sealed partial class RigEditorView : UserControl
         {
             UpdateSelectionStyles();
         }
+        if (args.PropertyName == nameof(RigEditorViewModel.CanvasConnections) ||
+            args.PropertyName == nameof(RigEditorViewModel.SelectedConnection))
+        {
+            UpdateConnectionVisualState();
+        }
+        if (args.PropertyName is nameof(RigEditorViewModel.ConnectionSourceNodeId) or
+            nameof(RigEditorViewModel.ConnectionDestinationNodeId) or
+            nameof(RigEditorViewModel.ConnectionCandidateFeedbackKind) or
+            nameof(RigEditorViewModel.Theme))
+        {
+            UpdateConnectionCandidateFeedbackVisual();
+        }
     }
 
     private void UpdateSelectionStyles()
@@ -1693,6 +1876,24 @@ public sealed partial class RigEditorView : UserControl
         PortInspectorButton.Classes.Set("selected", viewModel.InspectorTab == "端口");
         ResourceInspectorButton.Classes.Set("selected", viewModel.InspectorTab == "资源");
     }
+
+    private void UpdateConnectionCandidateFeedbackVisual()
+    {
+        if (viewModel is null || ConnectionCandidateStatusText is null)
+        {
+            return;
+        }
+        ConnectionCandidateStatusText.Foreground = ResolveConnectionFeedbackBrush(
+            viewModel.ConnectionCandidateFeedbackKind);
+    }
+
+    private IBrush ResolveConnectionFeedbackBrush(ConnectionFeedbackKind kind) => kind switch
+    {
+        ConnectionFeedbackKind.Allowed => Resources["SrgAccentHoverBrush"] as IBrush ?? Brushes.White,
+        ConnectionFeedbackKind.Blocked => Resources["SrgErrorBrush"] as IBrush ?? Brushes.Red,
+        ConnectionFeedbackKind.Diagnostic => Resources["SrgWarningBrush"] as IBrush ?? Brushes.Gold,
+        _ => Resources["SrgMutedBrush"] as IBrush ?? Brushes.Gray,
+    };
 
     private void StartRuntimeRefreshTimer()
     {
@@ -1742,6 +1943,7 @@ public sealed partial class RigEditorView : UserControl
         SetBrush("SrgCardBorderBrush", palette.CardBorder);
         SetBrush("SrgTextBrush", palette.Text);
         SetBrush("SrgMutedBrush", palette.Muted);
+        SetBrush("SrgWarningBrush", palette.Warning);
         SetBrush("SrgErrorBrush", palette.Error);
         SetBrush("SrgAccentBrush", palette.Accent);
         SetBrush("SrgAccentHoverBrush", palette.AccentHover);
@@ -1796,6 +1998,7 @@ public sealed partial class RigEditorView : UserControl
             CardBorder = ThemeColor(theme, "cardBorder", fallback.CardBorder),
             Text = ThemeColor(theme, "text", fallback.Text),
             Muted = ThemeColor(theme, "muted", fallback.Muted),
+            Warning = ThemeColor(theme, "warning", fallback.Warning),
             Error = ThemeColor(theme, "error", fallback.Error),
             Accent = accent,
             AccentHover = ThemeColor(theme, "accentHover", accent),
@@ -1921,9 +2124,107 @@ public sealed partial class RigEditorView : UserControl
         var transform = new MatrixTransform(new Matrix(canvasZoom, 0.0, 0.0, canvasZoom, canvasPanX, canvasPanY));
         CanvasConnectionLayer.RenderTransform = transform;
         CanvasNodeLayer.RenderTransform = new MatrixTransform(transform.Matrix);
+        if (ConnectionPreviewPath is not null)
+        {
+            ConnectionPreviewPath.RenderTransform = new MatrixTransform(transform.Matrix);
+            ConnectionPreviewPath.StrokeThickness = 4.0 / Math.Max(canvasZoom, MinimumCanvasZoom);
+        }
+        if (ConnectionPreviewHalo is not null)
+        {
+            ConnectionPreviewHalo.RenderTransform = new MatrixTransform(transform.Matrix);
+            ConnectionPreviewHalo.StrokeThickness = 10.0 / Math.Max(canvasZoom, MinimumCanvasZoom);
+        }
+        UpdateConnectionVisualState();
         if (CanvasZoomText is not null)
         {
             CanvasZoomText.Text = $"{canvasZoom * 100:0}%";
+        }
+    }
+
+    private double ConnectionScreenScale(double screenSize) =>
+        screenSize / Math.Max(canvasZoom, MinimumCanvasZoom);
+
+    private void ConnectionContainerPrepared(object? sender, ContainerPreparedEventArgs args)
+    {
+        var container = args.Container;
+        void ContainerLayoutUpdated(object? layoutSender, EventArgs layoutArgs)
+        {
+            container.LayoutUpdated -= ContainerLayoutUpdated;
+            UpdateConnectionPathVisualState(container);
+        }
+        container.LayoutUpdated += ContainerLayoutUpdated;
+    }
+
+    private void NodeContainerPrepared(object? sender, ContainerPreparedEventArgs args)
+    {
+        var container = args.Container;
+        void ContainerLayoutUpdated(object? layoutSender, EventArgs layoutArgs)
+        {
+            container.LayoutUpdated -= ContainerLayoutUpdated;
+            UpdateConnectionEndpointVisualState(container);
+        }
+        container.LayoutUpdated += ContainerLayoutUpdated;
+    }
+
+    private void UpdateConnectionVisualState()
+    {
+        UpdateConnectionPathVisualState();
+        UpdateConnectionEndpointVisualState();
+    }
+
+    private void UpdateConnectionPathVisualState(Control? visualRoot = null)
+    {
+        visualRoot ??= CanvasConnectionLayer;
+        if (visualRoot is null)
+        {
+            return;
+        }
+        foreach (var path in visualRoot.GetVisualDescendants().OfType<AvaloniaPath>())
+        {
+            if (path.Classes.Contains("srg-connection-halo"))
+            {
+                var selected = path.DataContext is CanvasConnectionSnapshot { Selected: true };
+                path.StrokeThickness = ConnectionScreenScale(selected ? 11.0 : 8.0);
+            }
+            else if (path.Classes.Contains("srg-connection-line"))
+            {
+                var selected = path.DataContext is CanvasConnectionSnapshot { Selected: true };
+                path.StrokeThickness = ConnectionScreenScale(selected ? 5.0 : 3.0);
+            }
+            else if (path.Classes.Contains("srg-connection-hover-line"))
+            {
+                path.StrokeThickness = ConnectionScreenScale(5.0);
+            }
+            else if (path.Classes.Contains("srg-connection-hit"))
+            {
+                var selected = path.DataContext is CanvasConnectionSnapshot { Selected: true };
+                path.StrokeThickness = ConnectionScreenScale(selected ? 22.0 : 18.0);
+            }
+            else if (path.Classes.Contains("srg-connection-arrow"))
+            {
+                path.StrokeThickness = ConnectionScreenScale(1.0);
+            }
+        }
+    }
+
+    private void UpdateConnectionEndpointVisualState(Control? visualRoot = null)
+    {
+        visualRoot ??= CanvasNodeLayer;
+        if (visualRoot is not null)
+        {
+            var inverseScale = 1.0 / Math.Max(canvasZoom, MinimumCanvasZoom);
+            foreach (var endpoint in visualRoot.GetVisualDescendants().OfType<Button>()
+                         .Where(button => button.Classes.Contains("srg-endpoint")))
+            {
+                endpoint.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
+                endpoint.RenderTransformOrigin = RelativePoint.Center;
+            }
+            foreach (var candidate in visualRoot.GetVisualDescendants().OfType<Control>()
+                         .Where(control => control.Classes.Contains("srg-endpoint-candidate")))
+            {
+                candidate.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
+                candidate.RenderTransformOrigin = RelativePoint.Center;
+            }
         }
     }
 
@@ -2107,6 +2408,9 @@ public sealed partial class RigEditorView : UserControl
         {
             return false;
         }
+        draggingConnection = false;
+        draggingConnectionSource = null;
+        HideConnectionPreview();
         viewModel.ConnectionSourceNodeId = null;
         viewModel.ConnectionDestinationNodeId = null;
         return true;
@@ -2151,6 +2455,15 @@ public sealed partial class RigEditorView : UserControl
 
     private void CanvasPointerMoved(object? sender, PointerEventArgs args)
     {
+        if (draggingConnection && viewModel is not null && args.Pointer.Captured == EditorCanvas)
+        {
+            var point = CanvasViewportToWorld(args.GetPosition(EditorCanvas));
+            var target = FindInputEndpoint(point);
+            viewModel.ConnectionDestinationNodeId = target;
+            UpdateConnectionPreview(target is null ? point : GetInputEndpointPoint(target));
+            args.Handled = true;
+            return;
+        }
         if (panningCanvas && args.Pointer.Captured == EditorCanvas)
         {
             var panPoint = args.GetPosition(EditorCanvas);
@@ -2171,6 +2484,28 @@ public sealed partial class RigEditorView : UserControl
 
     private void CanvasPointerReleased(object? sender, PointerReleasedEventArgs args)
     {
+        if (draggingConnection && viewModel is not null)
+        {
+            var point = CanvasViewportToWorld(args.GetPosition(EditorCanvas));
+            var target = FindInputEndpoint(point);
+            var source = draggingConnectionSource;
+            draggingConnection = false;
+            draggingConnectionSource = null;
+            HideConnectionPreview();
+            args.Pointer.Capture(null);
+            if (!string.IsNullOrWhiteSpace(source) && !string.IsNullOrWhiteSpace(target))
+            {
+                viewModel.ConnectionSourceNodeId = source;
+                viewModel.ConnectionDestinationNodeId = target;
+                viewModel.ConnectConnectionCandidate();
+            }
+            else
+            {
+                viewModel.ReportInteractionStatus("连接未完成：请将线拖到目标效果器的输入端点");
+            }
+            args.Handled = true;
+            return;
+        }
         if (panningCanvas)
         {
             panningCanvas = false;
@@ -2185,6 +2520,86 @@ public sealed partial class RigEditorView : UserControl
         dragging = false;
         viewModel.EndDrag();
         args.Pointer.Capture(null);
+        args.Handled = true;
+    }
+
+    private void NodeRuntimeControlPointerPressed(object? sender, PointerPressedEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control || control.Tag is not NodeControlSnapshot runtimeControl ||
+            !runtimeControl.IsMomentary || runtimeControl.IsBypass ||
+            !args.GetCurrentPoint(control).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+        if (pressedMomentaryTargets.Add(runtimeControl.Target))
+        {
+            viewModel.SetParameter(runtimeControl.Target, runtimeControl.Maximum);
+        }
+        args.Pointer.Capture(control);
+        args.Handled = true;
+    }
+
+    private void NodeRuntimeControlPointerReleased(object? sender, PointerReleasedEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control || control.Tag is not NodeControlSnapshot runtimeControl ||
+            !runtimeControl.IsMomentary || runtimeControl.IsBypass)
+        {
+            return;
+        }
+        if (pressedMomentaryTargets.Remove(runtimeControl.Target))
+        {
+            viewModel.SetParameter(runtimeControl.Target, runtimeControl.Minimum);
+        }
+        args.Pointer.Capture(null);
+        args.Handled = true;
+    }
+
+    private void NodeRuntimeControlWheelChanged(object? sender, PointerWheelEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control || control.Tag is not NodeControlSnapshot runtimeControl ||
+            runtimeControl.IsBypass || Math.Abs(args.Delta.Y) < double.Epsilon)
+        {
+            return;
+        }
+        viewModel.NudgeParameter(runtimeControl.Target, args.Delta.Y > 0.0 ? 1 : -1,
+            (args.KeyModifiers & KeyModifiers.Shift) != 0);
+        args.Handled = true;
+    }
+
+    private void NodeRuntimeControlClick(object? sender, RoutedEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control || control.Tag is not NodeControlSnapshot runtimeControl)
+        {
+            return;
+        }
+        if (runtimeControl.IsBypass)
+        {
+            var suffix = ".__bypass";
+            var instanceId = runtimeControl.Target.EndsWith(suffix, StringComparison.Ordinal)
+                ? runtimeControl.Target[..^suffix.Length]
+                : string.Empty;
+            if (!string.IsNullOrWhiteSpace(instanceId))
+            {
+                viewModel.ToggleNodeBypass(instanceId);
+            }
+        }
+        else if (runtimeControl.IsMomentary)
+        {
+            // Pointer interaction pulses high on press and returns low on release.
+            // Keyboard activation has no pointer release, so leave it at the safe low state.
+            if (!pressedMomentaryTargets.Contains(runtimeControl.Target))
+            {
+                viewModel.SetParameter(runtimeControl.Target, runtimeControl.Minimum);
+            }
+        }
+        else if (runtimeControl.IsToggle || runtimeControl.IsButton)
+        {
+            viewModel.ToggleParameter(runtimeControl.Target);
+        }
+        else
+        {
+            FocusParameterEditor(runtimeControl.Target);
+        }
         args.Handled = true;
     }
 
@@ -2207,6 +2622,9 @@ public sealed partial class RigEditorView : UserControl
 
     private Point CanvasViewportToWorld(Point point) =>
         new((point.X - canvasPanX) / canvasZoom, (point.Y - canvasPanY) / canvasZoom);
+
+    private Point CanvasWorldToViewport(Point point) =>
+        new(point.X * canvasZoom + canvasPanX, point.Y * canvasZoom + canvasPanY);
 
     private void ModuleCatalogItemPointerPressed(object? sender, PointerPressedEventArgs args)
     {
@@ -2543,6 +2961,140 @@ public sealed partial class RigEditorView : UserControl
         }
         SelectConnectionSource(nodeId);
         args.Handled = true;
+    }
+
+    private void NodeOutputEndpointPointerPressed(object? sender, PointerPressedEventArgs args)
+    {
+        if (viewModel is null || sender is not Control control || control.Tag is not string nodeId ||
+            !args.GetCurrentPoint(control).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+        SelectConnectionSource(nodeId);
+        draggingConnection = true;
+        draggingConnectionSource = nodeId;
+        var source = viewModel.CanvasNodes.FirstOrDefault(node => node.InstanceId == nodeId);
+        if (source is not null)
+        {
+            var start = new Point(source.CanvasX + source.Width, source.CanvasY + source.Height * 0.5);
+            UpdateConnectionPreview(start);
+        }
+        args.Pointer.Capture(EditorCanvas);
+        args.Handled = true;
+    }
+
+    private void CanvasConnectionPointerEntered(object? sender, PointerEventArgs args) =>
+        SetConnectionHoverVisual(sender, true);
+
+    private void CanvasConnectionPointerExited(object? sender, PointerEventArgs args) =>
+        SetConnectionHoverVisual(sender, false);
+
+    private static void SetConnectionHoverVisual(object? sender, bool visible)
+    {
+        if (sender is not Control hit || hit.Parent is not Panel parent)
+        {
+            return;
+        }
+        var hoverPath = parent.Children.FirstOrDefault(child => child.Classes.Contains("srg-connection-hover-line"));
+        if (hoverPath is not null)
+        {
+            hoverPath.Opacity = visible ? 0.92 : 0.0;
+        }
+    }
+
+    private void UpdateConnectionPreview(Point end)
+    {
+        if (ConnectionPreviewPath is null || viewModel is null || string.IsNullOrWhiteSpace(draggingConnectionSource))
+        {
+            return;
+        }
+        var source = viewModel.CanvasNodes.FirstOrDefault(node => node.InstanceId == draggingConnectionSource);
+        if (source is null)
+        {
+            return;
+        }
+        var start = new Point(source.CanvasX + source.Width, source.CanvasY + source.Height * 0.5);
+        var feedbackKind = viewModel.ConnectionCandidateFeedbackKind;
+        var feedbackBrush = ResolveConnectionFeedbackBrush(feedbackKind);
+        var route = ConnectionGeometryConverter.CreateRouteGeometry(start, end);
+        if (ConnectionPreviewHalo is not null)
+        {
+            ConnectionPreviewHalo.Data = route;
+            ConnectionPreviewHalo.Stroke = Resources["SrgCanvasBrush"] as IBrush ?? Brushes.Black;
+            ConnectionPreviewHalo.Opacity = feedbackKind == ConnectionFeedbackKind.Blocked ? 0.96 : 0.9;
+            ConnectionPreviewHalo.IsVisible = true;
+        }
+        ConnectionPreviewPath.Data = route;
+        ConnectionPreviewPath.Stroke = feedbackBrush;
+        ConnectionPreviewPath.IsVisible = true;
+        if (ConnectionPreviewTarget is not null)
+        {
+            var targetId = viewModel.ConnectionDestinationNodeId;
+            var target = string.IsNullOrWhiteSpace(targetId)
+                ? null
+                : viewModel.CanvasNodes.FirstOrDefault(node => node.InstanceId == targetId);
+            if (target is null)
+            {
+                ConnectionPreviewTarget.IsVisible = false;
+            }
+            else
+            {
+                var targetPoint = CanvasWorldToViewport(GetInputEndpointPoint(target.InstanceId));
+                Canvas.SetLeft(ConnectionPreviewTarget, targetPoint.X - 9.0);
+                Canvas.SetTop(ConnectionPreviewTarget, targetPoint.Y - 9.0);
+                ConnectionPreviewTarget.Stroke = feedbackBrush;
+                ConnectionPreviewTarget.StrokeThickness = 3.0;
+                ConnectionPreviewTarget.IsVisible = true;
+            }
+        }
+    }
+
+    private Point GetInputEndpointPoint(string nodeId)
+    {
+        var node = viewModel?.CanvasNodes.FirstOrDefault(candidate => candidate.InstanceId == nodeId);
+        return node is null
+            ? new Point(0, 0)
+            : new Point(node.CanvasX, node.CanvasY + node.Height * 0.5);
+    }
+
+    private void HideConnectionPreview()
+    {
+        if (ConnectionPreviewPath is not null)
+        {
+            ConnectionPreviewPath.Data = new StreamGeometry();
+            ConnectionPreviewPath.IsVisible = false;
+        }
+        if (ConnectionPreviewHalo is not null)
+        {
+            ConnectionPreviewHalo.Data = new StreamGeometry();
+            ConnectionPreviewHalo.IsVisible = false;
+        }
+        if (ConnectionPreviewTarget is not null)
+        {
+            ConnectionPreviewTarget.Stroke = Resources["SrgAccentHoverBrush"] as IBrush ?? Brushes.White;
+            ConnectionPreviewTarget.IsVisible = false;
+        }
+    }
+
+    private string? FindInputEndpoint(Point point)
+    {
+        if (viewModel is null)
+        {
+            return null;
+        }
+        var snapRadius = ConnectionScreenScale(ConnectionSnapScreenRadius);
+        return viewModel.CanvasNodes
+            .Where(node => node.InstanceId != draggingConnectionSource)
+            .Select(node => new
+            {
+                node.InstanceId,
+                Distance = Math.Sqrt(Math.Pow(point.X - node.CanvasX, 2) +
+                                     Math.Pow(point.Y - (node.CanvasY + node.Height * 0.5), 2))
+            })
+            .Where(candidate => candidate.Distance <= snapRadius)
+            .OrderBy(candidate => candidate.Distance)
+            .Select(candidate => candidate.InstanceId)
+            .FirstOrDefault();
     }
 
     private void SelectConnectionSource(string nodeId)

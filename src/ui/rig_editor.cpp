@@ -120,7 +120,8 @@ std::optional<PedalSkinDefinition> ReadPedalSkinFile(const std::filesystem::path
     const auto schema = Find(object, "schemaVersion");
     const auto id = StringField(object, "id");
     const auto* controls = Find(object, "controls");
-    if (schema == nullptr || schema->AsNumber() == nullptr || *schema->AsNumber() != 1.0 || !id.has_value() ||
+    if (schema == nullptr || schema->AsNumber() == nullptr ||
+        (*schema->AsNumber() != 1.0 && *schema->AsNumber() != 2.0) || !id.has_value() ||
         controls == nullptr || controls->AsObject() == nullptr || id->empty()) {
         return std::nullopt;
     }
@@ -185,6 +186,54 @@ std::optional<PedalSkinDefinition> ReadPedalSkinFile(const std::filesystem::path
                     return std::nullopt;
                 }
                 result.parameter_placements.push_back({.parameter_id = *parameter_id, .x = *x, .y = *y});
+            }
+        }
+        if (*schema->AsNumber() == 2.0) {
+            if (const auto* elements = Find(*layout_object, "elements"); elements != nullptr) {
+                const auto* array = elements->AsArray();
+                if (array == nullptr || array->size() > 256U) return std::nullopt;
+                std::set<std::string, std::less<>> ids;
+                for (const auto& value : *array) {
+                    const auto* element = value.AsObject();
+                    if (element == nullptr) return std::nullopt;
+                    const auto element_id = StringField(*element, "id");
+                    const auto type = StringField(*element, "type");
+                    const auto x = NumberField(*element, "x");
+                    const auto y = NumberField(*element, "y");
+                    const auto element_width = NumberField(*element, "width");
+                    const auto element_height = NumberField(*element, "height");
+                    const auto rotation = NumberField(*element, "rotation");
+                    const auto detents = NumberField(*element, "detents").value_or(0.0);
+                    const auto z_index = NumberField(*element, "zIndex").value_or(0.0);
+                    const auto is_integer = [](double number) {
+                        return std::isfinite(number) && std::floor(number) == number;
+                    };
+                    if (!element_id.has_value() || element_id->empty() || !ids.insert(*element_id).second ||
+                        !type.has_value() || type->empty() || !x.has_value() || !y.has_value() ||
+                        !element_width.has_value() || !element_height.has_value() || !rotation.has_value() ||
+                        *element_width <= 0.0 || *element_height <= 0.0 || *x < 0.0 || *y < 0.0 ||
+                        *x + *element_width > result.width || *y + *element_height > result.height ||
+                        *rotation < -360.0 || *rotation > 360.0 || !is_integer(detents) ||
+                        !is_integer(z_index) || detents < 0.0 || detents > 128.0 ||
+                        z_index < -100000.0 || z_index > 100000.0) {
+                        return std::nullopt;
+                    }
+                    PedalSkinDefinition::Element element_definition{
+                        .id = *element_id,
+                        .type = *type,
+                        .binding = StringField(*element, "binding").value_or(std::string{}),
+                        .x = *x,
+                        .y = *y,
+                        .width = *element_width,
+                        .height = *element_height,
+                        .rotation = *rotation,
+                        .detents = static_cast<int32_t>(detents),
+                        .z_index = static_cast<int32_t>(z_index),
+                        .label = StringField(*element, "label").value_or(std::string{}),
+                        .style = StringField(*element, "style").value_or(std::string{}),
+                    };
+                    result.elements.push_back(std::move(element_definition));
+                }
             }
         }
         if (const auto* footswitch_value = Find(*layout_object, "footswitch"); footswitch_value != nullptr) {
