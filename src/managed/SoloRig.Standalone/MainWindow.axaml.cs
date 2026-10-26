@@ -1,4 +1,6 @@
 using Avalonia.Controls;
+using Avalonia;
+using Avalonia.Media.Imaging;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using SoloRig.Ui;
@@ -58,6 +60,43 @@ public sealed partial class MainWindow : Window
     }
 
     public bool HasStandaloneVisualContent => EditorView.HasStandaloneVisualContent;
+
+    public void OpenWorkshop(bool example = false)
+    {
+        SetWorkspace(true);
+        if (example) WorkshopView.ShowEdaExample();
+    }
+
+    public async Task PrepareEdaProbe(string directory)
+    {
+        OpenWorkshop();
+        UpdateLayout();
+        await WorkshopView.ProbeEdaWorkflow(directory);
+    }
+
+    public void CaptureEdaProbe(string path, bool light, string? inspectorType = null)
+    {
+        WorkshopView.ApplyTheme(ThemeSnapshot.Empty, !light);
+        if (Content is Control content)
+        {
+            content.InvalidateMeasure();
+            content.Measure(ClientSize);
+            content.Arrange(new Rect(ClientSize));
+        }
+        UpdateLayout();
+        if (inspectorType is not null) WorkshopView.ShowEdaInspector(inspectorType);
+        WorkshopView.FitEdaView();
+        UpdateLayout();
+        var scale = RenderScaling;
+        using var bitmap = new RenderTargetBitmap(new PixelSize((int)Math.Ceiling(Bounds.Width * scale),
+            (int)Math.Ceiling(Bounds.Height * scale)), new Vector(96 * scale, 96 * scale));
+        bitmap.Render(this);
+        bitmap.Save(path);
+        if (inspectorType is null ? !WorkshopView.ProbeEdaViewport() : !WorkshopView.ProbeEdaInspectorBounds())
+            throw new InvalidOperationException("EDA viewport or inspector bounds failed");
+        Console.WriteLine($"[PASS] EDA viewport {Bounds.Width}x{Bounds.Height} at {scale}: {path}");
+        if (inspectorType is not null) WorkshopView.ShowEdaExample();
+    }
 
     public bool ProbeThemeSwitch() => EditorView.ProbeThemeSwitch();
 

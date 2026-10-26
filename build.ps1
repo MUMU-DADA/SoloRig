@@ -526,6 +526,9 @@ try {
             Invoke-Tool -Layer "C# Standalone offline visual probe" -Executable $managedStandaloneExe.FullName -Arguments @(
                 "--standalone-visual-probe"
             )
+            Invoke-Tool -Layer "C# EDA workflow and visual probe" -Executable $managedStandaloneExe.FullName -Arguments @(
+                "--eda-visual-probe", (Join-Path $outputBuildRoot "eda-proof")
+            )
         }
         finally {
             $env:DOTNET_MULTILEVEL_LOOKUP = $previousDotnetLookup

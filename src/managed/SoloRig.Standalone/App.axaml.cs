@@ -21,6 +21,50 @@ public sealed class App : Application
             desktop.MainWindow = mainWindow;
             desktop.Exit += (_, _) => viewModel.Dispose();
             var args = desktop.Args ?? Array.Empty<string>();
+            if (args.Contains("--workshop", StringComparer.Ordinal)) mainWindow.OpenWorkshop();
+            if (args.Contains("--workshop-example", StringComparer.Ordinal)) mainWindow.OpenWorkshop(true);
+            var edaProbeIndex = Array.IndexOf(args, "--eda-visual-probe");
+            if (edaProbeIndex >= 0 && edaProbeIndex + 1 < args.Length)
+            {
+                var directory = Path.GetFullPath(args[edaProbeIndex + 1]);
+                Directory.CreateDirectory(directory);
+                var step = 0;
+                var edaProbe = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+                edaProbe.Tick += async (_, _) =>
+                {
+                    edaProbe.Stop();
+                    try
+                    {
+                        switch (step++)
+                        {
+                            case 0: mainWindow.Width = 1440; mainWindow.Height = 900; mainWindow.OpenWorkshop(); break;
+                            case 1: await mainWindow.PrepareEdaProbe(directory); break;
+                            case 2: mainWindow.CaptureEdaProbe(Path.Combine(directory, "eda-desktop-dark.png"), false); break;
+                            case 3:
+                                mainWindow.CaptureEdaProbe(Path.Combine(directory, "eda-desktop-light.png"), true);
+                                mainWindow.CaptureEdaProbe(Path.Combine(directory, "eda-properties-desktop.png"), true, "capacitor");
+                                break;
+                            case 4: mainWindow.Width = 820; mainWindow.Height = 520; break;
+                            case 5: mainWindow.CaptureEdaProbe(Path.Combine(directory, "eda-compact-light.png"), true); break;
+                            case 6:
+                                mainWindow.CaptureEdaProbe(Path.Combine(directory, "eda-compact-dark.png"), false);
+                                mainWindow.CaptureEdaProbe(Path.Combine(directory, "eda-properties-compact.png"), false, "bjt-npn");
+                                if (!mainWindow.ProbeWorkshopWorkspace()) throw new InvalidOperationException("Workshop regression failed");
+                                edaProbe.Stop();
+                                desktop.Shutdown(0);
+                                return;
+                        }
+                        edaProbe.Start();
+                    }
+                    catch (Exception exception)
+                    {
+                        Console.Error.WriteLine(exception);
+                        edaProbe.Stop();
+                        desktop.Shutdown(1);
+                    }
+                };
+                edaProbe.Start();
+            }
             if (args.Contains("--standalone-visual-probe", StringComparer.Ordinal))
             {
                 var attempts = 0;

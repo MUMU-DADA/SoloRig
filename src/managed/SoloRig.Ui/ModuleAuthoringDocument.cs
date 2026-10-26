@@ -418,6 +418,8 @@ public sealed class AnalogPinDraft : ModuleAuthoringDraft
     private double anchorY;
     private string side;
     private string electricalRole;
+    private string terminalPortId = string.Empty;
+    private bool groundSymbol;
 
     public AnalogPinDraft(
         string id,
@@ -440,10 +442,17 @@ public sealed class AnalogPinDraft : ModuleAuthoringDraft
     public string Id { get => id; set => Set(ref id, value); }
     public string DisplayName { get => displayName; set => Set(ref displayName, value); }
     public string Node { get => node; set => Set(ref node, value); }
+    public string TerminalPortId { get => terminalPortId; set => Set(ref terminalPortId, value); }
+    public bool GroundSymbol { get => groundSymbol; set => Set(ref groundSymbol, value); }
+    public AnalogPinDraft Clone(string? newNode = null) => new(Id, DisplayName, newNode ?? Node)
+    {
+        TerminalPortId = TerminalPortId,
+        GroundSymbol = GroundSymbol,
+    };
     public double AnchorX => anchorX;
     public double AnchorY => anchorY;
-    public double VisualLeft => anchorX - 6.0;
-    public double VisualTop => anchorY - 6.0;
+    public double VisualLeft => anchorX - 7.0;
+    public double VisualTop => anchorY - 7.0;
     public string Side => side;
     public string ElectricalRole => electricalRole;
 
@@ -758,6 +767,7 @@ public sealed class AnalogComponentDraft : ModuleAuthoringDraft
     private string type;
     private double canvasX;
     private double canvasY;
+    private int rotation;
 
     public AnalogComponentDraft(string id, string type, string pinA, string pinB, double value, string model = "")
         : this(id, type,
@@ -772,12 +782,14 @@ public sealed class AnalogComponentDraft : ModuleAuthoringDraft
         IEnumerable<AnalogPinDraft> pins,
         IEnumerable<AnalogComponentPropertyDraft>? properties = null,
         double canvasX = 0.0,
-        double canvasY = 0.0)
+        double canvasY = 0.0,
+        int rotation = 0)
     {
         this.id = id;
         this.type = type;
         this.canvasX = canvasX;
         this.canvasY = canvasY;
+        this.rotation = NormalizeRotation(rotation);
         Pins.CollectionChanged += PinsChanged;
         Properties.CollectionChanged += PropertiesChanged;
         foreach (var pin in pins)
@@ -827,6 +839,42 @@ public sealed class AnalogComponentDraft : ModuleAuthoringDraft
     public ObservableCollection<AnalogComponentPropertyDraft> Properties { get; } = [];
     public double CanvasX { get => canvasX; set => Set(ref canvasX, value); }
     public double CanvasY { get => canvasY; set => Set(ref canvasY, value); }
+    public int Rotation
+    {
+        get => rotation;
+        set
+        {
+            if (!Set(ref rotation, NormalizeRotation(value))) return;
+            RefreshPinDescriptors();
+            NotifyPropertyChanged(nameof(VisualWidth));
+            NotifyPropertyChanged(nameof(VisualHeight));
+            NotifyPropertyChanged(nameof(LabelX));
+            NotifyPropertyChanged(nameof(LabelY));
+            NotifyPropertyChanged(nameof(ValueLabelY));
+        }
+    }
+    public double VisualWidth => Rotation % 180 == 0 ? Descriptor.SymbolWidth : Descriptor.SymbolHeight;
+    public double VisualHeight => Rotation % 180 == 0 ? Descriptor.SymbolHeight : Descriptor.SymbolWidth;
+    public double LabelX => Rotation % 180 == 0 ? 32 : VisualWidth * 0.5 + 24;
+    public double LabelY => Rotation % 180 == 0 ? -4 : VisualHeight * 0.5 - 20;
+    public double ValueLabelY => Rotation % 180 == 0 ? VisualHeight - 20 : VisualHeight * 0.5 + 4;
+    public string ValueLabel => TryGetProperty("value", out _) ? FormatEngineeringValue(Value,
+        Descriptor.Properties.FirstOrDefault(property => property.Id == "value")?.Unit ?? "") : Descriptor.DisplayName;
+
+    private static int NormalizeRotation(int value) => ((value / 90 % 4) + 4) % 4 * 90;
+
+    private static string FormatEngineeringValue(double value, string unit)
+    {
+        var magnitude = Math.Abs(value);
+        var (scale, prefix) = magnitude switch
+        {
+            >= 1e9 => (1e9, "G"), >= 1e6 => (1e6, "M"), >= 1e3 => (1e3, "k"),
+            > 0 and < 1e-9 => (1e-12, "p"), > 0 and < 1e-6 => (1e-9, "n"),
+            > 0 and < 1e-3 => (1e-6, "µ"), > 0 and < 1 => (1e-3, "m"), _ => (1.0, ""),
+        };
+        return (value / scale).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+               " " + prefix + (unit == "ohm" ? "Ω" : unit);
+    }
 
     public string PinA
     {
@@ -964,6 +1012,10 @@ public sealed class AnalogComponentDraft : ModuleAuthoringDraft
             }
         }
         RefreshPropertyDescriptors();
+        RefreshPinDescriptors();
+        NotifyPropertyChanged(nameof(VisualWidth));
+        NotifyPropertyChanged(nameof(VisualHeight));
+        NotifyPropertyChanged(nameof(ValueLabel));
         NotifyPropertyChanged(nameof(PinA));
         NotifyPropertyChanged(nameof(PinB));
     }
@@ -976,7 +1028,17 @@ public sealed class AnalogComponentDraft : ModuleAuthoringDraft
         }
         for (var index = 0; index < Math.Min(Pins.Count, descriptor.Pins.Count); ++index)
         {
-            Pins[index].ApplyDescriptor(descriptor.Pins[index]);
+            var pin = descriptor.Pins[index];
+            var (x, y) = Rotation switch
+            {
+                90 => (descriptor.SymbolHeight - pin.AnchorY, pin.AnchorX),
+                180 => (descriptor.SymbolWidth - pin.AnchorX, descriptor.SymbolHeight - pin.AnchorY),
+                270 => (pin.AnchorY, descriptor.SymbolWidth - pin.AnchorX),
+                _ => (pin.AnchorX, pin.AnchorY),
+            };
+            string[] sides = ["right", "bottom", "left", "top"];
+            var side = sides[(Array.IndexOf(sides, pin.Side) + Rotation / 90) % 4];
+            Pins[index].ApplyDescriptor(pin with { AnchorX = x, AnchorY = y, Side = side });
         }
     }
 
@@ -1003,6 +1065,7 @@ public sealed class AnalogComponentDraft : ModuleAuthoringDraft
         SubscribeDraftItems(args, NestedPropertyChanged);
         NotifyPropertyChanged(nameof(Value));
         NotifyPropertyChanged(nameof(Model));
+        NotifyPropertyChanged(nameof(ValueLabel));
         NotifyChanged();
     }
 
@@ -1036,6 +1099,7 @@ public sealed class AnalogComponentDraft : ModuleAuthoringDraft
         RefreshPropertyDescriptors();
         NotifyPropertyChanged(nameof(Value));
         NotifyPropertyChanged(nameof(Model));
+        NotifyPropertyChanged(nameof(ValueLabel));
         NotifyChanged();
     }
 
@@ -1161,27 +1225,36 @@ public sealed class AnalogWirePointDraft : ModuleAuthoringDraft
     private double x;
     private double y;
 
-    public AnalogWirePointDraft(double x, double y)
+    public AnalogWirePointDraft(double x, double y, AnalogComponentDraft? component = null, AnalogPinDraft? pin = null,
+        string? id = null)
     {
         this.x = x;
         this.y = y;
+        Component = component;
+        Pin = pin;
+        Id = id ?? Guid.NewGuid().ToString("N");
     }
 
-    public double X { get => x; set => Set(ref x, value); }
-    public double Y { get => y; set => Set(ref y, value); }
+    public string Id { get; }
+    public AnalogComponentDraft? Component { get; }
+    public AnalogPinDraft? Pin { get; }
+    public double X { get => Component is not null && Pin is not null ? Component.CanvasX + Pin.AnchorX : x; set => Set(ref x, value); }
+    public double Y { get => Component is not null && Pin is not null ? Component.CanvasY + Pin.AnchorY : y; set => Set(ref y, value); }
 }
 
 public sealed class AnalogWireRouteDraft : ModuleAuthoringDraft
 {
     private string node;
 
-    public AnalogWireRouteDraft(string node)
+    public AnalogWireRouteDraft(string node, bool isExplicit = false)
     {
         this.node = node;
+        IsExplicit = isExplicit;
         Points.CollectionChanged += PointsChanged;
     }
 
     public string Node { get => node; set => Set(ref node, value); }
+    public bool IsExplicit { get; }
     public ObservableCollection<AnalogWirePointDraft> Points { get; } = [];
 
     private void PointsChanged(object? sender, NotifyCollectionChangedEventArgs args)
@@ -1341,7 +1414,7 @@ public sealed class AnalogCircuitDraft : ModuleAuthoringDraft
     private void DraftChanged() => NotifyChanged();
 }
 
-public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
+public sealed partial class ModuleAuthoringDocument : INotifyPropertyChanged
 {
     private sealed record HistoryEntry(LoadedState State, string Fingerprint);
 
@@ -2089,47 +2162,102 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
 
     public AnalogComponentDraft AddAnalogComponent() => AddAnalogComponent("resistor");
 
-    public AnalogComponentDraft AddAnalogComponent(string componentType, double canvasX = 0.0, double canvasY = 0.0)
+    public AnalogComponentDraft AddAnalogComponent(string componentType, double? canvasX = null, double? canvasY = null)
     {
-        var id = UniqueId("component", AnalogCircuit.Components.Select(component => component.Id));
-        if (canvasX == 0.0 && canvasY == 0.0)
+        var prefix = componentType switch
+        {
+            "resistor" => "R", "capacitor" => "C", "inductor" => "L", "diode" => "D",
+            "potentiometer" => "RV", "voltage-source" => "V", "switch" => "SW",
+            "coupled-inductor" => "T", "speaker-load" => "SP", "relay" => "K",
+            _ when componentType.StartsWith("bjt") || componentType.StartsWith("jfet") || componentType.StartsWith("mosfet") => "Q",
+            _ => "U",
+        };
+        var usedIds = AnalogCircuit.Components.Select(component => component.Id).ToHashSet(StringComparer.Ordinal);
+        var number = 1;
+        while (usedIds.Contains(prefix + number)) number++;
+        var id = prefix + number;
+        if (canvasX is null && canvasY is null)
         {
             var index = AnalogCircuit.Components.Count;
             canvasX = 64.0 + index % 4 * 224.0;
             canvasY = 72.0 + index / 4 * 176.0;
         }
         var descriptor = AnalogComponentCatalog.Get(componentType);
-        var pins = descriptor.Pins.Select((pin, index) => new AnalogPinDraft(
-            pin.Id,
-            pin.DisplayName,
-            index switch
-            {
-                0 => AnalogCircuit.InputNode,
-                1 => AnalogCircuit.OutputNode,
-                _ => AnalogCircuit.ReferenceGround,
-            })).ToArray();
+        var pins = descriptor.Pins.Select(pin => new AnalogPinDraft(
+            pin.Id, pin.DisplayName, UniqueId(id + "_" + pin.Id, AnalogNodeIds()))).ToArray();
         var properties = descriptor.Properties
             .Select(property => new AnalogComponentPropertyDraft(property.Id, AnalogComponentCatalog.DefaultJson(property)))
             .ToArray();
-        var component = new AnalogComponentDraft(id, descriptor.Type, pins, properties, canvasX, canvasY);
-        AnalogCircuit.Components.Add(component);
+        var component = new AnalogComponentDraft(id, descriptor.Type, pins, properties, canvasX ?? 0, canvasY ?? 0);
+        BeginEditTransaction();
+        try
+        {
+            AnalogCircuit.Components.Add(component);
+        }
+        finally { EndEditTransaction(); }
         return component;
     }
 
-    public bool RemoveAnalogComponent(AnalogComponentDraft component) => AnalogCircuit.Components.Remove(component);
+    public bool RemoveAnalogComponent(AnalogComponentDraft component)
+    {
+        BeginEditTransaction();
+        try
+        {
+            if (!AnalogCircuit.Components.Remove(component)) return false;
+            var affected = AnalogCircuit.WireRoutes.Where(wire => wire.IsExplicit &&
+                wire.Points.Any(point => ReferenceEquals(point.Component, component))).Select(wire => wire.Node).Distinct().ToArray();
+            foreach (var wire in AnalogCircuit.WireRoutes.Where(wire => wire.IsExplicit &&
+                         wire.Points.Any(point => ReferenceEquals(point.Component, component))).ToArray())
+                AnalogCircuit.WireRoutes.Remove(wire);
+            foreach (var node in affected) RebuildSchematicNode(node);
+            foreach (var node in component.Pins.Select(pin => pin.Node).Distinct()) RemoveUnusedAnalogNode(node);
+            return true;
+        }
+        finally { EndEditTransaction(); }
+    }
 
     public AnalogComponentDraft DuplicateAnalogComponent(
-        AnalogComponentDraft source, double offset = CircuitAuthoringDuplicateOffset)
+        AnalogComponentDraft source, double offset = CircuitAuthoringDuplicateOffset) =>
+        DuplicateAnalogComponents([source], offset)[0];
+
+    public AnalogComponentDraft[] DuplicateAnalogComponents(
+        IEnumerable<AnalogComponentDraft> sources, double offset = CircuitAuthoringDuplicateOffset,
+        IEnumerable<AnalogWireRouteDraft>? sourceWires = null)
     {
-        var duplicate = new AnalogComponentDraft(
-            UniqueId(source.Id, AnalogCircuit.Components.Select(component => component.Id)),
-            source.Type,
-            source.Pins.Select(pin => new AnalogPinDraft(pin.Id, pin.DisplayName, pin.Node)),
-            source.Properties.Select(property => new AnalogComponentPropertyDraft(property.Id, property.JsonValue)),
-            Math.Min(source.CanvasX + offset, 2200.0),
-            Math.Min(source.CanvasY + offset, 1460.0));
-        AnalogCircuit.Components.Add(duplicate);
-        return duplicate;
+        var nodeMap = new Dictionary<string, string>(StringComparer.Ordinal);
+        var usedNodes = AnalogNodeIds().ToHashSet(StringComparer.Ordinal);
+        var copies = new List<AnalogComponentDraft>();
+        var componentMap = new Dictionary<AnalogComponentDraft, AnalogComponentDraft>();
+        string CopiedNode(string node)
+        {
+            if (node == AnalogCircuit.ReferenceGround) return node;
+            if (!nodeMap.TryGetValue(node, out var mapped))
+            {
+                mapped = UniqueId("net", usedNodes);
+                nodeMap[node] = mapped;
+                usedNodes.Add(mapped);
+            }
+            return mapped;
+        }
+        BeginEditTransaction();
+        try
+        {
+            foreach (var source in sources.ToArray())
+            {
+                var duplicate = new AnalogComponentDraft(
+                    UniqueId(source.Id, AnalogCircuit.Components.Select(component => component.Id)), source.Type,
+                    source.Pins.Select(pin => new AnalogPinDraft(pin.Id, pin.DisplayName, CopiedNode(pin.Node)) { GroundSymbol = pin.GroundSymbol }),
+                    source.Properties.Select(property => new AnalogComponentPropertyDraft(property.Id, property.JsonValue)),
+                    Math.Min(source.CanvasX + offset, 2200.0), Math.Min(source.CanvasY + offset, 1460.0), source.Rotation);
+                AnalogCircuit.Components.Add(duplicate);
+                copies.Add(duplicate);
+                componentMap.Add(source, duplicate);
+            }
+            foreach (var wire in CopySchematicWires(sourceWires ?? AnalogCircuit.WireRoutes, componentMap, CopiedNode, offset))
+                AnalogCircuit.WireRoutes.Add(wire);
+        }
+        finally { EndEditTransaction(); }
+        return copies.ToArray();
     }
 
     public bool ConnectAnalogPins(AnalogPinDraft first, AnalogPinDraft second)
@@ -2143,10 +2271,17 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
         var targetNode = !string.IsNullOrWhiteSpace(firstNode)
             ? firstNode
             : !string.IsNullOrWhiteSpace(secondNode) ? secondNode : NextAnalogNodeId();
+        if (firstNode == AnalogCircuit.ReferenceGround || secondNode == AnalogCircuit.ReferenceGround)
+            targetNode = AnalogCircuit.ReferenceGround;
+        else if (AnalogCircuit.Ports.Any(port => port.Node == secondNode) &&
+                 !AnalogCircuit.Ports.Any(port => port.Node == firstNode))
+            targetNode = secondNode;
         BeginEditTransaction();
         try
         {
             first.Node = targetNode;
+            if (!string.IsNullOrWhiteSpace(firstNode) && firstNode != targetNode)
+                ReplaceAnalogNode(firstNode, targetNode);
             if (!string.IsNullOrWhiteSpace(secondNode) && !string.Equals(secondNode, targetNode, StringComparison.Ordinal))
             {
                 ReplaceAnalogNode(secondNode, targetNode);
@@ -2167,17 +2302,36 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
     public bool DisconnectAnalogPin(AnalogPinDraft pin)
     {
         var node = NextAnalogNodeId();
+        var previous = pin.Node;
+        var explicitNode = AnalogCircuit.WireRoutes.Any(wire => wire.IsExplicit && wire.Node == previous);
         BeginEditTransaction();
         try
         {
+            foreach (var wire in AnalogCircuit.WireRoutes.Where(wire => wire.IsExplicit &&
+                         wire.Points.Any(point => ReferenceEquals(point.Pin, pin))).ToArray())
+                AnalogCircuit.WireRoutes.Remove(wire);
+            pin.GroundSymbol = false;
+            pin.TerminalPortId = string.Empty;
             pin.Node = node;
-            AnalogCircuit.Nodes.Add(node);
+            if (explicitNode) RebuildSchematicNode(previous);
+            RemoveUnusedAnalogNode(previous);
         }
         finally
         {
             EndEditTransaction();
         }
         return true;
+    }
+
+    private void RemoveUnusedAnalogNode(string node)
+    {
+        if (node == AnalogCircuit.ReferenceGround ||
+            AnalogCircuit.Components.Any(component => component.Pins.Any(pin => pin.Node == node)) ||
+            AnalogCircuit.Ports.Any(port => port.Node == node) ||
+            AnalogCircuit.Supplies.Any(supply => supply.PositiveNode == node || supply.NegativeNode == node)) return;
+        while (AnalogCircuit.Nodes.Remove(node)) { }
+        foreach (var route in AnalogCircuit.WireRoutes.Where(route => !route.IsExplicit && route.Node == node).ToArray())
+            AnalogCircuit.WireRoutes.Remove(route);
     }
 
     public AnalogWireRouteDraft GetOrCreateAnalogWireRoute(string node)
@@ -2201,10 +2355,13 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
         return route is not null && AnalogCircuit.WireRoutes.Remove(route);
     }
 
-    private string NextAnalogNodeId() => UniqueId("node", AnalogCircuit.Nodes
+    private IEnumerable<string> AnalogNodeIds() => AnalogCircuit.Nodes
+        .Concat(AnalogCircuit.WireRoutes.Select(route => route.Node))
         .Concat(AnalogCircuit.Components.SelectMany(component => component.Pins.Select(pin => pin.Node)))
         .Concat(AnalogCircuit.Ports.Select(port => port.Node))
-        .Concat(AnalogCircuit.Supplies.SelectMany(supply => new[] { supply.PositiveNode, supply.NegativeNode })));
+        .Concat(AnalogCircuit.Supplies.SelectMany(supply => new[] { supply.PositiveNode, supply.NegativeNode }));
+
+    private string NextAnalogNodeId() => UniqueId("node", AnalogNodeIds());
 
     private void ReplaceAnalogNode(string previous, string replacement)
     {
@@ -2230,9 +2387,11 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             }
         }
         var previousRoute = AnalogCircuit.WireRoutes.FirstOrDefault(route =>
-            string.Equals(route.Node, previous, StringComparison.Ordinal));
+            !route.IsExplicit && string.Equals(route.Node, previous, StringComparison.Ordinal));
         var replacementRoute = AnalogCircuit.WireRoutes.FirstOrDefault(route =>
-            string.Equals(route.Node, replacement, StringComparison.Ordinal));
+            !route.IsExplicit && string.Equals(route.Node, replacement, StringComparison.Ordinal));
+        foreach (var wire in AnalogCircuit.WireRoutes.Where(route => route.IsExplicit && route.Node == previous))
+            wire.Node = replacement;
         if (previousRoute is not null && replacementRoute is null)
         {
             previousRoute.Node = replacement;
@@ -2241,6 +2400,7 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
         {
             AnalogCircuit.WireRoutes.Remove(previousRoute);
         }
+        while (AnalogCircuit.Nodes.Remove(previous)) { }
     }
 
     public AnalogCircuitPortDraft AddAnalogCircuitPort(string direction = "input")
@@ -2886,7 +3046,7 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                 AddIssue($"声明节点 {node} 未被端口、电源或元件使用，运行时可能形成奇异矩阵",
                     ModuleAuthoringIssueTarget.AnalogCircuit, node.Trim(), "nodes", warning: true);
             }
-            foreach (var duplicateRoute in AnalogCircuit.WireRoutes.Where(route => !string.IsNullOrWhiteSpace(route.Node))
+            foreach (var duplicateRoute in AnalogCircuit.WireRoutes.Where(route => !route.IsExplicit && !string.IsNullOrWhiteSpace(route.Node))
                          .GroupBy(route => route.Node.Trim(), StringComparer.Ordinal).Where(group => group.Count() > 1))
             {
                 AddIssue($"网络 {duplicateRoute.Key} 存在重复人工路由",
@@ -3640,7 +3800,7 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
     {
         var metadata = new
         {
-            schemaVersion = 2,
+            schemaVersion = 3,
             analogCircuit = new
             {
                 components = AnalogCircuit.Components.Select(component => new
@@ -3648,11 +3808,19 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
                     id = component.Id.Trim(),
                     x = component.CanvasX,
                     y = component.CanvasY,
+                    rotation = component.Rotation,
+                    terminals = component.Pins.Where(pin => pin.GroundSymbol || pin.TerminalPortId.Length > 0)
+                        .Select(pin => new { pin = pin.Id, ground = pin.GroundSymbol, port = pin.TerminalPortId }),
                 }),
                 routes = AnalogCircuit.WireRoutes.Select(route => new
                 {
                     node = route.Node.Trim(),
-                    points = route.Points.Select(point => new { x = point.X, y = point.Y }),
+                    explicitPath = route.IsExplicit,
+                    points = route.Points.Select(point => new
+                    {
+                        id = point.Id, x = point.X, y = point.Y,
+                        component = point.Component?.Id, pin = point.Pin?.Id,
+                    }),
                 }),
             },
         };
@@ -3669,7 +3837,7 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
         using var document = JsonDocument.Parse(File.ReadAllText(path));
         var root = document.RootElement;
         var schemaVersion = root.GetProperty("schemaVersion").GetInt32();
-        if (schemaVersion is not (1 or 2) ||
+        if (schemaVersion is not (1 or 2 or 3) ||
             !root.TryGetProperty("analogCircuit", out var analogCircuit) ||
             !analogCircuit.TryGetProperty("components", out var components))
         {
@@ -3686,22 +3854,41 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             }
             component.CanvasX = layout.TryGetProperty("x", out var x) ? x.GetDouble() : 0.0;
             component.CanvasY = layout.TryGetProperty("y", out var y) ? y.GetDouble() : 0.0;
+            component.Rotation = layout.TryGetProperty("rotation", out var rotation) ? rotation.GetInt32() : 0;
+            if (layout.TryGetProperty("terminals", out var terminals))
+                foreach (var terminal in terminals.EnumerateArray())
+                {
+                    var pin = component.Pins.FirstOrDefault(pin => pin.Id == ReadOptionalString(terminal, "pin"));
+                    if (pin is null) continue;
+                    pin.GroundSymbol = terminal.TryGetProperty("ground", out var ground) && ground.GetBoolean();
+                    pin.TerminalPortId = ReadOptionalString(terminal, "port");
+                }
         }
         if (schemaVersion >= 2 && analogCircuit.TryGetProperty("routes", out var routes) &&
             routes.ValueKind == JsonValueKind.Array)
         {
+            var junctions = new Dictionary<string, AnalogWirePointDraft>(StringComparer.Ordinal);
             foreach (var routeValue in routes.EnumerateArray())
             {
-                var route = new AnalogWireRouteDraft(ReadOptionalString(routeValue, "node"));
+                var route = new AnalogWireRouteDraft(ReadOptionalString(routeValue, "node"),
+                    routeValue.TryGetProperty("explicitPath", out var explicitPath) && explicitPath.GetBoolean());
                 if (routeValue.TryGetProperty("points", out var points) && points.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var point in points.EnumerateArray())
                     {
-                        route.Points.Add(new AnalogWirePointDraft(
-                            point.GetProperty("x").GetDouble(), point.GetProperty("y").GetDouble()));
+                        var id = ReadOptionalString(point, "id");
+                        if (id.Length == 0 || !junctions.TryGetValue(id, out var vertex))
+                        {
+                            var owner = circuit.Components.FirstOrDefault(component => component.Id == ReadOptionalString(point, "component"));
+                            var pin = owner?.Pins.FirstOrDefault(pin => pin.Id == ReadOptionalString(point, "pin"));
+                            vertex = new AnalogWirePointDraft(point.GetProperty("x").GetDouble(), point.GetProperty("y").GetDouble(), owner, pin,
+                                id.Length == 0 ? null : id);
+                            junctions[vertex.Id] = vertex;
+                        }
+                        route.Points.Add(vertex);
                     }
                 }
-                circuit.WireRoutes.Add(route);
+                if (!route.IsExplicit || route.Points.Count >= 2) circuit.WireRoutes.Add(route);
             }
         }
     }
@@ -3915,21 +4102,12 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             AnalogCircuit.Components.Add(new AnalogComponentDraft(
                 component.Id,
                 component.Type,
-                component.Pins.Select(pin => new AnalogPinDraft(pin.Id, pin.DisplayName, pin.Node)),
+                component.Pins.Select(pin => pin.Clone()),
                 component.Properties.Select(property => new AnalogComponentPropertyDraft(property.Id, property.JsonValue)),
                 component.CanvasX,
-                component.CanvasY));
+                component.CanvasY, component.Rotation));
         }
-        AnalogCircuit.WireRoutes.Clear();
-        foreach (var route in source.WireRoutes)
-        {
-            var cloned = new AnalogWireRouteDraft(route.Node);
-            foreach (var point in route.Points)
-            {
-                cloned.Points.Add(new AnalogWirePointDraft(point.X, point.Y));
-            }
-            AnalogCircuit.WireRoutes.Add(cloned);
-        }
+        CloneAnalogWireRoutes(source, AnalogCircuit);
         ReplaceAnalogProperties(AnalogCircuit.RootProperties, source.RootProperties);
         ReplaceAnalogProperties(AnalogCircuit.SolverProperties, source.SolverProperties);
         ReplaceAnalogProperties(AnalogCircuit.ConvergenceProperties, source.ConvergenceProperties);
@@ -4046,20 +4224,12 @@ public sealed class ModuleAuthoringDocument : INotifyPropertyChanged
             circuit.Components.Add(new AnalogComponentDraft(
                 component.Id,
                 component.Type,
-                component.Pins.Select(pin => new AnalogPinDraft(pin.Id, pin.DisplayName, pin.Node)),
+                component.Pins.Select(pin => pin.Clone()),
                 component.Properties.Select(property => new AnalogComponentPropertyDraft(property.Id, property.JsonValue)),
                 component.CanvasX,
-                component.CanvasY));
+                component.CanvasY, component.Rotation));
         }
-        foreach (var route in AnalogCircuit.WireRoutes)
-        {
-            var cloned = new AnalogWireRouteDraft(route.Node);
-            foreach (var point in route.Points)
-            {
-                cloned.Points.Add(new AnalogWirePointDraft(point.X, point.Y));
-            }
-            circuit.WireRoutes.Add(cloned);
-        }
+        CloneAnalogWireRoutes(AnalogCircuit, circuit);
         ReplaceAnalogProperties(circuit.RootProperties, AnalogCircuit.RootProperties);
         ReplaceAnalogProperties(circuit.SolverProperties, AnalogCircuit.SolverProperties);
         ReplaceAnalogProperties(circuit.ConvergenceProperties, AnalogCircuit.ConvergenceProperties);

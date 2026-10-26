@@ -29,7 +29,8 @@ public sealed partial class PedalWorkshopView : UserControl
         HitTarget,
     }
 
-    private sealed record CircuitWireVisualTag(string Node, CircuitWireVisualPart Part, IBrush BaseStroke);
+    private sealed record CircuitWireVisualTag(string Node, CircuitWireVisualPart Part, IBrush BaseStroke,
+        AnalogWireRouteDraft? Route = null, int SegmentIndex = -1);
     private sealed record CircuitCrossingVisualTag(string Node, bool IsHalo, IBrush BaseStroke);
     private sealed record CircuitJunctionVisualTag(string Node);
     private sealed record CircuitLabelLeaderVisualTag(string Node, IBrush BaseStroke);
@@ -100,8 +101,8 @@ public sealed partial class PedalWorkshopView : UserControl
         string GridMajor);
 
     private static readonly WorkshopThemePalette DarkPalette = new(
-        "#11151B", "#161B22", "#191F27", "#10151A", "#222A34", "#2A3440", "#394655",
-        "#EEF3F8", "#9AA8B8", "#4DD6A4", "#10261F", "#FFD166", "#FF7B72", "#1B2530", "#263542");
+        "#191C1E", "#25292C", "#25292C", "#1C2022", "#303539", "#3A4146", "#434B50",
+        "#EEF3F8", "#ACB5BA", "#4DD6A4", "#10261F", "#FFD166", "#FF7B72", "#252A2D", "#30373B");
 
     private static readonly WorkshopThemePalette LightPalette = new(
         "#F4F7FB", "#FFFFFF", "#EEF3F7", "#F8FAFC", "#FFFFFF", "#E8F0F6", "#C7D2DE",
@@ -111,7 +112,7 @@ public sealed partial class PedalWorkshopView : UserControl
     private const double CircuitCanvasHeight = 1600.0;
     private const double CircuitGridSize = 16.0;
     private const double CircuitPinPreviewSnapTolerance = 28.0;
-    private const double CircuitPinCommitSnapTolerance = 32.0;
+    private const double CircuitPinCommitSnapTolerance = CircuitPinPreviewSnapTolerance;
     private const double CircuitNormalWireThickness = 3.0;
     private const double CircuitHoverWireThickness = 5.0;
     private const double CircuitSelectedWireThickness = 5.0;
@@ -157,6 +158,11 @@ public sealed partial class PedalWorkshopView : UserControl
     private bool selectingCircuitBox;
     private bool circuitSelectionAdditive;
     private bool draggingCircuitPalette;
+    private string circuitTool = "Select";
+    private AnalogComponentDescriptor? placingCircuitComponent;
+    private int circuitPlacementRotation;
+    private Point circuitPlacementPointer;
+    private readonly List<Point> pendingCircuitBends = [];
     private Point circuitPointerStart;
     private Point circuitSelectionStart;
     private Point circuitPreviewPointer;
@@ -174,6 +180,7 @@ public sealed partial class PedalWorkshopView : UserControl
     private CircuitRoutingGrid? circuitRoutingGridSnapshot;
     private readonly Dictionary<AnalogComponentDraft, Point> draggingCircuitStarts = [];
     private readonly List<AnalogComponentDraft> circuitClipboard = [];
+    private AnalogWireRouteDraft[] circuitClipboardWires = [];
     private double circuitClipboardPasteOffset;
     private AnalogPinDraft? pendingCircuitPin;
     private AnalogComponentDescriptor? circuitPaletteDescriptor;
@@ -243,10 +250,15 @@ public sealed partial class PedalWorkshopView : UserControl
         InitializeComponent();
         ApplyTheme(ThemeSnapshot.Empty, true);
         Document = new ModuleAuthoringDocument();
+        Document.NewProjectFromTemplate("analog-blank");
         RecentProjects = new ModuleAuthoringRecentProjects();
         DataContext = Document;
         ProjectKindSelector.ItemsSource = ModuleAuthoringDocument.KindOptions;
         SelectProjectCreationKind(Document.Kind);
+        CircuitCategorySelector.ItemsSource = new[] { "全部元件" }
+            .Concat(AnalogComponentCatalog.Components.Select(component => component.Category).Distinct()).ToArray();
+        CircuitCategorySelector.SelectedIndex = 0;
+        WorkshopTabs.SelectedIndex = 2;
         RefreshRecentProjects();
         Document.AnalogCircuitChanged += (_, _) =>
             Dispatcher.UIThread.Post(RenderCircuitConnections, DispatcherPriority.Background);
@@ -348,8 +360,7 @@ public sealed partial class PedalWorkshopView : UserControl
 
     public bool HasWorkshopVisualContent =>
         WorkshopTabs is not null && WorkshopTabs.Bounds.Width > 0 && WorkshopTabs.Bounds.Height > 0 &&
-        ProjectKindSelector is not null && ProjectKindSelector.Bounds.Width > 0 &&
-        TemplateSelector is not null && TemplateSelector.Bounds.Width > 0 &&
+        ProjectKindSelector is not null && TemplateSelector is not null &&
         ModuleIdEditor is not null && PortList is not null && ParameterList is not null && ValidationList is not null &&
         AuditionInputWaveform is not null && AuditionOutputWaveform is not null &&
         FrequencyMagnitudePlot is not null && FrequencyPhasePlot is not null &&
@@ -448,96 +459,61 @@ public sealed partial class PedalWorkshopView : UserControl
 
     public bool ProbeResponsiveLayout()
     {
-        var originalWidth = Bounds.Width > 0 ? Bounds.Width : 1180.0;
-        var originalCompact = compactLayout;
+        var width = Bounds.Width;
         try
         {
-            UpdateResponsiveLayout(860.0);
+            UpdateResponsiveLayout(860);
+            CircuitPalettePanel.IsVisible = false;
+            CircuitInspectorPanel.IsVisible = false;
             UpdateLayout();
-            var compactBase = compactLayout && Grid.GetRow(WorkshopActions) == 1 && Grid.GetColumn(WorkshopActions) == 0 &&
-                   WorkshopActions.HorizontalAlignment == HorizontalAlignment.Left &&
-                   WorkshopStatusGrid.ColumnDefinitions.Count == 4 &&
-                   WorkshopStatusGrid.RowDefinitions.Count == 2 &&
-                   Grid.GetRow(RecentProjectSearchBox) == 1 && Grid.GetColumn(RecentProjectSearchBox) == 0 &&
-                   Grid.GetRow(RecentProjectSelector) == 1 && Grid.GetColumn(RecentProjectSelector) == 1 &&
-                   Grid.GetRow(OpenRecentProjectButton) == 1 && Grid.GetColumn(OpenRecentProjectButton) == 2 &&
-                   Grid.GetRow(ValidateProjectButton) == 1 && Grid.GetColumn(ValidateProjectButton) == 3 &&
-                   SkinWorkspaceGrid.ColumnDefinitions.Count == 1 &&
-                   SkinWorkspaceGrid.RowDefinitions.Count == 2 &&
-                   Grid.GetRow(SkinPreviewPanel) == 1 && Grid.GetColumn(SkinPreviewPanel) == 0 &&
-                   CircuitWorkspaceGrid.ColumnDefinitions.Count == 1 &&
-                   CircuitWorkspaceGrid.RowDefinitions.Count == 1 &&
-                   Grid.GetColumn(CircuitCanvasSurface) == 0 &&
-                   !CircuitPalettePanel.IsVisible && !CircuitInspectorPanel.IsVisible &&
-                   CircuitPaletteToggleButton.IsVisible && CircuitInspectorToggleButton.IsVisible &&
-                   double.IsNaN(AnalogConfigurationTabs.Height);
+            var compact = compactLayout && CircuitWorkspaceGrid.ColumnDefinitions.Count == 1 &&
+                          CircuitPaletteToggleButton.IsVisible && CircuitInspectorToggleButton.IsVisible &&
+                          SkinWorkspaceGrid.RowDefinitions.Count == 2;
             CircuitPaletteToggleClick(null, new RoutedEventArgs());
             UpdateLayout();
-            var paletteDrawer = CircuitPalettePanel.IsVisible && !CircuitInspectorPanel.IsVisible &&
-                                CircuitPalettePanel.Bounds.Width <= CircuitWorkspaceGrid.Bounds.Width + 0.5;
+            var palette = CircuitPalettePanel.IsVisible && !CircuitInspectorPanel.IsVisible &&
+                          CircuitPalettePanel.Bounds.Width <= CircuitWorkspaceGrid.Bounds.Width;
             CircuitInspectorToggleClick(null, new RoutedEventArgs());
             UpdateLayout();
-            var inspectorDrawer = !CircuitPalettePanel.IsVisible && CircuitInspectorPanel.IsVisible &&
-                                  CircuitInspectorPanel.Bounds.Width <= CircuitWorkspaceGrid.Bounds.Width + 0.5;
-            CircuitInspectorPanel.IsVisible = false;
-            return compactBase && paletteDrawer && inspectorDrawer;
+            var inspector = CircuitInspectorPanel.IsVisible && !CircuitPalettePanel.IsVisible &&
+                            CircuitInspectorPanel.Bounds.Width <= CircuitWorkspaceGrid.Bounds.Width;
+            UpdateResponsiveLayout(1280);
+            UpdateLayout();
+            return compact && palette && inspector && CircuitWorkspaceGrid.ColumnDefinitions.Count == 3 &&
+                   CircuitPalettePanel.IsVisible && CircuitInspectorPanel.IsVisible;
         }
         finally
         {
-            UpdateResponsiveLayout(originalWidth);
-            if (originalCompact != compactLayout)
-            {
-                UpdateResponsiveLayout(originalCompact ? 860.0 : 1180.0);
-            }
+            UpdateResponsiveLayout(width);
+            CircuitPalettePanel.IsVisible = CircuitInspectorPanel.IsVisible = !compactLayout;
             UpdateLayout();
         }
     }
 
     public bool ProbeNarrowLayoutBounds()
     {
-        var layoutWidth = Bounds.Width;
-        if (TopLevel.GetTopLevel(this) is Window window && window.Width > 0 && window.Width < 1120.0)
+        if (TopLevel.GetTopLevel(this) is Window window && window.Content is Control content)
         {
-            layoutWidth = window.Width;
+            content.InvalidateMeasure();
+            content.Measure(new Size(window.Width, window.Height));
+            content.Arrange(new Rect(0, 0, window.Width, window.Height));
         }
-        UpdateResponsiveLayout(layoutWidth);
+        UpdateResponsiveLayout(Bounds.Width);
         UpdateLayout();
-        var circuitCanvasName = CircuitCanvasSurface.GetValue(AutomationProperties.NameProperty) ?? string.Empty;
-        var skinCanvasName = SkinDesignCanvas.GetValue(AutomationProperties.NameProperty) ?? string.Empty;
-        var circuitToolbarChildrenFit = CircuitToolbarPanel.Bounds.Width <= 0 ||
-            CircuitToolbarPanel.Bounds.Height <= 0 ||
-            CircuitToolbarPanel.Children.OfType<Control>().Where(child => child.IsVisible).All(child =>
-                child.TranslatePoint(default, CircuitToolbarPanel) is { } origin &&
-                origin.X >= -0.5 && origin.Y >= -0.5 &&
-                origin.X + child.Bounds.Width <= CircuitToolbarPanel.Bounds.Width + 0.5 &&
-                origin.Y + child.Bounds.Height <= CircuitToolbarPanel.Bounds.Height + 0.5);
-        // Bounds are device pixels on a scaled desktop; compactLayout is based
-        // on the logical width passed through the responsive layout policy.
-        var result = Bounds.Width > 0 && compactLayout &&
-               WorkshopTopbarGrid.Bounds.Width > 0 && WorkshopActions.Bounds.Width > 0 &&
-               WorkshopActions.Bounds.Right <= WorkshopTopbarGrid.Bounds.Width + 0.5 &&
-               WorkshopStatusGrid.Bounds.Width > 0 && RecentProjectSearchBox.Bounds.Width > 0 &&
-               RecentProjectSelector.Bounds.Width > 0 &&
-               RecentProjectSearchBox.Bounds.Right <= WorkshopStatusGrid.Bounds.Width + 0.5 &&
-               RecentProjectSelector.Bounds.Right <= WorkshopStatusGrid.Bounds.Width + 0.5 &&
-               OpenRecentProjectButton.Bounds.Right <= WorkshopStatusGrid.Bounds.Width + 0.5 &&
-               ValidateProjectButton.Bounds.Right <= WorkshopStatusGrid.Bounds.Width + 0.5 &&
-               RecentProjectSearchBox.Bounds.Top >= WorkshopStatusText.Bounds.Bottom - 0.5 &&
-               CircuitCanvasSurface.Bounds.Width >= CircuitWorkspaceGrid.Bounds.Width - 1.0 &&
-               circuitToolbarChildrenFit &&
-               CircuitPaletteToggleButton.Bounds.Right <= CircuitWorkspaceGrid.Bounds.Right + 0.5 &&
-               CircuitInspectorToggleButton.Bounds.Right <= CircuitWorkspaceGrid.Bounds.Right + 0.5 &&
-               !string.IsNullOrWhiteSpace(circuitCanvasName) && !string.IsNullOrWhiteSpace(skinCanvasName);
+        static bool Fits(Control child, Control parent) =>
+            child.TranslatePoint(default, parent) is { } point &&
+            point.X >= -1 && point.Y >= -1 &&
+            point.X + child.Bounds.Width <= parent.Bounds.Width + 1 &&
+            point.Y + child.Bounds.Height <= parent.Bounds.Height + 1;
+        var toolbarFits = CircuitToolbarPanel.Children.OfType<Control>()
+            .Where(child => child.IsEffectivelyVisible).All(child => Fits(child, CircuitToolbarPanel));
+        var result = compactLayout && Fits(WorkshopActions, WorkshopTopbarGrid) && toolbarFits &&
+                     CircuitCanvasSurface.Bounds.Width >= CircuitWorkspaceGrid.Bounds.Width - 1 &&
+                     CircuitCanvasSurface.Bounds.Height >= 160 &&
+                     Fits(CircuitWorkspaceGrid, WorkshopRoot);
         if (!result)
-        {
-            Console.Error.WriteLine($"[standalone-visual-probe] narrow detail: bounds={Bounds.Width:0.##}, compact={compactLayout}, " +
-                                    $"topbar={WorkshopTopbarGrid.Bounds}, actions={WorkshopActions.Bounds}, status={WorkshopStatusGrid.Bounds}, " +
-                                    $"search={RecentProjectSearchBox.Bounds}/{RecentProjectSearchBox.Bounds.Right:0.##}, recent={RecentProjectSelector.Bounds}, " +
-                                    $"open={OpenRecentProjectButton.Bounds}, validate={ValidateProjectButton.Bounds}, circuit={CircuitWorkspaceGrid.Bounds}, " +
-                                    $"toolbar={CircuitToolbarPanel.Bounds}/{circuitToolbarChildrenFit}, " +
-                                    $"canvas={CircuitCanvasSurface.Bounds}, paletteToggle={CircuitPaletteToggleButton.Bounds}, inspectorToggle={CircuitInspectorToggleButton.Bounds}, " +
-                                    $"names={circuitCanvasName}/{skinCanvasName}");
-        }
+            Console.Error.WriteLine($"[EDA layout] compact={compactLayout}, toolbar={toolbarFits}, " +
+                $"canvas={CircuitCanvasSurface.Bounds}, workspace={CircuitWorkspaceGrid.Bounds}, root={Bounds}");
         return result;
     }
 
@@ -558,6 +534,12 @@ public sealed partial class PedalWorkshopView : UserControl
             {
                 window.Width = logicalWidth;
                 window.Height = Math.Max(originalHeight > 0 ? originalHeight : 640.0, 640.0);
+                if (window.Content is Control content)
+                {
+                    content.InvalidateMeasure();
+                    content.Measure(new Size(window.Width, window.Height));
+                    content.Arrange(new Rect(0, 0, window.Width, window.Height));
+                }
                 UpdateResponsiveLayout(logicalWidth);
                 UpdateLayout();
                 var scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
@@ -693,7 +675,10 @@ public sealed partial class PedalWorkshopView : UserControl
         WorkshopTabs.SelectedIndex = 2;
         UpdateLayout();
         RenderCircuitConnections();
-        var normalSurfaceFingerprint = CaptureWorkshopSurface();
+        ClearCircuitSelection();
+        circuitSelectionAdditive = false;
+        UpdateLayout();
+        var normalSurfaceFingerprint = CaptureWorkshopSurface("circuit-normal");
         var component = Document.AnalogCircuit.Components[0];
         var inspectorWasVisible = CircuitInspectorPanel.IsVisible;
         CircuitInspectorPanel.IsVisible = true;
@@ -764,13 +749,15 @@ public sealed partial class PedalWorkshopView : UserControl
         CompleteCircuitBoxSelection(CircuitWorldToViewport(new Point(40.0, 80.0)),
             CircuitWorldToViewport(new Point(620.0, 320.0)));
         var boxSelected = selectedCircuitComponents.Count == 2;
+        if (!boxSelected) Console.Error.WriteLine($"[EDA box] selected={selectedCircuitComponents.Count}, additive={circuitSelectionAdditive}, " +
+            string.Join(";", Document.AnalogCircuit.Components.Select(c => $"{c.Id}={c.CanvasX},{c.CanvasY}")));
         var additiveTarget = Document.AnalogCircuit.Components[1];
         SelectCircuitComponents([Document.AnalogCircuit.Components[0]]);
         circuitSelectionAdditive = true;
         CompleteCircuitBoxSelection(
             CircuitWorldToViewport(new Point(additiveTarget.CanvasX - 4.0, additiveTarget.CanvasY - 4.0)),
-            CircuitWorldToViewport(new Point(additiveTarget.CanvasX + additiveTarget.Descriptor.SymbolWidth + 4.0,
-                additiveTarget.CanvasY + additiveTarget.Descriptor.SymbolHeight + 4.0)));
+            CircuitWorldToViewport(new Point(additiveTarget.CanvasX + additiveTarget.VisualWidth + 4.0,
+                additiveTarget.CanvasY + additiveTarget.VisualHeight + 4.0)));
         var additiveBoxSelected = selectedCircuitComponents.Count == 2;
         var previewSource = Document.AnalogCircuit.Components[0].Pins[1];
         var previewTarget = Document.AnalogCircuit.Components[1].Pins[1];
@@ -794,11 +781,10 @@ public sealed partial class PedalWorkshopView : UserControl
         pendingCircuitPin = previewSource;
         var invalidTargetPoint = CircuitWorldToViewport(CircuitPinPoint(Document.AnalogCircuit.Components[1], 0));
         UpdateCircuitWirePreview(invalidTargetPoint);
-        var invalidPreviewVisible = CircuitWirePreviewTarget.IsVisible &&
+        var sameNetPreviewVisible = CircuitWirePreviewTarget.IsVisible &&
                                     pendingCircuitTargetVisual is not null &&
-                                    pendingCircuitTargetVisual.Stroke == circuitErrorBrush &&
-                                    (CircuitSelectionText.Text?.Contains("不能连接", StringComparison.Ordinal) == true ||
-                                     CircuitSelectionText.Text?.Contains("无法连接", StringComparison.Ordinal) == true);
+                                    pendingCircuitTargetVisual.Stroke == circuitHoverBrush &&
+                                    CircuitSelectionText.Text?.Contains("可连接", StringComparison.Ordinal) == true;
         ClearPendingCircuitPin();
         selectedCircuitNode = "out";
         RenderCircuitConnections();
@@ -1030,9 +1016,12 @@ public sealed partial class PedalWorkshopView : UserControl
         Document.AnalogCircuit.WireRoutes.Remove(duplicateDiagnosticRoute);
         Document.NewProject(ModuleAuthoringKind.AnalogCircuit);
         ClearCircuitSelection();
+        circuitZoom = 1.0;
+        circuitPanX = 0.0;
+        circuitPanY = 0.0;
         RenderCircuitConnections();
         UpdateLayout();
-        var restoredSurfaceFingerprint = CaptureWorkshopSurface();
+        var restoredSurfaceFingerprint = CaptureWorkshopSurface("circuit-restored");
         var visualStateBaselines = normalSurfaceFingerprint is not null &&
                                     selectedSurfaceFingerprint is not null &&
                                     diagnosticSurfaceFingerprint is not null &&
@@ -1051,7 +1040,7 @@ public sealed partial class PedalWorkshopView : UserControl
         var circuitResult = CircuitCanvasSurface.Bounds.Width > 0 && CircuitCanvasSurface.Bounds.Height > 0 &&
                CircuitNodeLayer.ItemCount == Document.AnalogCircuit.Components.Count &&
                CircuitWireLayer.Children.Count > 0 && moved && undone && paletteDrop && boxSelected &&
-               previewVisible && invalidPreviewVisible && wireSelected && routeDeleted && routePointDeleted &&
+               previewVisible && sameNetPreviewVisible && wireSelected && routeDeleted && routePointDeleted &&
                 previewSnapBoundary && previewSnapOutside &&
                 additiveBoxSelected && snapToggleWorked &&
                 minimumZoomStable && maximumZoomStable &&
@@ -1063,7 +1052,7 @@ public sealed partial class PedalWorkshopView : UserControl
             Console.Error.WriteLine($"[standalone-visual-probe] circuit detail: " +
                                     $"surface={CircuitCanvasSurface.Bounds.Width:0.##}x{CircuitCanvasSurface.Bounds.Height:0.##}, " +
                                     $"items={CircuitNodeLayer.ItemCount}/{Document.AnalogCircuit.Components.Count}, wires={CircuitWireLayer.Children.Count}, " +
-                                    $"moved={moved}, undone={undone}, palette={paletteDrop}, box={boxSelected}, preview={previewVisible}, invalid={invalidPreviewVisible}, " +
+                                    $"moved={moved}, undone={undone}, palette={paletteDrop}, box={boxSelected}, preview={previewVisible}, sameNet={sameNetPreviewVisible}, " +
                                     $"wire={wireSelected}, route={routeDeleted}, point={routePointDeleted}, boundary={previewSnapBoundary}, outside={previewSnapOutside}, " +
                                     $"additive={additiveBoxSelected}, snap={snapToggleWorked}, minZoom={minimumZoomStable}, maxZoom={maximumZoomStable}, " +
                                     $"cross={crossoverMarked}/{crossoverTagged}/{crossoverSelection}, routeAvoid={obstacleRouteAvoids}/{denseRouteAvoids}, " +
@@ -1075,7 +1064,7 @@ public sealed partial class PedalWorkshopView : UserControl
         return circuitResult;
     }
 
-    private WorkshopSurfaceFingerprint? CaptureWorkshopSurface()
+    private WorkshopSurfaceFingerprint? CaptureWorkshopSurface(string? evidenceName = null)
     {
         var topLevel = TopLevel.GetTopLevel(this);
         var renderScale = topLevel?.RenderScaling ?? 1.0;
@@ -1094,6 +1083,7 @@ public sealed partial class PedalWorkshopView : UserControl
             using var stream = new MemoryStream();
             bitmap.Save(stream);
             var png = stream.ToArray();
+            if (evidenceName is not null) bitmap.Save(Path.Combine(AppContext.BaseDirectory, evidenceName + ".png"));
             if (png.Length < 32 || png[0] != 0x89 || png[1] != 0x50 || png[2] != 0x4E || png[3] != 0x47)
             {
                 return null;
@@ -1242,156 +1232,36 @@ public sealed partial class PedalWorkshopView : UserControl
     private void UpdateResponsiveLayout(double width)
     {
         var compact = width > 0 && width < 1120.0;
+        var changed = compactLayout != compact;
         compactLayout = compact;
-        WorkshopTopbarGrid.ColumnDefinitions.Clear();
-        WorkshopTopbarGrid.RowDefinitions.Clear();
-        WorkshopStatusGrid.ColumnDefinitions.Clear();
-        WorkshopStatusGrid.RowDefinitions.Clear();
-        SkinWorkspaceGrid.ColumnDefinitions.Clear();
-        SkinWorkspaceGrid.RowDefinitions.Clear();
-        CircuitWorkspaceGrid.ColumnDefinitions.Clear();
-        CircuitWorkspaceGrid.RowDefinitions.Clear();
-        if (compact)
+        SkinWorkspaceGrid.ColumnDefinitions = new ColumnDefinitions(compact ? "*" : "1.35*,*");
+        SkinWorkspaceGrid.RowDefinitions = new RowDefinitions(compact ? "*,260" : "*");
+        Grid.SetColumn(SkinPreviewPanel, compact ? 0 : 1);
+        Grid.SetRow(SkinPreviewPanel, compact ? 1 : 0);
+        SkinEditorScroll.Margin = compact ? new Thickness(0, 0, 0, 14) : new Thickness(0, 0, 18, 0);
+        SkinPreviewPanel.MinHeight = compact ? 240 : 280;
+
+        CircuitWorkspaceGrid.ColumnDefinitions = new ColumnDefinitions(compact ? "*" : "190,*,280");
+        CircuitWorkspaceGrid.RowDefinitions = new RowDefinitions("*");
+        Grid.SetColumn(CircuitPalettePanel, 0);
+        Grid.SetColumn(CircuitCanvasSurface, compact ? 0 : 1);
+        Grid.SetColumn(CircuitInspectorPanel, compact ? 0 : 2);
+        CircuitPalettePanel.Width = compact ? 220 : double.NaN;
+        CircuitInspectorPanel.Width = compact ? 280 : double.NaN;
+        CircuitPalettePanel.HorizontalAlignment = compact ? HorizontalAlignment.Left : HorizontalAlignment.Stretch;
+        CircuitInspectorPanel.HorizontalAlignment = compact ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
+        CircuitPalettePanel.Margin = compact ? default : new Thickness(0, 0, 1, 0);
+        CircuitInspectorPanel.Margin = compact ? default : new Thickness(1, 0, 0, 0);
+        CircuitPalettePanel.SetValue(Panel.ZIndexProperty, compact ? 10 : 0);
+        CircuitInspectorPanel.SetValue(Panel.ZIndexProperty, compact ? 10 : 0);
+        if (changed || !compact)
         {
-            WorkshopTopbarGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-            WorkshopTopbarGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            WorkshopTopbarGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            Grid.SetColumn(WorkshopTitlePanel, 0);
-            Grid.SetRow(WorkshopTitlePanel, 0);
-            Grid.SetColumn(WorkshopActions, 0);
-            Grid.SetRow(WorkshopActions, 1);
-            WorkshopActions.HorizontalAlignment = HorizontalAlignment.Left;
-            WorkshopActions.Margin = new Thickness(0, 8, 0, 0);
-
-            WorkshopStatusGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-            WorkshopStatusGrid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1.2, GridUnitType.Star)));
-            WorkshopStatusGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
-            WorkshopStatusGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
-            WorkshopStatusGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            WorkshopStatusGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            Grid.SetRow(WorkshopKindBadge, 0);
-            Grid.SetColumn(WorkshopKindBadge, 0);
-            Grid.SetRow(WorkshopStatusText, 0);
-            Grid.SetColumn(WorkshopStatusText, 1);
-            Grid.SetColumnSpan(WorkshopStatusText, 3);
-            Grid.SetRow(RecentProjectSearchBox, 1);
-            Grid.SetColumn(RecentProjectSearchBox, 0);
-            RecentProjectSearchBox.Margin = new Thickness(0, 8, 6, 0);
-            Grid.SetRow(RecentProjectSelector, 1);
-            Grid.SetColumn(RecentProjectSelector, 1);
-            RecentProjectSelector.Margin = new Thickness(0, 8, 6, 0);
-            Grid.SetRow(OpenRecentProjectButton, 1);
-            Grid.SetColumn(OpenRecentProjectButton, 2);
-            OpenRecentProjectButton.Margin = new Thickness(0, 8, 6, 0);
-            Grid.SetRow(ValidateProjectButton, 1);
-            Grid.SetColumn(ValidateProjectButton, 3);
-            ValidateProjectButton.Margin = new Thickness(0, 8, 0, 0);
-
-            SkinWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-            SkinWorkspaceGrid.RowDefinitions.Add(new RowDefinition(GridLength.Star));
-            SkinWorkspaceGrid.RowDefinitions.Add(new RowDefinition(new GridLength(260)));
-            Grid.SetColumn(SkinEditorScroll, 0);
-            Grid.SetRow(SkinEditorScroll, 0);
-            SkinEditorScroll.Margin = new Thickness(0, 0, 0, 14);
-            Grid.SetColumn(SkinPreviewPanel, 0);
-            Grid.SetRow(SkinPreviewPanel, 1);
-            SkinPreviewPanel.MinHeight = 240;
-
-            CircuitWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-            CircuitWorkspaceGrid.RowDefinitions.Add(new RowDefinition(GridLength.Star));
-            Grid.SetColumn(CircuitCanvasSurface, 0);
-            Grid.SetRow(CircuitCanvasSurface, 0);
-            CircuitCanvasSurface.Margin = default;
-            Grid.SetColumn(CircuitPalettePanel, 0);
-            Grid.SetRow(CircuitPalettePanel, 0);
-            CircuitPalettePanel.Width = 240.0;
-            CircuitPalettePanel.HorizontalAlignment = HorizontalAlignment.Left;
-            CircuitPalettePanel.Margin = default;
-            CircuitPalettePanel.IsVisible = false;
-            CircuitPalettePanel.SetValue(Panel.ZIndexProperty, 10);
-            Grid.SetColumn(CircuitInspectorPanel, 0);
-            Grid.SetRow(CircuitInspectorPanel, 0);
-            CircuitInspectorPanel.Width = Math.Clamp(width - 96.0, 280.0, 380.0);
-            CircuitInspectorPanel.HorizontalAlignment = HorizontalAlignment.Right;
-            CircuitInspectorPanel.Margin = default;
-            CircuitInspectorPanel.IsVisible = false;
-            CircuitInspectorPanel.SetValue(Panel.ZIndexProperty, 10);
-            CircuitPaletteToggleButton.IsVisible = true;
-            CircuitInspectorToggleButton.IsVisible = true;
-            AnalogConfigurationTabs.MaxHeight = 320.0;
+            CircuitPalettePanel.IsVisible = !compact;
+            CircuitInspectorPanel.IsVisible = !compact;
         }
-        else
-        {
-            WorkshopTopbarGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-            WorkshopTopbarGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
-            WorkshopTopbarGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            Grid.SetColumn(WorkshopTitlePanel, 0);
-            Grid.SetRow(WorkshopTitlePanel, 0);
-            Grid.SetColumn(WorkshopActions, 1);
-            Grid.SetRow(WorkshopActions, 0);
-            WorkshopActions.HorizontalAlignment = HorizontalAlignment.Right;
-            WorkshopActions.Margin = default;
-
-            WorkshopStatusGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
-            WorkshopStatusGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-            WorkshopStatusGrid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(180)));
-            WorkshopStatusGrid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(220)));
-            WorkshopStatusGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
-            WorkshopStatusGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
-            WorkshopStatusGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            Grid.SetRow(WorkshopKindBadge, 0);
-            Grid.SetColumn(WorkshopKindBadge, 0);
-            Grid.SetRow(WorkshopStatusText, 0);
-            Grid.SetColumn(WorkshopStatusText, 1);
-            Grid.SetColumnSpan(WorkshopStatusText, 1);
-            Grid.SetRow(RecentProjectSearchBox, 0);
-            Grid.SetColumn(RecentProjectSearchBox, 2);
-            RecentProjectSearchBox.Margin = new Thickness(0, 0, 6, 0);
-            Grid.SetRow(RecentProjectSelector, 0);
-            Grid.SetColumn(RecentProjectSelector, 3);
-            RecentProjectSelector.Margin = new Thickness(0, 0, 6, 0);
-            Grid.SetRow(OpenRecentProjectButton, 0);
-            Grid.SetColumn(OpenRecentProjectButton, 4);
-            OpenRecentProjectButton.Margin = new Thickness(0, 0, 6, 0);
-            Grid.SetRow(ValidateProjectButton, 0);
-            Grid.SetColumn(ValidateProjectButton, 5);
-            ValidateProjectButton.Margin = default;
-
-            SkinWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1.35, GridUnitType.Star)));
-            SkinWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-            SkinWorkspaceGrid.RowDefinitions.Add(new RowDefinition(GridLength.Star));
-            Grid.SetColumn(SkinEditorScroll, 0);
-            Grid.SetRow(SkinEditorScroll, 0);
-            SkinEditorScroll.Margin = new Thickness(0, 0, 18, 0);
-            Grid.SetColumn(SkinPreviewPanel, 1);
-            Grid.SetRow(SkinPreviewPanel, 0);
-            SkinPreviewPanel.MinHeight = 280;
-
-            CircuitWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(190)));
-            CircuitWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-            CircuitWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(340)));
-            CircuitWorkspaceGrid.RowDefinitions.Add(new RowDefinition(GridLength.Star));
-            Grid.SetColumn(CircuitPalettePanel, 0);
-            Grid.SetRow(CircuitPalettePanel, 0);
-            CircuitPalettePanel.Width = double.NaN;
-            CircuitPalettePanel.HorizontalAlignment = HorizontalAlignment.Stretch;
-            CircuitPalettePanel.Margin = new Thickness(0, 0, 12, 0);
-            CircuitPalettePanel.IsVisible = true;
-            CircuitPalettePanel.SetValue(Panel.ZIndexProperty, 0);
-            Grid.SetColumn(CircuitCanvasSurface, 1);
-            Grid.SetRow(CircuitCanvasSurface, 0);
-            CircuitCanvasSurface.Margin = default;
-            Grid.SetColumn(CircuitInspectorPanel, 2);
-            Grid.SetRow(CircuitInspectorPanel, 0);
-            CircuitInspectorPanel.Width = double.NaN;
-            CircuitInspectorPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
-            CircuitInspectorPanel.Margin = new Thickness(12, 0, 0, 0);
-            CircuitInspectorPanel.IsVisible = true;
-            CircuitInspectorPanel.SetValue(Panel.ZIndexProperty, 0);
-            CircuitPaletteToggleButton.IsVisible = false;
-            CircuitInspectorToggleButton.IsVisible = false;
-            AnalogConfigurationTabs.MaxHeight = 280.0;
-        }
+        CircuitPaletteToggleButton.IsVisible = compact;
+        CircuitInspectorToggleButton.IsVisible = compact;
+        AnalogConfigurationTabs.MaxHeight = compact ? 200 : 280;
     }
 
     private void CircuitPaletteToggleClick(object? sender, RoutedEventArgs args)
@@ -1405,6 +1275,9 @@ public sealed partial class PedalWorkshopView : UserControl
         CircuitPalettePanel.IsVisible = show;
     }
 
+    private void ProjectOptionsClick(object? sender, RoutedEventArgs args) =>
+        WorkshopStatusBand.IsVisible = !WorkshopStatusBand.IsVisible;
+
     private void CircuitInspectorToggleClick(object? sender, RoutedEventArgs args)
     {
         if (!compactLayout)
@@ -1414,6 +1287,8 @@ public sealed partial class PedalWorkshopView : UserControl
         var show = !CircuitInspectorPanel.IsVisible;
         CircuitPalettePanel.IsVisible = false;
         CircuitInspectorPanel.IsVisible = show;
+        UpdateLayout();
+        if (show && selectedCircuitComponent is { } component) CenterCircuitComponent(component);
     }
 
     public async Task<bool> ConfirmPendingChangesAsync()
@@ -1481,22 +1356,22 @@ public sealed partial class PedalWorkshopView : UserControl
         {
             return;
         }
-        for (var x = 0.0; x <= CircuitCanvasWidth; x += CircuitGridSize)
+        for (var x = -CircuitCanvasWidth; x <= CircuitCanvasWidth * 2; x += CircuitGridSize)
         {
             CircuitGridLayer.Children.Add(new Line
             {
-                StartPoint = new Point(x, 0.0),
-                EndPoint = new Point(x, CircuitCanvasHeight),
+                StartPoint = new Point(x, -CircuitCanvasHeight),
+                EndPoint = new Point(x, CircuitCanvasHeight * 2),
                 Stroke = ((int)(x / CircuitGridSize) % 4 == 0) ? circuitMajorGridBrush : circuitMinorGridBrush,
                 StrokeThickness = 1.0,
             });
         }
-        for (var y = 0.0; y <= CircuitCanvasHeight; y += CircuitGridSize)
+        for (var y = -CircuitCanvasHeight; y <= CircuitCanvasHeight * 2; y += CircuitGridSize)
         {
             CircuitGridLayer.Children.Add(new Line
             {
-                StartPoint = new Point(0.0, y),
-                EndPoint = new Point(CircuitCanvasWidth, y),
+                StartPoint = new Point(-CircuitCanvasWidth, y),
+                EndPoint = new Point(CircuitCanvasWidth * 2, y),
                 Stroke = ((int)(y / CircuitGridSize) % 4 == 0) ? circuitMajorGridBrush : circuitMinorGridBrush,
                 StrokeThickness = 1.0,
             });
@@ -1510,11 +1385,18 @@ public sealed partial class PedalWorkshopView : UserControl
         {
             return;
         }
+        if (selectedCircuitComponents.Any(component => !Document.AnalogCircuit.Components.Contains(component)))
+            ClearCircuitSelection();
+        if (selectedSchematicWire is not null && !Document.AnalogCircuit.WireRoutes.Contains(selectedSchematicWire))
+            ClearCircuitSelection();
+        if (pendingCircuitPin is not null && pendingWireStart is null && !Document.AnalogCircuit.Components.Any(component => component.Pins.Contains(pendingCircuitPin)))
+            ClearPendingCircuitPin();
         CircuitWireLayer.Children.Clear();
         CircuitCrossingLayer.Children.Clear();
         CircuitJunctionLayer.Children.Clear();
         renderedCircuitSegments.Clear();
         circuitLabelBounds.Clear();
+        circuitWirePaths.Clear();
         circuitRouteCache.Clear();
         circuitRoutingObstacleSnapshot = null;
         circuitRoutingGridSnapshot = null;
@@ -1532,11 +1414,36 @@ public sealed partial class PedalWorkshopView : UserControl
         foreach (var node in endpoints)
         {
             var circuitEndpoints = node.Select(endpoint => new CircuitEndpoint(endpoint.Pin, endpoint.Point)).ToArray();
+            var stroke = CircuitNodeBaseBrush(node.Key);
+            var explicitWires = Document.AnalogCircuit.WireRoutes.Where(wire => wire.IsExplicit && wire.Node == node.Key).ToArray();
+            if (explicitWires.Length > 0)
+            {
+                RenderSchematicWires(node.Key, explicitWires, circuitEndpoints, stroke);
+                continue;
+            }
+            if (node.Key == Document.AnalogCircuit.ReferenceGround)
+            {
+                foreach (var endpoint in circuitEndpoints)
+                {
+                    var lead = CircuitLeadPoint(endpoint);
+                    AddCircuitWireSegment(node.Key, endpoint.Point, lead, stroke);
+                    AddCircuitWireSegment(node.Key, lead, new Point(lead.X, lead.Y + 16), stroke);
+                    AddGroundSymbol(new Point(lead.X, lead.Y + 16), stroke);
+                }
+                continue;
+            }
+            var port = Document.AnalogCircuit.Ports.FirstOrDefault(port => port.Node == node.Key);
+            if (port is not null)
+            {
+                var endpoint = port.Direction == "input" ? circuitEndpoints.MinBy(e => e.Point.X)! : circuitEndpoints.MaxBy(e => e.Point.X)!;
+                var lead = CircuitLeadPoint(endpoint);
+                AddCircuitWireSegment(node.Key, endpoint.Point, lead, stroke);
+                AddCircuitNodeLabel(node.Key, lead, stroke, port.Direction == "input" ? "IN" : "OUT");
+            }
             if (circuitEndpoints.Length < 2)
             {
                 continue;
             }
-            var stroke = CircuitNodeBaseBrush(node.Key);
             var leadPoints = circuitEndpoints.Select(CircuitLeadPoint).ToArray();
             var route = Document.AnalogCircuit.WireRoutes.FirstOrDefault(candidate =>
                 string.Equals(candidate.Node, node.Key, StringComparison.Ordinal));
@@ -1568,7 +1475,7 @@ public sealed partial class PedalWorkshopView : UserControl
                         AddJunctionDot(new Point(point.X, point.Y), routeStroke, 6.0, node.Key);
                     }
                 }
-                AddCircuitNodeLabel(node.Key, RouteLabelPoint(waypoints), routeStroke);
+                if (port is null) AddCircuitNodeLabel(node.Key, RouteLabelPoint(waypoints), routeStroke);
             }
             else
             {
@@ -1594,20 +1501,23 @@ public sealed partial class PedalWorkshopView : UserControl
                 {
                     AddJunctionDot(new Point(trunkX, branch.Key), stroke, 8.0, node.Key);
                 }
-                AddCircuitNodeLabel(node.Key, new Point(trunkX + 6.0, minimumY - 18.0), stroke);
+                if (port is null) AddCircuitNodeLabel(node.Key, new Point(trunkX + 6.0, minimumY - 18.0), stroke);
                 if (string.Equals(node.Key, Document.AnalogCircuit.ReferenceGround, StringComparison.Ordinal))
                 {
                     AddGroundSymbol(new Point(trunkX, maximumY), stroke);
                 }
             }
         }
+        foreach (var wires in Document.AnalogCircuit.WireRoutes.Where(wire => wire.IsExplicit &&
+                     !endpoints.Any(group => group.Key == wire.Node)).GroupBy(wire => wire.Node))
+            RenderSchematicWires(wires.Key, wires.ToArray(), [], CircuitNodeBaseBrush(wires.Key));
         RenderCircuitCrossings();
         if (selectedCircuitNode is not null)
         {
             CircuitSelectionText.Text = CircuitNetworkStatusText(selectedCircuitNode);
         }
-        CircuitAddRoutePointButton.IsVisible = selectedCircuitNode is not null;
-        CircuitClearRouteButton.IsVisible = selectedCircuitNode is not null;
+        CircuitAddRoutePointButton.IsVisible = selectedCircuitNode is not null && selectedSchematicWire is null;
+        CircuitClearRouteButton.IsVisible = selectedCircuitNode is not null && selectedSchematicWire is null;
         CircuitAddRoutePointButton.IsEnabled = selectedCircuitNode is not null;
         CircuitClearRouteButton.IsEnabled = selectedCircuitNode is not null &&
                                              Document.AnalogCircuit.WireRoutes.Any(route =>
@@ -1688,7 +1598,7 @@ public sealed partial class PedalWorkshopView : UserControl
 
     private static Point CircuitLeadPoint(CircuitEndpoint endpoint)
     {
-        const double lead = 20.0;
+        const double lead = 32.0;
         return endpoint.Pin.Side switch
         {
             "right" => new Point(endpoint.Point.X + lead, endpoint.Point.Y),
@@ -1818,7 +1728,9 @@ public sealed partial class PedalWorkshopView : UserControl
             {
                 continue;
             }
-            var selected = string.Equals(tag.Node, selectedCircuitNode, StringComparison.Ordinal);
+            var selected = selectedSchematicWire is not null && tag.Route is not null
+                ? ReferenceEquals(tag.Route, selectedSchematicWire)
+                : string.Equals(tag.Node, selectedCircuitNode, StringComparison.Ordinal);
             var hovered = string.Equals(tag.Node, hoveredCircuitNode, StringComparison.Ordinal);
             var diagnostic = circuitDiagnosticRoutes.Any(route =>
                 string.Equals(route.Node, tag.Node, StringComparison.Ordinal));
@@ -1994,8 +1906,8 @@ public sealed partial class PedalWorkshopView : UserControl
         .Select(component => new Rect(
             component.CanvasX - CircuitGridSize,
             component.CanvasY - CircuitGridSize,
-            component.Descriptor.SymbolWidth + CircuitGridSize * 2.0,
-            component.Descriptor.SymbolHeight + CircuitGridSize * 2.0))
+            component.VisualWidth + CircuitGridSize * 2.0,
+            component.VisualHeight + CircuitGridSize * 2.0))
         .ToArray();
     }
 
@@ -2302,14 +2214,14 @@ public sealed partial class PedalWorkshopView : UserControl
         CircuitJunctionLayer.Children.Add(dot);
     }
 
-    private void AddCircuitNodeLabel(string node, Point point, IBrush stroke)
+    private void AddCircuitNodeLabel(string node, Point point, IBrush stroke, string? caption = null)
     {
         var displayStroke = string.Equals(node, selectedCircuitNode, StringComparison.Ordinal)
             ? circuitSelectedBrush
             : string.Equals(node, hoveredCircuitNode, StringComparison.Ordinal)
                 ? circuitHoverBrush
                 : stroke;
-        var labelWidth = Math.Clamp(14.0 + node.Length * 7.0, 48.0, 188.0);
+        var labelWidth = Math.Clamp(14.0 + (caption ?? node).Length * 7.0, 48.0, 188.0);
         const double labelHeight = 24.0;
         var labelBounds = FindCircuitLabelBounds(point, labelWidth, labelHeight);
         circuitLabelBounds.Add(labelBounds);
@@ -2336,13 +2248,13 @@ public sealed partial class PedalWorkshopView : UserControl
             Tag = node,
             Background = circuitWireHaloBrush,
             BorderBrush = displayStroke,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(3),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(0),
             Padding = new Thickness(4, 2),
             IsHitTestVisible = false,
             Child = new TextBlock
             {
-                Text = node,
+                Text = caption ?? node,
                 Foreground = displayStroke,
                 FontSize = 10.0,
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -2460,7 +2372,8 @@ public sealed partial class PedalWorkshopView : UserControl
         AddCircuitWireSegment(node, new Point(middleX, end.Y), end, stroke);
     }
 
-    private void AddCircuitWireSegment(string node, Point start, Point end, IBrush stroke)
+    private void AddCircuitWireSegment(string node, Point start, Point end, IBrush stroke,
+        AnalogWireRouteDraft? route = null, int segmentIndex = -1)
     {
         if (DistanceSquared(start, end) < 0.01)
         {
@@ -2474,7 +2387,7 @@ public sealed partial class PedalWorkshopView : UserControl
             Stroke = circuitWireHaloBrush,
             StrokeThickness = 6.5,
             StrokeLineCap = PenLineCap.Round,
-            Tag = new CircuitWireVisualTag(node, CircuitWireVisualPart.Halo, stroke),
+            Tag = new CircuitWireVisualTag(node, CircuitWireVisualPart.Halo, stroke, route, segmentIndex),
             IsHitTestVisible = false,
         };
         CircuitWireLayer.Children.Add(halo);
@@ -2486,7 +2399,8 @@ public sealed partial class PedalWorkshopView : UserControl
             Stroke = stroke,
             StrokeThickness = 3.0,
             StrokeLineCap = PenLineCap.Round,
-            Tag = new CircuitWireVisualTag(node, CircuitWireVisualPart.Wire, stroke),
+            Tag = new CircuitWireVisualTag(node, CircuitWireVisualPart.Wire, stroke, route, segmentIndex),
+            ZIndex = 1,
             IsHitTestVisible = false,
         };
         ToolTip.SetTip(line, $"网络 {node}");
@@ -2499,8 +2413,10 @@ public sealed partial class PedalWorkshopView : UserControl
             Stroke = Brushes.Transparent,
             StrokeThickness = 16.0,
             StrokeLineCap = PenLineCap.Round,
-            Tag = new CircuitWireVisualTag(node, CircuitWireVisualPart.HitTarget, stroke),
-            Cursor = new Cursor(StandardCursorType.Hand),
+            Tag = new CircuitWireVisualTag(node, CircuitWireVisualPart.HitTarget, stroke, route, segmentIndex),
+            ZIndex = 2,
+            Cursor = new Cursor(route is null ? StandardCursorType.Hand : Math.Abs(start.X - end.X) < 0.01
+                ? StandardCursorType.SizeWestEast : StandardCursorType.SizeNorthSouth),
             Focusable = true,
             IsTabStop = true,
         };
@@ -2522,6 +2438,9 @@ public sealed partial class PedalWorkshopView : UserControl
             return;
         }
         var matrix = new Matrix(circuitZoom, 0.0, 0.0, circuitZoom, circuitPanX, circuitPanY);
+        foreach (var layer in new Control[] { CircuitGridLayer, CircuitWireLayer, CircuitCrossingLayer, CircuitJunctionLayer, CircuitNodeLayer })
+            layer.RenderTransformOrigin = RelativePoint.TopLeft;
+        foreach (var line in CircuitGridLayer.Children.OfType<Line>()) line.StrokeThickness = 0.65 / circuitZoom;
         CircuitGridLayer.RenderTransform = new MatrixTransform(matrix);
         CircuitWireLayer.RenderTransform = new MatrixTransform(matrix);
         CircuitCrossingLayer.RenderTransform = new MatrixTransform(matrix);
@@ -2546,11 +2465,165 @@ public sealed partial class PedalWorkshopView : UserControl
             return;
         }
         circuitPaletteDescriptor = descriptor;
+        SetCircuitTool("Select");
         circuitPalettePointerStart = args.GetPosition(WorkshopRoot);
         draggingCircuitPalette = false;
         AnalogAddTypeSelector.SelectedItem = descriptor;
         args.Pointer.Capture(WorkshopRoot);
         args.Handled = true;
+    }
+
+    private void CircuitComponentSearchChanged(object? sender, TextChangedEventArgs args) => FilterCircuitPalette();
+    private void CircuitCategoryChanged(object? sender, SelectionChangedEventArgs args) => FilterCircuitPalette();
+
+    private void FilterCircuitPalette()
+    {
+        if (CircuitComponentPalette is null || CircuitCategorySelector is null) return;
+        var search = CircuitComponentSearch.Text?.Trim() ?? string.Empty;
+        var category = CircuitCategorySelector.SelectedItem as string;
+        CircuitComponentPalette.ItemsSource = AnalogComponentCatalog.Components.Where(component =>
+            (string.IsNullOrEmpty(category) || category == "全部元件" || component.Category == category) &&
+            (component.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+             component.Type.Contains(search, StringComparison.OrdinalIgnoreCase))).ToArray();
+    }
+
+    private void CircuitPaletteItemKeyDown(object? sender, KeyEventArgs args)
+    {
+        if (sender is Border { Tag: AnalogComponentDescriptor descriptor } && args.Key is Key.Enter or Key.Space)
+        {
+            BeginCircuitPlacement(descriptor);
+            args.Handled = true;
+        }
+    }
+
+    private void BeginCircuitPlacement(AnalogComponentDescriptor descriptor)
+    {
+        SetCircuitTool("Select");
+        placingCircuitComponent = descriptor;
+        CircuitSelectionText.Text = descriptor.DisplayName;
+        CircuitCanvasSurface.Cursor = new Cursor(StandardCursorType.Cross);
+        if (compactLayout) CircuitPalettePanel.IsVisible = false;
+        CircuitCanvasSurface.Focus();
+    }
+
+    private void UpdateCircuitPlacementPreview(AnalogComponentDescriptor descriptor, Point pointer)
+    {
+        circuitPlacementPointer = pointer;
+        var size = CircuitPlacementSize(descriptor);
+        var world = CircuitViewportToWorld(pointer);
+        var position = CircuitWorldToViewport(new Point(
+            Math.Clamp(SnapCircuitEdit(world.X - size.Width * 0.5), 0, CircuitCanvasWidth - size.Width),
+            Math.Clamp(SnapCircuitEdit(world.Y - size.Height * 0.5), 0, CircuitCanvasHeight - size.Height)));
+        CircuitPaletteDragPreview.IsVisible = true;
+        CircuitPaletteDragPreview.Width = size.Width * circuitZoom;
+        CircuitPaletteDragPreview.Height = size.Height * circuitZoom;
+        CircuitPlacementBounds.Width = size.Width;
+        CircuitPlacementBounds.Height = size.Height;
+        CircuitPlacementCanvas.Width = descriptor.SymbolWidth;
+        CircuitPlacementCanvas.Height = descriptor.SymbolHeight;
+        CircuitPlacementCanvas.RenderTransform = new RotateTransform(circuitPlacementRotation);
+        CircuitPlacementSymbol.Data = StreamGeometry.Parse(descriptor.SymbolPath);
+        CircuitPaletteDragPreviewText.Text = descriptor.DisplayName;
+        Canvas.SetLeft(CircuitPaletteDragPreview, position.X);
+        Canvas.SetTop(CircuitPaletteDragPreview, position.Y);
+    }
+
+    private Size CircuitPlacementSize(AnalogComponentDescriptor descriptor) => circuitPlacementRotation % 180 == 0
+        ? new Size(descriptor.SymbolWidth, descriptor.SymbolHeight)
+        : new Size(descriptor.SymbolHeight, descriptor.SymbolWidth);
+
+    private void CircuitToolClick(object? sender, RoutedEventArgs args)
+    {
+        if (sender is Button { Tag: string tool }) SetCircuitTool(tool);
+        CircuitCanvasSurface.Focus();
+    }
+
+    private void SetCircuitTool(string tool)
+    {
+        ClearPendingCircuitPin();
+        placingCircuitComponent = null;
+        circuitPlacementRotation = 0;
+        CircuitPaletteDragPreview.IsVisible = false;
+        circuitTool = tool;
+        foreach (var button in CircuitToolbarPanel.Children.OfType<Button>().Where(button => button.Tag is string))
+            button.Classes.Set("active", Equals(button.Tag, tool));
+        CircuitCanvasSurface.Cursor = new Cursor(tool == "Select" ? StandardCursorType.Arrow : StandardCursorType.Cross);
+        UpdateCircuitSelectionStatus();
+    }
+
+    private void CircuitRotateClick(object? sender, RoutedEventArgs args)
+    {
+        if (placingCircuitComponent is { } placement)
+        {
+            circuitPlacementRotation = (circuitPlacementRotation + 90) % 360;
+            UpdateCircuitPlacementPreview(placement, circuitPlacementPointer);
+            return;
+        }
+        Document.BeginEditTransaction();
+        try
+        {
+            foreach (var component in selectedCircuitComponents)
+            {
+                component.Rotation += 90;
+                component.CanvasX = Math.Clamp(component.CanvasX, 0, CircuitCanvasWidth - component.VisualWidth);
+                component.CanvasY = Math.Clamp(component.CanvasY, 0, CircuitCanvasHeight - component.VisualHeight);
+            }
+        }
+        finally { Document.EndEditTransaction(); }
+        UpdateLayout();
+        RenderCircuitConnections();
+    }
+
+    private void CircuitDuplicateClick(object? sender, RoutedEventArgs args) =>
+        CircuitCanvasKeyDown(CircuitCanvasSurface, new KeyEventArgs { Key = Key.D, KeyModifiers = KeyModifiers.Control });
+
+    private void CircuitDeleteClick(object? sender, RoutedEventArgs args) =>
+        CircuitCanvasKeyDown(CircuitCanvasSurface, new KeyEventArgs { Key = Key.Delete });
+
+    private bool ApplyCircuitTerminal(AnalogPinDraft pin)
+    {
+        var node = circuitTool switch
+        {
+            "Ground" => Document.AnalogCircuit.ReferenceGround,
+            "Input" => Document.AnalogCircuit.InputNode,
+            "Output" => Document.AnalogCircuit.OutputNode,
+            _ => null,
+        };
+        if (node is null) return false;
+        Document.BeginEditTransaction();
+        try
+        {
+            if (circuitTool == "Ground") pin.GroundSymbol = true;
+            else pin.TerminalPortId = Document.AnalogCircuit.Ports.FirstOrDefault(port => port.Node == node)?.Id ?? string.Empty;
+            Document.ConnectAnalogPins(new AnalogPinDraft("terminal", "terminal", node), pin);
+        }
+        finally { Document.EndEditTransaction(); }
+        SetCircuitTool("Select");
+        RenderCircuitConnections();
+        return true;
+    }
+
+    private void CompleteCircuitWire(AnalogPinDraft target)
+    {
+        if (pendingCircuitPin is null || !IsCircuitPinConnectionValid(pendingCircuitPin, target)) return;
+        var sourcePin = pendingCircuitPin;
+        var source = PendingWireEndpoint();
+        if (source is null) return;
+        var end = Document.AnalogPinEndpoint(target);
+        var path = BuildSchematicPath(source, new Point(end.X, end.Y), target.Side, pendingCircuitBends);
+        Document.BeginEditTransaction();
+        try
+        {
+            EnsureSchematicNode(sourcePin.Node);
+            EnsureSchematicNode(target.Node);
+            source = pendingWireStart is { } wireStart ? SplitSchematicWire(wireStart) : Document.AnalogPinEndpoint(sourcePin);
+            end = Document.AnalogPinEndpoint(target);
+            Document.ConnectAnalogPins(sourcePin, target);
+            AddSchematicPath(sourcePin.Node, source, end, path);
+        }
+        finally { Document.EndEditTransaction(); }
+        ClearPendingCircuitPin();
+        RenderCircuitConnections();
     }
 
     private void CircuitRootPointerMoved(object? sender, PointerEventArgs args)
@@ -2576,11 +2649,7 @@ public sealed partial class PedalWorkshopView : UserControl
         {
             return;
         }
-        CircuitPaletteDragPreviewText.Text = circuitPaletteDescriptor.DisplayName;
-        Canvas.SetLeft(CircuitPaletteDragPreview, Math.Clamp(canvasPoint.X - 75.0, 0.0,
-            Math.Max(CircuitCanvasSurface.Bounds.Width - 150.0, 0.0)));
-        Canvas.SetTop(CircuitPaletteDragPreview, Math.Clamp(canvasPoint.Y - 27.0, 0.0,
-            Math.Max(CircuitCanvasSurface.Bounds.Height - 54.0, 0.0)));
+        UpdateCircuitPlacementPreview(circuitPaletteDescriptor, canvasPoint);
         args.Handled = true;
     }
 
@@ -2600,6 +2669,10 @@ public sealed partial class PedalWorkshopView : UserControl
                 DropCircuitPaletteComponent(circuitPaletteDescriptor, canvasPoint);
             }
         }
+        else
+        {
+            BeginCircuitPlacement(circuitPaletteDescriptor);
+        }
         circuitPaletteDescriptor = null;
         draggingCircuitPalette = false;
         CircuitPaletteDragPreview.IsVisible = false;
@@ -2614,11 +2687,17 @@ public sealed partial class PedalWorkshopView : UserControl
         AnalogComponentDescriptor descriptor, Point viewportPoint)
     {
         var world = CircuitViewportToWorld(viewportPoint);
-            var x = Math.Clamp(SnapCircuitEdit(world.X - descriptor.SymbolWidth * 0.5),
-                0.0, CircuitCanvasWidth - descriptor.SymbolWidth);
-        var y = Math.Clamp(SnapCircuitEdit(world.Y - descriptor.SymbolHeight * 0.5),
-                0.0, CircuitCanvasHeight - descriptor.SymbolHeight);
-        var component = Document.AddAnalogComponent(descriptor.Type, x, y);
+        var size = CircuitPlacementSize(descriptor);
+        var x = Math.Clamp(SnapCircuitEdit(world.X - size.Width * 0.5), 0.0, CircuitCanvasWidth - size.Width);
+        var y = Math.Clamp(SnapCircuitEdit(world.Y - size.Height * 0.5), 0.0, CircuitCanvasHeight - size.Height);
+        AnalogComponentDraft component;
+        Document.BeginEditTransaction();
+        try
+        {
+            component = Document.AddAnalogComponent(descriptor.Type, x, y);
+            component.Rotation = circuitPlacementRotation;
+        }
+        finally { Document.EndEditTransaction(); }
         UpdateLayout();
         SelectCircuitComponents([component]);
         if (compactLayout)
@@ -2636,6 +2715,39 @@ public sealed partial class PedalWorkshopView : UserControl
             return;
         }
         var point = args.GetCurrentPoint(surface);
+        if (point.Properties.IsRightButtonPressed)
+        {
+            SetCircuitTool("Select");
+            args.Handled = true;
+            return;
+        }
+        if (selectedCircuitComponents.Any(component => !Document.AnalogCircuit.Components.Contains(component)))
+            ClearCircuitSelection();
+        if (pendingCircuitPin is not null && pendingWireStart is null && !Document.AnalogCircuit.Components.Any(component => component.Pins.Contains(pendingCircuitPin)))
+            ClearPendingCircuitPin();
+        if (point.Properties.IsLeftButtonPressed && placingCircuitComponent is { } placement)
+        {
+            DropCircuitPaletteComponent(placement, args.GetPosition(surface));
+            args.Handled = true;
+            return;
+        }
+        if (point.Properties.IsLeftButtonPressed && pendingCircuitPin is not null)
+        {
+            var position = args.GetPosition(surface);
+            var candidate = FindCircuitPinNearViewport(position, CircuitPinCommitSnapTolerance)?.Endpoint.Pin;
+            if (candidate is not null) CompleteCircuitWire(candidate);
+            else if (FindSchematicWire(position) is { } wireTarget) CompleteSchematicBranch(wireTarget);
+            else
+            {
+                var world = CircuitViewportToWorld(position);
+                var path = BuildSchematicPath(PendingWireEndpoint()!, new Point(SnapCircuitGrid(world.X), SnapCircuitGrid(world.Y)), null, pendingCircuitBends);
+                pendingCircuitBends.Clear();
+                pendingCircuitBends.AddRange(path.Skip(1));
+                UpdateCircuitWirePreview(position);
+            }
+            args.Handled = true;
+            return;
+        }
         if (point.Properties.IsMiddleButtonPressed)
         {
             surface.Focus();
@@ -2649,6 +2761,11 @@ public sealed partial class PedalWorkshopView : UserControl
         }
         if (point.Properties.IsLeftButtonPressed)
         {
+            if (FindSchematicWire(args.GetPosition(surface)) is { } hit)
+            {
+                PressSchematicWire(hit, args);
+                return;
+            }
             surface.Focus();
             circuitSelectionAdditive = (args.KeyModifiers & KeyModifiers.Control) != 0;
             if (!circuitSelectionAdditive)
@@ -2671,6 +2788,7 @@ public sealed partial class PedalWorkshopView : UserControl
         {
             return;
         }
+        if (placingCircuitComponent is not null) SetCircuitTool("Select");
         ClearPendingCircuitPin();
         selectedCircuitNode = null;
         var additive = (args.KeyModifiers & KeyModifiers.Control) != 0;
@@ -2682,7 +2800,7 @@ public sealed partial class PedalWorkshopView : UserControl
         {
             selectedCircuitComponents.Remove(component);
             selectedCircuitCards.Remove(component);
-            card.BorderThickness = new Thickness(1);
+            card.Classes.Set("selected", false);
             selectedCircuitComponent = selectedCircuitComponents.LastOrDefault();
             selectedCircuitCard = selectedCircuitComponent is not null &&
                                   selectedCircuitCards.TryGetValue(selectedCircuitComponent, out var selectedCard)
@@ -2696,7 +2814,7 @@ public sealed partial class PedalWorkshopView : UserControl
         selectedCircuitCards[component] = card;
         selectedCircuitCard = card;
         selectedCircuitComponent = component;
-        card.BorderThickness = new Thickness(2);
+        card.Classes.Set("selected", true);
         UpdateCircuitSelectionStatus();
         if (AnalogComponentList.ContainerFromIndex(0) is Control inspectorItem)
         {
@@ -2728,13 +2846,13 @@ public sealed partial class PedalWorkshopView : UserControl
             {
                 selectedCircuitComponents.Remove(component);
                 selectedCircuitCards.Remove(component);
-                card.BorderThickness = new Thickness(1);
+                card.Classes.Set("selected", false);
             }
             else
             {
                 selectedCircuitComponents.Add(component);
                 selectedCircuitCards[component] = card;
-                card.BorderThickness = new Thickness(2);
+                card.Classes.Set("selected", true);
             }
             selectedCircuitComponent = selectedCircuitComponents.LastOrDefault();
             selectedCircuitCard = selectedCircuitComponent is not null &&
@@ -2758,6 +2876,7 @@ public sealed partial class PedalWorkshopView : UserControl
             return;
         }
         var properties = args.GetCurrentPoint(visual).Properties;
+        if (placingCircuitComponent is not null) SetCircuitTool("Select");
         if (properties.IsRightButtonPressed)
         {
             Document.DisconnectAnalogPin(pin);
@@ -2768,6 +2887,11 @@ public sealed partial class PedalWorkshopView : UserControl
         }
         if (!properties.IsLeftButtonPressed)
         {
+            return;
+        }
+        if (ApplyCircuitTerminal(pin))
+        {
+            args.Handled = true;
             return;
         }
         if (pendingCircuitPin is null)
@@ -2790,9 +2914,7 @@ public sealed partial class PedalWorkshopView : UserControl
         {
             if (IsCircuitPinConnectionValid(pendingCircuitPin, pin))
             {
-                Document.ConnectAnalogPins(pendingCircuitPin, pin);
-                ClearPendingCircuitPin();
-                RenderCircuitConnections();
+                CompleteCircuitWire(pin);
             }
             else
             {
@@ -2830,9 +2952,7 @@ public sealed partial class PedalWorkshopView : UserControl
         }
         else if (IsCircuitPinConnectionValid(pendingCircuitPin, pin))
         {
-            Document.ConnectAnalogPins(pendingCircuitPin, pin);
-            ClearPendingCircuitPin();
-            RenderCircuitConnections();
+            CompleteCircuitWire(pin);
         }
         else
         {
@@ -2973,19 +3093,13 @@ public sealed partial class PedalWorkshopView : UserControl
         _ => "无源端",
     };
 
-    private static ConnectionFeedback CircuitPinConnectionDecision(
+    private ConnectionFeedback CircuitPinConnectionDecision(
         AnalogPinDraft first, AnalogPinDraft second)
     {
-        if (ReferenceEquals(first, second))
+        if (ReferenceEquals(first, second) && pendingWireStart is null)
         {
             return ConnectionFeedback.Blocked("不能连接同一个引脚");
         }
-        if (!string.IsNullOrWhiteSpace(first.Node) && !string.IsNullOrWhiteSpace(second.Node) &&
-            string.Equals(first.Node.Trim(), second.Node.Trim(), StringComparison.Ordinal))
-        {
-            return ConnectionFeedback.Blocked("两个引脚已经属于同一网络，无法连接");
-        }
-
         // Analog pins are net endpoints: role labels describe polarity/control
         // semantics, but do not impose a directional restriction on merging nets.
         var firstRole = NormalizeCircuitElectricalRole(first.ElectricalRole);
@@ -3007,11 +3121,14 @@ public sealed partial class PedalWorkshopView : UserControl
         _ => "passive",
     };
 
-    private static bool IsCircuitPinConnectionValid(AnalogPinDraft first, AnalogPinDraft second) =>
+    private bool IsCircuitPinConnectionValid(AnalogPinDraft first, AnalogPinDraft second) =>
         CircuitPinConnectionDecision(first, second).IsAllowed;
 
     private void ClearPendingCircuitPin()
     {
+        pendingWireStart = null;
+        circuitWireHorizontalFirst = true;
+        pendingCircuitBends.Clear();
         if (pendingCircuitPinVisual is not null)
         {
             RestoreCircuitPinVisual(pendingCircuitPinVisual);
@@ -3050,7 +3167,7 @@ public sealed partial class PedalWorkshopView : UserControl
     {
         foreach (var card in selectedCircuitCards.Values)
         {
-            card.BorderThickness = new Thickness(1);
+            card.Classes.Set("selected", false);
         }
         selectedCircuitCards.Clear();
         selectedCircuitComponents.Clear();
@@ -3058,6 +3175,7 @@ public sealed partial class PedalWorkshopView : UserControl
         selectedCircuitComponent = null;
         selectedCircuitNode = null;
         selectedCircuitRoutePoint = null;
+        selectedSchematicWire = null;
         hoveredCircuitNode = null;
         UpdateCircuitSelectionStatus();
         UpdateCircuitWireVisualState();
@@ -3122,10 +3240,7 @@ public sealed partial class PedalWorkshopView : UserControl
             CircuitWirePreviewTarget.IsVisible = false;
             return;
         }
-        var source = Document.AnalogCircuit.Components
-            .SelectMany(component => component.Pins.Select((pin, index) =>
-                new CircuitEndpoint(pin, CircuitPinPoint(component, index))))
-            .FirstOrDefault(endpoint => ReferenceEquals(endpoint.Pin, pendingCircuitPin));
+        var source = PendingWireEndpoint();
         if (source is null)
         {
             CircuitWirePreview.Data = new StreamGeometry();
@@ -3135,28 +3250,30 @@ public sealed partial class PedalWorkshopView : UserControl
             CircuitWirePreviewTarget.IsVisible = false;
             return;
         }
-        var start = CircuitWorldToViewport(source.Point);
         var nearest = FindCircuitPinNearViewport(pointer, CircuitPinPreviewSnapTolerance);
         var target = nearest?.Endpoint;
-        var targetPoint = target is null ? pointer : CircuitWorldToViewport(target.Point);
+        var wireTarget = target is null ? FindSchematicWire(pointer) : null;
+        var world = CircuitViewportToWorld(pointer);
+        var targetWorld = target?.Point ?? wireTarget?.Position ?? new Point(SnapCircuitGrid(world.X), SnapCircuitGrid(world.Y));
+        var targetPoint = CircuitWorldToViewport(targetWorld);
         var decision = target is null
-            ? ConnectionFeedback.Neutral("请将连线移动到有效引脚")
+            ? wireTarget is not null ? ConnectionFeedback.Allowed("连接分支") : ConnectionFeedback.Neutral("布线")
             : CircuitPinConnectionDecision(pendingCircuitPin, target.Pin);
-        var valid = target is not null && decision.IsAllowed;
+        var valid = decision.IsAllowed;
         CircuitSelectionText.Text = target is null
             ? decision.Reason
             : $"{decision.Reason} · 已吸附到 {target.Pin.DisplayName}";
         CircuitSelectionText.Foreground = CircuitConnectionFeedbackBrush(decision.Kind);
         UpdateCircuitPinCandidateVisual(target?.Pin, valid);
-        var points = BuildOrthogonalPreviewPoints(start, source.Pin.Side, targetPoint,
-            target is null ? null : target.Pin.Side);
+        var points = BuildSchematicPath(source, targetWorld, target?.Pin.Side, pendingCircuitBends)
+            .Select(CircuitWorldToViewport).ToArray();
         var geometry = BuildPolylineGeometry(points);
         CircuitWirePreviewHalo.Data = geometry;
         CircuitWirePreview.Data = BuildPolylineGeometry(points);
         CircuitWirePreviewHalo.IsVisible = true;
         CircuitWirePreview.IsVisible = true;
-        CircuitWirePreviewTarget.IsVisible = target is not null;
-        if (target is not null)
+        CircuitWirePreviewTarget.IsVisible = target is not null || wireTarget is not null;
+        if (CircuitWirePreviewTarget.IsVisible)
         {
             Canvas.SetLeft(CircuitWirePreviewTarget, targetPoint.X - 9.0);
             Canvas.SetTop(CircuitWirePreviewTarget, targetPoint.Y - 9.0);
@@ -3191,7 +3308,7 @@ public sealed partial class PedalWorkshopView : UserControl
         return Document.AnalogCircuit.Components
             .SelectMany(component => component.Pins.Select((pin, index) =>
                 new CircuitPinHit(new CircuitEndpoint(pin, CircuitPinPoint(component, index)), FindCircuitPinVisual(pin))))
-            .Where(hit => !ReferenceEquals(hit.Endpoint.Pin, pendingCircuitPin) && hit.Visual is not null)
+            .Where(hit => (pendingWireStart is not null || !ReferenceEquals(hit.Endpoint.Pin, pendingCircuitPin)) && hit.Visual is not null)
             .Select(hit => (Hit: hit, Distance: DistanceSquared(CircuitWorldToViewport(hit.Endpoint.Point), pointer)))
             .Where(candidate => candidate.Distance <= thresholdSquared)
             .OrderBy(candidate => candidate.Distance)
@@ -3289,6 +3406,39 @@ public sealed partial class PedalWorkshopView : UserControl
     private void CircuitCanvasPointerMoved(object? sender, PointerEventArgs args)
     {
         var viewportPoint = args.GetPosition(CircuitCanvasSurface);
+        if (draggingSchematicSegment is not null && args.Pointer.Captured == CircuitCanvasSurface)
+        {
+            MoveSchematicSegment(CircuitViewportToWorld(viewportPoint));
+            return;
+        }
+        if (panningCircuit && args.Pointer.Captured == CircuitCanvasSurface)
+        {
+            circuitPanX = circuitPanStartX + viewportPoint.X - circuitPointerStart.X;
+            circuitPanY = circuitPanStartY + viewportPoint.Y - circuitPointerStart.Y;
+            ApplyCircuitCanvasTransform();
+            if (placingCircuitComponent is { } pendingPlacement) UpdateCircuitPlacementPreview(pendingPlacement, viewportPoint);
+            return;
+        }
+        if (placingCircuitComponent is { } placement)
+        {
+            UpdateCircuitPlacementPreview(placement, viewportPoint);
+            return;
+        }
+        if (pendingCircuitPin is null && args.Pointer.Captured is null)
+        {
+            var hovered = FindSchematicWire(viewportPoint);
+            if (hoveredCircuitNode != hovered?.Wire.Node)
+            {
+                hoveredCircuitNode = hovered?.Wire.Node;
+                UpdateCircuitWireVisualState();
+                UpdateCircuitSelectionStatus();
+            }
+            var path = hovered is null ? null : SchematicPath(hovered.Wire);
+            CircuitCanvasSurface.Cursor = new Cursor(circuitTool != "Select" ? StandardCursorType.Cross :
+                hovered is null ? StandardCursorType.Arrow :
+                Math.Abs(path![hovered.Segment].X - path[hovered.Segment + 1].X) < 0.01
+                    ? StandardCursorType.SizeWestEast : StandardCursorType.SizeNorthSouth);
+        }
         if (pendingCircuitPin is not null)
         {
             UpdateCircuitWirePreview(viewportPoint);
@@ -3310,13 +3460,6 @@ public sealed partial class PedalWorkshopView : UserControl
             RenderCircuitConnections();
             return;
         }
-        if (panningCircuit && args.Pointer.Captured == CircuitCanvasSurface)
-        {
-            circuitPanX = circuitPanStartX + viewportPoint.X - circuitPointerStart.X;
-            circuitPanY = circuitPanStartY + viewportPoint.Y - circuitPointerStart.Y;
-            ApplyCircuitCanvasTransform();
-            return;
-        }
         if (selectingCircuitBox && args.Pointer.Captured == CircuitCanvasSurface)
         {
             UpdateCircuitSelectionRectangle(circuitSelectionStart, viewportPoint);
@@ -3333,15 +3476,27 @@ public sealed partial class PedalWorkshopView : UserControl
         {
             component.CanvasX = Math.Clamp(
                 SnapCircuitEdit(start.X + deltaX),
-                0.0, CircuitCanvasWidth - component.Descriptor.SymbolWidth);
+                0.0, CircuitCanvasWidth - component.VisualWidth);
             component.CanvasY = Math.Clamp(
                 SnapCircuitEdit(start.Y + deltaY),
-                0.0, CircuitCanvasHeight - component.Descriptor.SymbolHeight);
+                0.0, CircuitCanvasHeight - component.VisualHeight);
         }
+    }
+
+    private void CircuitCanvasPointerExited(object? sender, PointerEventArgs args)
+    {
+        CircuitPaletteDragPreview.IsVisible = false;
+        hoveredCircuitNode = null;
+        UpdateCircuitWireVisualState();
     }
 
     private void CircuitCanvasPointerReleased(object? sender, PointerReleasedEventArgs args)
     {
+        if (draggingSchematicSegment is not null)
+        {
+            FinishSchematicDrag(false);
+            return;
+        }
         if (pendingCircuitPin is not null && args.Pointer.Captured == CircuitCanvasSurface)
         {
             var viewportPoint = args.GetPosition(CircuitCanvasSurface);
@@ -3351,9 +3506,11 @@ public sealed partial class PedalWorkshopView : UserControl
             {
                 if (candidate is not null && IsCircuitPinConnectionValid(pendingCircuitPin, candidate))
                 {
-                    Document.ConnectAnalogPins(pendingCircuitPin, candidate);
-                    ClearPendingCircuitPin();
-                    RenderCircuitConnections();
+                    CompleteCircuitWire(candidate);
+                }
+                else if (FindSchematicWire(viewportPoint) is { } wireTarget)
+                {
+                    CompleteSchematicBranch(wireTarget);
                 }
                 else
                 {
@@ -3420,8 +3577,8 @@ public sealed partial class PedalWorkshopView : UserControl
         var right = Math.Max(first.X, second.X);
         var bottom = Math.Max(first.Y, second.Y);
         var selected = Document.AnalogCircuit.Components.Where(component =>
-            component.CanvasX < right && component.CanvasX + component.Descriptor.SymbolWidth > left &&
-            component.CanvasY < bottom && component.CanvasY + component.Descriptor.SymbolHeight > top).ToArray();
+            component.CanvasX < right && component.CanvasX + component.VisualWidth > left &&
+            component.CanvasY < bottom && component.CanvasY + component.VisualHeight > top).ToArray();
         if (!circuitSelectionAdditive)
         {
             SelectCircuitComponents(selected);
@@ -3437,7 +3594,7 @@ public sealed partial class PedalWorkshopView : UserControl
                 : null;
             if (foundCard is not null)
             {
-                foundCard.BorderThickness = new Thickness(2);
+                foundCard.Classes.Set("selected", true);
                 selectedCircuitCards[component] = foundCard;
             }
         }
@@ -3462,7 +3619,7 @@ public sealed partial class PedalWorkshopView : UserControl
                 : null;
             if (foundCard is not null)
             {
-                foundCard.BorderThickness = new Thickness(2);
+                foundCard.Classes.Set("selected", true);
                 selectedCircuitCards[component] = foundCard;
             }
         }
@@ -3509,9 +3666,40 @@ public sealed partial class PedalWorkshopView : UserControl
         {
             return;
         }
+        var hit = FindSchematicWire(args.GetPosition(CircuitCanvasSurface), node: node);
+        if (hit is not null) PressSchematicWire(hit, args);
+    }
+
+    private void PressSchematicWire(SchematicWireHit hit, PointerPressedEventArgs args)
+    {
+        if (pendingCircuitPin is not null)
+        {
+            CompleteSchematicBranch(hit);
+            args.Handled = true;
+            return;
+        }
+        if (circuitTool == "Wire")
+        {
+            pendingWireStart = hit;
+            pendingCircuitPin = new AnalogPinDraft("wire", "wire", hit.Wire.Node);
+            UpdateCircuitWirePreview(args.GetPosition(CircuitCanvasSurface));
+            CircuitCanvasSurface.Focus();
+            args.Handled = true;
+            return;
+        }
         ClearCircuitSelection();
         ClearPendingCircuitPin();
-        selectedCircuitNode = node;
+        selectedCircuitNode = hit.Wire.Node;
+        selectedSchematicWire = Document.AnalogCircuit.WireRoutes.Contains(hit.Wire) ? hit.Wire : null;
+        if (selectedSchematicWire is not null)
+        {
+            draggingSchematicSegment = hit;
+            draggingSchematicOrigin = CircuitViewportToWorld(args.GetPosition(CircuitCanvasSurface));
+            draggingSchematicPoints = SchematicPath(selectedSchematicWire).ToArray();
+            draggingSchematicVertices = selectedSchematicWire.Points.ToArray();
+            draggingSchematicPointer = args.Pointer;
+            args.Pointer.Capture(CircuitCanvasSurface);
+        }
         UpdateCircuitSelectionStatus();
         RenderCircuitConnections();
         CircuitCanvasSurface.Focus();
@@ -3600,8 +3788,40 @@ public sealed partial class PedalWorkshopView : UserControl
     {
         if (args.Key == Key.Escape)
         {
-            ClearPendingCircuitPin();
+            FinishSchematicDrag(true);
+            SetCircuitTool("Select");
             ClearCircuitSelection();
+            args.Handled = true;
+            return;
+        }
+        if (args.Key == Key.Tab && pendingCircuitPin is not null)
+        {
+            circuitWireHorizontalFirst = !circuitWireHorizontalFirst;
+            UpdateCircuitWirePreview(circuitPreviewPointer);
+            args.Handled = true;
+            return;
+        }
+        if (args.Key == Key.Back && pendingCircuitBends.Count > 0)
+        {
+            pendingCircuitBends.RemoveAt(pendingCircuitBends.Count - 1);
+            UpdateCircuitWirePreview(circuitPreviewPointer);
+            args.Handled = true;
+            return;
+        }
+        if (args.Key is Key.Delete or Key.Back && selectedSchematicWire is { } wire)
+        {
+            Document.RemoveSchematicWire(wire);
+            ClearCircuitSelection();
+            RenderCircuitConnections();
+            args.Handled = true;
+            return;
+        }
+        if (args.KeyModifiers == KeyModifiers.None && args.Key is Key.R or Key.W or Key.G or Key.Home)
+        {
+            if (args.Key == Key.R) CircuitRotateClick(null, new RoutedEventArgs());
+            if (args.Key == Key.W) SetCircuitTool("Wire");
+            if (args.Key == Key.G) SetCircuitTool("Ground");
+            if (args.Key == Key.Home) FitCircuitCanvas();
             args.Handled = true;
             return;
         }
@@ -3612,8 +3832,7 @@ public sealed partial class PedalWorkshopView : UserControl
             AnalogComponentDraft[] pasted;
             try
             {
-                pasted = circuitClipboard.Select(component =>
-                    Document.DuplicateAnalogComponent(component, circuitClipboardPasteOffset)).ToArray();
+                pasted = Document.DuplicateAnalogComponents(circuitClipboard, circuitClipboardPasteOffset, circuitClipboardWires);
             }
             finally
             {
@@ -3625,6 +3844,8 @@ public sealed partial class PedalWorkshopView : UserControl
                 selectedCircuitComponents.Add(component);
             }
             selectedCircuitComponent = pasted.LastOrDefault();
+            UpdateLayout();
+            SelectCircuitComponents(pasted);
             args.Handled = true;
             return;
         }
@@ -3635,7 +3856,14 @@ public sealed partial class PedalWorkshopView : UserControl
                 args.Handled = RemoveSelectedCircuitRoutePoint();
                 return;
             }
-            args.Handled = RemoveSelectedCircuitRoute();
+            Document.BeginEditTransaction();
+            try
+            {
+                foreach (var pin in Document.AnalogCircuit.Components.SelectMany(component => component.Pins)
+                    .Where(pin => pin.Node == selectedCircuitNode).ToArray()) Document.DisconnectAnalogPin(pin);
+                args.Handled = RemoveSelectedCircuitRoute();
+            }
+            finally { Document.EndEditTransaction(); }
             return;
         }
         if (selectedCircuitComponents.Count == 0)
@@ -3645,7 +3873,10 @@ public sealed partial class PedalWorkshopView : UserControl
         if ((args.KeyModifiers & KeyModifiers.Control) != 0 && args.Key == Key.C)
         {
             circuitClipboard.Clear();
-            circuitClipboard.AddRange(selectedCircuitComponents.Select(CloneCircuitComponent));
+            var copies = selectedCircuitComponents.ToDictionary(component => component, CloneCircuitComponent);
+            circuitClipboard.AddRange(copies.Values);
+            circuitClipboardWires = ModuleAuthoringDocument.CopySchematicWires(Document.AnalogCircuit.WireRoutes,
+                copies, node => node, 0);
             circuitClipboardPasteOffset = 0.0;
             args.Handled = true;
             return;
@@ -3674,8 +3905,7 @@ public sealed partial class PedalWorkshopView : UserControl
             AnalogComponentDraft[] duplicates;
             try
             {
-                duplicates = selectedCircuitComponents.Select(component =>
-                    Document.DuplicateAnalogComponent(component)).ToArray();
+                duplicates = Document.DuplicateAnalogComponents(selectedCircuitComponents);
             }
             finally
             {
@@ -3687,6 +3917,8 @@ public sealed partial class PedalWorkshopView : UserControl
                 selectedCircuitComponents.Add(component);
             }
             selectedCircuitComponent = duplicates.LastOrDefault();
+            UpdateLayout();
+            SelectCircuitComponents(duplicates);
             args.Handled = true;
             return;
         }
@@ -3707,9 +3939,9 @@ public sealed partial class PedalWorkshopView : UserControl
         foreach (var component in selectedCircuitComponents)
         {
             component.CanvasX = Math.Clamp(
-                component.CanvasX + deltaX, 0.0, CircuitCanvasWidth - component.Descriptor.SymbolWidth);
+                component.CanvasX + deltaX, 0.0, CircuitCanvasWidth - component.VisualWidth);
             component.CanvasY = Math.Clamp(
-                component.CanvasY + deltaY, 0.0, CircuitCanvasHeight - component.Descriptor.SymbolHeight);
+                component.CanvasY + deltaY, 0.0, CircuitCanvasHeight - component.VisualHeight);
         }
         Document.EndEditTransaction();
         args.Handled = true;
@@ -3769,9 +4001,9 @@ public sealed partial class PedalWorkshopView : UserControl
 
     private static AnalogComponentDraft CloneCircuitComponent(AnalogComponentDraft source) =>
         new(source.Id, source.Type,
-            source.Pins.Select(pin => new AnalogPinDraft(pin.Id, pin.DisplayName, pin.Node)),
+            source.Pins.Select(pin => pin.Clone()),
             source.Properties.Select(property => new AnalogComponentPropertyDraft(property.Id, property.JsonValue)),
-            source.CanvasX, source.CanvasY);
+            source.CanvasX, source.CanvasY, source.Rotation);
 
     private void ZoomCircuitAt(Point viewportPoint, double requestedZoom)
     {
@@ -3794,20 +4026,28 @@ public sealed partial class PedalWorkshopView : UserControl
             ApplyCircuitCanvasTransform();
             return;
         }
-        var minimumX = Document.AnalogCircuit.Components.Min(component => component.CanvasX);
-        var minimumY = Document.AnalogCircuit.Components.Min(component => component.CanvasY);
+        var minimumX = Document.AnalogCircuit.Components.Min(component => component.CanvasX) - 96;
+        var minimumY = Document.AnalogCircuit.Components.Min(component => component.CanvasY) - 40;
         var maximumX = Document.AnalogCircuit.Components.Max(component =>
-            component.CanvasX + component.Descriptor.SymbolWidth);
+            component.CanvasX + component.VisualWidth) + 96;
         var maximumY = Document.AnalogCircuit.Components.Max(component =>
-            component.CanvasY + component.Descriptor.SymbolHeight);
+            component.CanvasY + component.VisualHeight) + 64;
         var width = Math.Max(maximumX - minimumX, 1.0);
         var height = Math.Max(maximumY - minimumY, 1.0);
+        var viewport = CircuitVisibleViewport();
         circuitZoom = Math.Clamp(Math.Min(
-            (CircuitCanvasSurface.Bounds.Width - 40.0) / width,
-            (CircuitCanvasSurface.Bounds.Height - 40.0) / height), MinimumCircuitZoom, MaximumCircuitZoom);
-        circuitPanX = CircuitCanvasSurface.Bounds.Width * 0.5 - (minimumX + maximumX) * 0.5 * circuitZoom;
-        circuitPanY = CircuitCanvasSurface.Bounds.Height * 0.5 - (minimumY + maximumY) * 0.5 * circuitZoom;
+            (viewport.Width - 40.0) / width,
+            (viewport.Height - 40.0) / height), MinimumCircuitZoom, 1.25);
+        circuitPanX = viewport.Center.X - (minimumX + maximumX) * 0.5 * circuitZoom;
+        circuitPanY = viewport.Center.Y - (minimumY + maximumY) * 0.5 * circuitZoom;
         ApplyCircuitCanvasTransform();
+    }
+
+    private Rect CircuitVisibleViewport()
+    {
+        var left = compactLayout && CircuitPalettePanel.IsVisible ? CircuitPalettePanel.Bounds.Width : 0;
+        var right = compactLayout && CircuitInspectorPanel.IsVisible ? CircuitInspectorPanel.Bounds.Width : 0;
+        return new Rect(left, 0, Math.Max(1, CircuitCanvasSurface.Bounds.Width - left - right), CircuitCanvasSurface.Bounds.Height);
     }
 
     private void CircuitZoomOutClick(object? sender, RoutedEventArgs args) =>
@@ -3824,10 +4064,11 @@ public sealed partial class PedalWorkshopView : UserControl
         {
             return;
         }
-        circuitPanX = CircuitCanvasSurface.Bounds.Width * 0.5 -
-                      (component.CanvasX + component.Descriptor.SymbolWidth * 0.5) * circuitZoom;
-        circuitPanY = CircuitCanvasSurface.Bounds.Height * 0.5 -
-                      (component.CanvasY + component.Descriptor.SymbolHeight * 0.5) * circuitZoom;
+        var viewport = CircuitVisibleViewport();
+        circuitPanX = viewport.Center.X -
+                      (component.CanvasX + component.VisualWidth * 0.5) * circuitZoom;
+        circuitPanY = viewport.Center.Y -
+                      (component.CanvasY + component.VisualHeight * 0.5) * circuitZoom;
         ApplyCircuitCanvasTransform();
     }
 
@@ -4086,9 +4327,20 @@ public sealed partial class PedalWorkshopView : UserControl
                        ModuleAuthoringDocument.TemplatesForKind(selectedKind).First();
         ClearSkinSelection();
         Document.NewProjectFromTemplate(selected.Id);
-        WorkshopTabs.SelectedIndex = 0;
-        ModuleIdEditor.Focus();
-        ModuleIdEditor.SelectAll();
+        SetCircuitTool("Select");
+        ClearCircuitSelection();
+        WorkshopStatusBand.IsVisible = false;
+        WorkshopTabs.SelectedIndex = selectedKind == ModuleAuthoringKind.AnalogCircuit ? 2 : 0;
+        if (selectedKind == ModuleAuthoringKind.AnalogCircuit)
+        {
+            CircuitCanvasSurface.Focus();
+            Dispatcher.UIThread.Post(FitCircuitCanvas, DispatcherPriority.Loaded);
+        }
+        else
+        {
+            ModuleIdEditor.Focus();
+            ModuleIdEditor.SelectAll();
+        }
     }
 
     private async Task OpenProjectAsync()
@@ -4120,7 +4372,7 @@ public sealed partial class PedalWorkshopView : UserControl
             RecentProjects.Touch(path);
             RefreshRecentProjects();
             SelectProjectCreationKind(Document.Kind);
-            WorkshopTabs.SelectedIndex = 0;
+            ShowOpenedProject();
         }
     }
 
@@ -4200,7 +4452,16 @@ public sealed partial class PedalWorkshopView : UserControl
         RecentProjects.Touch(project.Directory);
         RefreshRecentProjects();
         SelectProjectCreationKind(Document.Kind);
-        WorkshopTabs.SelectedIndex = 0;
+        ShowOpenedProject();
+    }
+
+    private void ShowOpenedProject()
+    {
+        SetCircuitTool("Select");
+        ClearCircuitSelection();
+        WorkshopStatusBand.IsVisible = false;
+        WorkshopTabs.SelectedIndex = Document.IsAnalogLogic ? 2 : 0;
+        if (Document.IsAnalogLogic) Dispatcher.UIThread.Post(FitCircuitCanvas, DispatcherPriority.Loaded);
     }
 
     private void ProjectKindSelectionChanged(object? sender, SelectionChangedEventArgs args)
@@ -4621,7 +4882,7 @@ public sealed partial class PedalWorkshopView : UserControl
                 selectedCircuitComponents.Remove(component);
                 if (selectedCircuitCards.Remove(component, out var card))
                 {
-                    card.BorderThickness = new Thickness(1);
+                    card.Classes.Set("selected", false);
                 }
                 selectedCircuitComponent = selectedCircuitComponents.LastOrDefault();
                 selectedCircuitCard = selectedCircuitComponent is not null &&

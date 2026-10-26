@@ -188,70 +188,63 @@ public static class AnalogComponentCatalog
 
     private static (double Width, double Height) SymbolSize(string symbolKind) => symbolKind switch
     {
-        "amplifier" or "transformer" or "relay" or "optocoupler" or "pentode" or "beam-tetrode" => (160.0, 112.0),
+        "amplifier" or "transformer" or "relay" or "optocoupler" or "pentode" or "beam-tetrode" => (160.0, 128.0),
         "potentiometer" or "bjt-npn" or "bjt-pnp" or "jfet-n" or "jfet-p" or "mosfet-n" or "mosfet-p" or
-            "triode" or "vari-mu" => (144.0, 112.0),
-        _ => (144.0, 96.0),
+            "triode" or "vari-mu" => (128.0, 128.0),
+        _ => (128.0, 96.0),
     };
 
     private static AnalogPinDescriptor PinDescriptor(
         string symbolKind, string id, int index, int count, double width, double height)
     {
-        var (x, y, side) = PinAnchor(symbolKind, id, index, count, width, height);
+        var (x, y, side) = PinAnchor(id, index, count, width, height);
         return new AnalogPinDescriptor(id, PinDisplayName(id), x, y, side, PinRole(id));
     }
 
     private static (double X, double Y, string Side) PinAnchor(
-        string symbolKind, string id, int index, int count, double width, double height)
+        string id, int index, int count, double width, double height)
     {
-        if (id is "base" or "gate" or "grid" or "non-inverting" or "inverting" or "control+" or "control-")
-        {
-            var y = id is "inverting" or "control-" ? height * 0.68 : height * 0.42;
-            return (0.0, y, "left");
-        }
-        if (id is "collector" or "drain" or "plate" or "out+")
-        {
-            return (width, height * 0.36, "right");
-        }
-        if (id is "emitter" or "source" or "cathode" or "out-")
-        {
-            return (width, height * 0.72, "right");
-        }
-        if (id == "wiper")
-        {
-            return (width * 0.5, height, "bottom");
-        }
+        if (count == 2) return index == 0 ? (0.0, 48.0, "left") : (width, 48.0, "right");
+        if (id is "non-inverting" or "control+") return (0.0, 48.0, "left");
+        if (id is "inverting" or "control-") return (0.0, 80.0, "left");
+        if (id is "base" or "gate" or "grid") return (0.0, 64.0, "left");
+        if (id == "screen") return (0.0, 32.0, "left");
+        if (id == "out+") return (width, 64.0, "right");
+        if (id == "out-") return (width, 112.0, "right");
+        if (id is "collector" or "drain" or "plate") return (width, 32.0, "right");
+        if (id is "emitter" or "source" or "cathode") return (width, 96.0, "right");
+        if (id == "wiper") return (width * 0.5, height, "bottom");
         if (count == 4)
         {
             var left = index < 2;
-            return (left ? 0.0 : width, index % 2 == 0 ? height * 0.36 : height * 0.72, left ? "left" : "right");
+            return (left ? 0.0 : width, index % 2 == 0 ? 32.0 : 96.0, left ? "left" : "right");
         }
-        return index == 0 ? (0.0, height * 0.56, "left") : (width, height * 0.56, "right");
+        return index == 0 ? (0.0, 64.0, "left") : (width, 64.0, "right");
     }
 
     private static string SymbolPath(string symbolKind) => symbolKind switch
     {
-        "resistor" => "M 0 54 L 26 54 L 34 42 L 46 66 L 58 42 L 70 66 L 82 42 L 94 66 L 106 42 L 114 54 L 144 54",
-        "capacitor" => "M 0 54 L 60 54 M 60 34 L 60 74 M 84 34 L 84 74 M 84 54 L 144 54",
-        "inductor" => "M 0 54 L 30 54 C 30 34 50 34 50 54 C 50 34 70 34 70 54 C 70 34 90 34 90 54 C 90 34 110 34 110 54 L 144 54",
-        "diode" => "M 0 54 L 48 54 L 48 34 L 84 54 L 48 74 Z M 88 32 L 88 76 M 88 54 L 144 54",
-        "voltage-source" => "M 0 54 L 42 54 M 42 54 A 30 30 0 1 0 102 54 A 30 30 0 1 0 42 54 M 62 44 L 82 44 M 72 34 L 72 54 M 62 66 L 82 66 M 102 54 L 144 54",
-        "potentiometer" => "M 0 62 L 26 62 L 34 50 L 46 74 L 58 50 L 70 74 L 82 50 L 94 74 L 106 50 L 114 62 L 144 62 M 72 112 L 72 82 M 64 90 L 72 82 L 80 90",
-        "switch" => "M 0 54 L 52 54 M 52 54 L 94 34 M 94 54 L 144 54 M 48 54 A 4 4 0 1 0 56 54 A 4 4 0 1 0 48 54 M 90 54 A 4 4 0 1 0 98 54 A 4 4 0 1 0 90 54",
-        "bjt-npn" => "M 0 58 L 48 58 M 48 32 L 48 84 M 48 46 L 96 40 L 144 40 M 48 70 L 96 78 L 144 82 M 92 68 L 104 80 M 92 88 L 104 80",
-        "bjt-pnp" => "M 0 58 L 48 58 M 48 32 L 48 84 M 48 46 L 96 40 L 144 40 M 48 70 L 96 78 L 144 82 M 62 66 L 50 72 M 62 78 L 50 72",
-        "jfet-n" => "M 0 58 L 46 58 M 54 32 L 54 84 M 54 44 L 98 40 L 144 40 M 54 72 L 98 80 L 144 80 M 24 58 L 40 58 M 32 50 L 40 58 L 32 66",
-        "jfet-p" => "M 0 58 L 46 58 M 54 32 L 54 84 M 54 44 L 98 40 L 144 40 M 54 72 L 98 80 L 144 80 M 40 50 L 32 58 L 40 66",
-        "mosfet-n" => "M 0 58 L 38 58 M 46 30 L 46 86 M 58 38 L 58 52 M 58 64 L 58 78 M 58 44 L 102 40 L 144 40 M 58 72 L 102 80 L 144 80 M 70 58 L 86 58 M 78 50 L 86 58 L 78 66",
-        "mosfet-p" => "M 0 58 L 38 58 M 46 30 L 46 86 M 58 38 L 58 52 M 58 64 L 58 78 M 58 44 L 102 40 L 144 40 M 58 72 L 102 80 L 144 80 M 86 50 L 78 58 L 86 66",
-        "amplifier" => "M 0 46 L 34 46 M 0 76 L 34 76 M 34 24 L 34 94 L 126 59 Z M 126 46 L 160 40 M 126 72 L 160 80 M 44 46 L 56 46 M 50 40 L 50 52 M 44 76 L 56 76",
-        "transformer" => "M 0 40 L 28 40 M 0 80 L 28 80 M 28 40 C 50 40 50 54 28 54 C 50 54 50 68 28 68 C 50 68 50 80 28 80 M 76 28 L 76 92 M 84 28 L 84 92 M 132 40 C 110 40 110 54 132 54 C 110 54 110 68 132 68 C 110 68 110 80 132 80 M 132 40 L 160 40 M 132 80 L 160 80",
-        "speaker" => "M 0 54 L 48 54 M 48 36 L 78 36 L 108 18 L 108 90 L 78 72 L 48 72 Z M 108 54 L 144 54",
-        "triode" or "vari-mu" => "M 0 58 L 44 58 M 44 48 L 88 48 M 44 58 L 88 58 M 72 28 L 72 42 M 52 76 C 72 92 92 76 92 76 M 92 76 L 144 82 M 72 28 L 144 40",
-        "pentode" or "beam-tetrode" => "M 0 58 L 36 58 M 36 44 L 92 44 M 36 54 L 92 54 M 36 64 L 92 64 M 72 24 L 72 38 M 54 80 C 72 92 90 80 90 80 M 90 80 L 160 82 M 72 24 L 160 40",
-        "relay" => "M 0 40 L 28 40 C 28 26 48 26 48 40 C 48 26 68 26 68 40 L 80 40 M 0 80 L 80 80 M 96 80 L 126 54 M 126 80 L 160 80 M 126 54 L 160 40",
-        "optocoupler" => "M 0 40 L 34 40 L 58 52 L 34 64 Z M 62 34 L 62 70 M 62 52 L 80 52 M 82 40 L 104 50 M 82 60 L 104 50 M 104 32 L 126 32 L 126 80 L 104 80 M 126 32 L 160 40 M 126 80 L 160 80",
-        _ => "M 0 54 L 42 54 L 42 30 L 102 30 L 102 78 L 42 78 L 42 54 M 102 54 L 144 54",
+        "resistor" => "M 0 48 H 32 L 40 36 L 52 60 L 64 36 L 76 60 L 88 36 L 96 48 H 128",
+        "capacitor" => "M 0 48 H 56 M 56 28 V 68 M 72 28 V 68 M 72 48 H 128",
+        "inductor" => "M 0 48 H 32 C 32 24 48 24 48 48 C 48 24 64 24 64 48 C 64 24 80 24 80 48 C 80 24 96 24 96 48 H 128",
+        "diode" => "M 0 48 H 48 M 48 28 V 68 L 80 48 Z M 80 28 V 68 M 80 48 H 128",
+        "voltage-source" => "M 0 48 H 36 M 36 48 A 28 28 0 1 0 92 48 A 28 28 0 1 0 36 48 M 56 36 H 72 M 64 28 V 44 M 56 60 H 72 M 92 48 H 128",
+        "potentiometer" => "M 0 64 H 32 L 40 52 L 52 76 L 64 52 L 76 76 L 88 52 L 96 64 H 128 M 64 128 V 84 M 56 92 L 64 84 L 72 92",
+        "switch" => "M 0 48 H 48 L 88 24 M 88 48 H 128 M 44 44 H 52 V 52 H 44 Z M 84 44 H 92 V 52 H 84 Z",
+        "bjt-npn" => "M 0 64 H 48 M 48 32 V 96 M 48 48 L 88 32 H 128 M 48 80 L 88 96 H 128 M 74 80 L 88 96 L 68 94",
+        "bjt-pnp" => "M 0 64 H 48 M 48 32 V 96 M 48 48 L 88 32 H 128 M 48 80 L 88 96 H 128 M 66 78 L 50 81 L 60 96",
+        "jfet-n" => "M 0 64 H 56 M 56 32 V 96 M 56 40 L 88 32 H 128 M 56 88 L 88 96 H 128 M 36 56 L 48 64 L 36 72",
+        "jfet-p" => "M 0 64 H 56 M 56 32 V 96 M 56 40 L 88 32 H 128 M 56 88 L 88 96 H 128 M 48 56 L 36 64 L 48 72",
+        "mosfet-n" => "M 0 64 H 40 M 40 32 V 96 M 56 32 V 56 M 56 72 V 96 M 56 40 L 88 32 H 128 M 56 88 L 88 96 H 128 M 56 64 H 88 V 96 M 74 56 L 62 64 L 74 72",
+        "mosfet-p" => "M 0 64 H 40 M 40 32 V 96 M 56 32 V 56 M 56 72 V 96 M 56 40 L 88 32 H 128 M 56 88 L 88 96 H 128 M 56 64 H 88 V 96 M 64 56 L 76 64 L 64 72",
+        "amplifier" => "M 0 48 H 40 M 0 80 H 40 M 40 24 V 104 L 120 64 Z M 120 64 H 160 M 112 112 H 160 M 48 48 H 64 M 56 40 V 56 M 48 80 H 64",
+        "transformer" => "M 0 32 H 48 C 72 32 72 48 48 48 C 72 48 72 64 48 64 C 72 64 72 80 48 80 C 72 80 72 96 48 96 H 0 M 76 24 V 104 M 84 24 V 104 M 160 32 H 112 C 88 32 88 48 112 48 C 88 48 88 64 112 64 C 88 64 88 80 112 80 C 88 80 88 96 112 96 H 160",
+        "speaker" => "M 0 48 H 40 M 40 32 H 64 L 88 16 V 80 L 64 64 H 40 Z M 88 48 H 128",
+        "triode" or "vari-mu" => "M 0 64 H 80 M 40 44 H 88 M 64 44 V 32 H 128 M 44 84 H 84 V 96 H 128 M 32 64 A 36 40 0 1 0 104 64 A 36 40 0 1 0 32 64",
+        "pentode" or "beam-tetrode" => "M 0 64 H 88 M 0 32 H 32 V 52 H 88 M 48 40 H 88 M 72 40 V 32 H 160 M 48 80 H 88 V 96 H 160 M 32 64 A 40 40 0 1 0 112 64 A 40 40 0 1 0 32 64",
+        "relay" => "M 0 32 H 40 V 40 C 64 40 64 56 40 56 C 64 56 64 72 40 72 C 64 72 64 88 40 88 V 96 H 0 M 160 32 H 120 M 160 96 H 104 L 120 48 M 72 64 H 88",
+        "optocoupler" => "M 0 32 H 32 V 40 M 20 40 H 44 L 32 64 Z M 20 64 H 44 M 32 64 V 96 H 0 M 68 48 L 88 60 M 68 64 L 88 76 M 104 40 V 88 M 104 48 L 136 32 H 160 M 104 80 L 136 96 H 160",
+        _ => "M 0 48 H 32 V 24 H 96 V 72 H 32 V 48 M 96 48 H 128",
     };
 
     private static string PinRole(string id) => id switch

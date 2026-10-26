@@ -4,8 +4,8 @@
              xmlns:local="using:SoloRig.Ui.Avalonia"
              x:Class="SoloRig.Ui.Avalonia.PedalWorkshopView"
              x:Name="WorkshopRoot"
-             MinWidth="760"
-             MinHeight="480"
+             MinWidth="600"
+             MinHeight="320"
              SizeChanged="WorkshopSizeChanged"
              PointerMoved="CircuitRootPointerMoved"
              PointerReleased="CircuitRootPointerReleased">
@@ -27,6 +27,38 @@
   </UserControl.Resources>
 
   <UserControl.Styles>
+    <Style Selector="Button.eda-tool">
+      <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="Width" Value="34" />
+      <Setter Property="Height" Value="34" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="2,0" />
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="{TemplateBinding Background}" CornerRadius="3">
+            <TextBlock Text="{TemplateBinding Content}" FontFamily="Segoe MDL2 Assets" FontSize="16"
+                       Foreground="{TemplateBinding Foreground}" Width="22" Height="22"
+                       TextAlignment="Center" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Button.eda-tool.active">
+      <Setter Property="Background" Value="{DynamicResource WorkshopAccentBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource WorkshopAccentTextBrush}" />
+    </Style>
+    <Style Selector="Border.eda-symbol">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Border.eda-symbol.selected, Border.eda-symbol:focus-visible">
+      <Setter Property="Background" Value="#184DA6D8" />
+      <Setter Property="BorderBrush" Value="{DynamicResource WorkshopAccentBrush}" />
+    </Style>
     <Style Selector="TextBlock.workshop-text">
       <Setter Property="Foreground" Value="{DynamicResource WorkshopTextBrush}" />
     </Style>
@@ -119,83 +151,69 @@
   <Border Background="{DynamicResource WorkshopWindowBrush}"
           BorderBrush="{DynamicResource WorkshopBorderBrush}"
           BorderThickness="1"
-          CornerRadius="8"
+          CornerRadius="0"
           ClipToBounds="True">
     <Grid RowDefinitions="Auto,Auto,*,Auto">
       <Border Grid.Row="0" Background="{DynamicResource WorkshopTopbarBrush}"
-              BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="0,0,0,1"
-              Padding="18,12">
+              BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="0,0,0,1" Padding="12,6">
         <Grid x:Name="WorkshopTopbarGrid" ColumnDefinitions="*,Auto">
-          <StackPanel x:Name="WorkshopTitlePanel" Grid.Column="0" Spacing="2" VerticalAlignment="Center">
-            <TextBlock Text="效果器工坊" Classes="workshop-text" FontSize="18" FontWeight="SemiBold" />
-            <TextBlock Text="{Binding FileStatus}" Classes="workshop-muted" FontSize="10"
+          <StackPanel x:Name="WorkshopTitlePanel" Spacing="1" VerticalAlignment="Center" Margin="0,0,12,0">
+            <TextBlock Text="{Binding DisplayName}" Classes="workshop-text" FontSize="14" FontWeight="SemiBold"
                        TextTrimming="CharacterEllipsis" />
+            <TextBlock Text="{Binding FileStatus}" Classes="workshop-muted" FontSize="10" TextTrimming="CharacterEllipsis" />
           </StackPanel>
-          <WrapPanel x:Name="WorkshopActions" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
-                     HorizontalAlignment="Right">
-            <ComboBox x:Name="ProjectKindSelector" Classes="workshop-input" Width="146" Margin="0,0,6,0"
-                      SelectionChanged="ProjectKindSelectionChanged"
-                      AutomationProperties.Name="新建项目类型">
-              <ComboBox.ItemTemplate>
-                <DataTemplate>
-                  <TextBlock Text="{Binding DisplayName}" />
-                </DataTemplate>
-              </ComboBox.ItemTemplate>
-            </ComboBox>
-            <ComboBox x:Name="TemplateSelector" Classes="workshop-input" Width="168" Margin="0,0,8,0"
-                      AutomationProperties.Name="新建起始模板">
-              <ComboBox.ItemTemplate>
-                <DataTemplate>
-                  <TextBlock Text="{Binding DisplayName}" />
-                </DataTemplate>
-              </ComboBox.ItemTemplate>
-            </ComboBox>
-            <Button Classes="workshop-button" Content="新建" Margin="0,0,6,0" Click="NewProjectClick"
-                    AutomationProperties.Name="新建效果器项目" />
-            <Button Classes="workshop-button" Content="打开" Margin="0,0,6,0" Click="OpenProjectClick"
-                    AutomationProperties.Name="打开效果器项目" />
-            <Button Classes="workshop-button" Content="另存为" Margin="0,0,6,0" Click="SaveProjectAsClick"
-                    AutomationProperties.Name="效果器项目另存为" />
-            <Button Classes="workshop-button" Content="复制" Margin="0,0,6,0" Click="CopyProjectClick"
-                    AutomationProperties.Name="复制效果器项目" />
-            <Button Classes="workshop-button" Content="导出包" Margin="0,0,6,0" Click="ExportProjectClick"
-                    AutomationProperties.Name="导出效果器模块包" />
-            <Button Classes="workshop-button primary" Content="保存" Margin="0,0,6,0" Click="SaveProjectClick"
-                    AutomationProperties.Name="保存效果器项目" />
-            <Button Classes="workshop-button" Content="撤销" Margin="0,0,6,0" IsEnabled="{Binding CanUndo}"
-                    ToolTip.Tip="撤销（Ctrl+Z）" AutomationProperties.Name="撤销工坊修改" Click="UndoClick" />
-            <Button Classes="workshop-button" Content="重做" Margin="0,0,6,0" IsEnabled="{Binding CanRedo}"
-                    ToolTip.Tip="重做（Ctrl+Y / Ctrl+Shift+Z）" AutomationProperties.Name="重做工坊修改" Click="RedoClick" />
-            <Button Classes="workshop-button" Content="安装到模块库" Click="InstallProjectClick"
-                    AutomationProperties.Name="安装效果器到模块库" />
+          <WrapPanel x:Name="WorkshopActions" Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal">
+            <Button Classes="workshop-button eda-tool" Content="&#xE8A5;" Click="ProjectOptionsClick"
+                    ToolTip.Tip="项目与最近文件" AutomationProperties.Name="项目与最近文件" />
+            <Button Classes="workshop-button eda-tool" Content="&#xE710;" Click="NewProjectClick"
+                    ToolTip.Tip="新建" AutomationProperties.Name="新建效果器项目" />
+            <Button Classes="workshop-button eda-tool" Content="&#xE8E5;" Click="OpenProjectClick"
+                    ToolTip.Tip="打开" AutomationProperties.Name="打开效果器项目" />
+            <Button Classes="workshop-button eda-tool" Content="&#xE74E;" Click="SaveProjectClick"
+                    ToolTip.Tip="保存" AutomationProperties.Name="保存效果器项目" />
+            <Button Classes="workshop-button eda-tool" Content="&#xE7A7;" IsEnabled="{Binding CanUndo}" Click="UndoClick"
+                    ToolTip.Tip="撤销" AutomationProperties.Name="撤销工坊修改" />
+            <Button Classes="workshop-button eda-tool" Content="&#xE7A6;" IsEnabled="{Binding CanRedo}" Click="RedoClick"
+                    ToolTip.Tip="重做" AutomationProperties.Name="重做工坊修改" />
+            <Button x:Name="ValidateProjectButton" Classes="workshop-button" Content="检查电路"
+                    Click="ValidateProjectClick" Margin="6,0" AutomationProperties.Name="校验效果器项目" />
+            <Button Classes="workshop-button eda-tool" Content="&#xE712;" ToolTip.Tip="项目操作"
+                    AutomationProperties.Name="更多项目操作">
+              <Button.Flyout>
+                <MenuFlyout>
+                  <MenuItem Header="另存为" Click="SaveProjectAsClick" />
+                  <MenuItem Header="复制项目" Click="CopyProjectClick" />
+                  <MenuItem Header="导出模块包" Click="ExportProjectClick" />
+                  <MenuItem Header="安装到模块库" Click="InstallProjectClick" />
+                </MenuFlyout>
+              </Button.Flyout>
+            </Button>
           </WrapPanel>
         </Grid>
       </Border>
-
-      <Border Grid.Row="1" x:Name="WorkshopStatusBand" Background="{DynamicResource WorkshopPanelBrush}"
-              BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="0,0,0,1"
-              Padding="18,9">
-        <Grid x:Name="WorkshopStatusGrid" ColumnDefinitions="Auto,*,180,220,Auto,Auto">
-          <Border x:Name="WorkshopKindBadge" Grid.Column="0" Background="{DynamicResource WorkshopControlBrush}" CornerRadius="4" Padding="8,4">
-            <TextBlock Text="{Binding KindDisplayName}" Classes="workshop-text" FontSize="11" FontWeight="SemiBold" />
-          </Border>
-          <TextBlock x:Name="WorkshopStatusText" Grid.Column="1" Text="{Binding Status}" Classes="workshop-muted" FontSize="11"
-                     Margin="12,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-          <TextBox Grid.Column="2" x:Name="RecentProjectSearchBox" Classes="workshop-input" Margin="0,0,6,0"
-                   Watermark="搜索项目" TextChanged="RecentProjectSearchChanged"
-                   AutomationProperties.Name="搜索最近效果器项目" />
-          <ComboBox Grid.Column="3" x:Name="RecentProjectSelector" Classes="workshop-input" Margin="0,0,6,0"
-                    AutomationProperties.Name="最近的效果器项目">
-            <ComboBox.ItemTemplate>
-              <DataTemplate>
-                <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
-              </DataTemplate>
-            </ComboBox.ItemTemplate>
-          </ComboBox>
-          <Button x:Name="OpenRecentProjectButton" Grid.Column="4" Classes="workshop-button" Content="打开最近" Margin="0,0,6,0"
-                  Click="OpenRecentProjectClick" AutomationProperties.Name="打开最近效果器项目" />
-          <Button x:Name="ValidateProjectButton" Grid.Column="5" Classes="workshop-button" Content="校验项目" Click="ValidateProjectClick"
-                  AutomationProperties.Name="校验效果器项目" />
+      <Border Grid.Row="1" x:Name="WorkshopStatusBand" IsVisible="False"
+              Background="{DynamicResource WorkshopPanelBrush}" Padding="12,8">
+        <Grid x:Name="WorkshopStatusGrid" RowDefinitions="Auto,Auto">
+          <WrapPanel Orientation="Horizontal">
+            <ComboBox x:Name="ProjectKindSelector" Classes="workshop-input" Width="146" Margin="0,0,6,6"
+                      SelectionChanged="ProjectKindSelectionChanged" AutomationProperties.Name="新建项目类型">
+              <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayName}" /></DataTemplate></ComboBox.ItemTemplate>
+            </ComboBox>
+            <ComboBox x:Name="TemplateSelector" Classes="workshop-input" Width="168" Margin="0,0,6,6"
+                      AutomationProperties.Name="新建起始模板">
+              <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayName}" /></DataTemplate></ComboBox.ItemTemplate>
+            </ComboBox>
+            <TextBox x:Name="RecentProjectSearchBox" Classes="workshop-input" Width="130" Margin="0,0,6,6"
+                     Watermark="搜索项目" TextChanged="RecentProjectSearchChanged" AutomationProperties.Name="搜索最近效果器项目" />
+            <ComboBox x:Name="RecentProjectSelector" Classes="workshop-input" Width="180" Margin="0,0,6,6"
+                      AutomationProperties.Name="最近的效果器项目">
+              <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button x:Name="OpenRecentProjectButton" Classes="workshop-button" Content="打开最近"
+                    Click="OpenRecentProjectClick" AutomationProperties.Name="打开最近效果器项目" />
+          </WrapPanel>
+          <TextBlock Grid.Row="1" x:Name="WorkshopStatusText" Text="{Binding Status}"
+                     Classes="workshop-muted" FontSize="11" TextWrapping="Wrap" />
         </Grid>
       </Border>
 
@@ -308,9 +326,9 @@
           </ScrollViewer>
         </TabItem>
 
-        <TabItem Header="功能逻辑" Classes="workshop-tab">
-          <Grid Margin="24" RowDefinitions="Auto,Auto,*">
-            <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,10">
+        <TabItem Header="原理图 / 逻辑" Classes="workshop-tab">
+          <Grid Margin="8,4" RowDefinitions="Auto,*">
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,6" IsVisible="{Binding !UsesStructuredAnalogLogic}">
               <StackPanel Grid.Column="0" Spacing="2">
                 <TextBlock Text="{Binding KindDisplayName}" Classes="workshop-text" FontSize="14" FontWeight="SemiBold" />
                 <TextBlock Text="{Binding LogicFile}" Classes="workshop-muted" FontSize="10" />
@@ -364,11 +382,10 @@
                 </ScrollViewer>
               </Grid>
             </Border>
-            <Border Grid.Row="1" IsVisible="{Binding UsesStructuredAnalogLogic}"
-                    Background="{DynamicResource WorkshopPanelBrush}" BorderBrush="{DynamicResource WorkshopBorderBrush}"
-                    BorderThickness="1" CornerRadius="6" Padding="16">
-              <Grid RowDefinitions="Auto,Auto,*">
-                <Grid Grid.Row="0" ColumnDefinitions="*,*,*,120" Margin="0,0,0,14">
+            <Border Grid.Row="1" IsVisible="{Binding UsesStructuredAnalogLogic}">
+              <Grid RowDefinitions="Auto,Auto,Auto,*">
+                <Grid Grid.Row="0" ColumnDefinitions="*,*,*,120" Margin="0,0,0,6"
+                      IsVisible="{Binding #AnalogConfigurationExpander.IsExpanded}">
                   <StackPanel Grid.Column="0" Spacing="5" Margin="0,0,8,0">
                     <TextBlock Text="参考地" Classes="workshop-label" />
                     <TextBox Classes="workshop-input" Text="{Binding AnalogCircuit.ReferenceGround, Mode=TwoWay}" />
@@ -388,7 +405,7 @@
                   </StackPanel>
                 </Grid>
                 <Expander Grid.Row="1" x:Name="AnalogConfigurationExpander" Header="电路工程设置"
-                          IsExpanded="False" Margin="0,0,0,12"
+                          IsExpanded="False" Margin="0,0,0,4"
                           Foreground="{DynamicResource WorkshopTextBrush}"
                           AutomationProperties.Name="展开模拟电路工程设置">
                 <TabControl x:Name="AnalogConfigurationTabs" MaxHeight="280" Margin="0,8,0,0"
@@ -549,70 +566,84 @@
                   </TabItem>
                 </TabControl>
                 </Expander>
-                <WrapPanel x:Name="CircuitToolbarPanel" Grid.Row="2" Orientation="Horizontal"
-                           VerticalAlignment="Center" Margin="0,0,0,10">
-                  <StackPanel Width="150" Spacing="2" Margin="0,0,10,6">
-                    <TextBlock Text="电路元件" Classes="workshop-text" FontSize="13" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding AnalogCircuit.Components.Count, StringFormat='{}{0} 个元件'}"
-                               Classes="workshop-muted" FontSize="10" />
-                    <TextBlock x:Name="CircuitSelectionText" Text="未选择" Classes="workshop-muted" FontSize="9"
-                               TextTrimming="CharacterEllipsis" />
-                  </StackPanel>
-                  <ComboBox x:Name="AnalogAddTypeSelector" Classes="workshop-input" Width="170"
-                            ItemsSource="{x:Static ui:AnalogComponentCatalog.Components}"
-                            SelectedIndex="0" Margin="0,0,8,6"
-                            AutomationProperties.Name="待添加模拟元件类型">
-                    <ComboBox.ItemTemplate>
-                      <DataTemplate><TextBlock Text="{Binding DisplayName}" /></DataTemplate>
-                    </ComboBox.ItemTemplate>
-                  </ComboBox>
-                  <Button Classes="workshop-button" Content="添加元件" Margin="0,0,0,6" Click="AddAnalogComponentClick"
-                          AutomationProperties.Name="添加选中的模拟元件" />
-                  <Button Classes="workshop-button workshop-icon" Content="−" Margin="6,0,0,6"
-                          ToolTip.Tip="缩小原理图" AutomationProperties.Name="缩小模拟电路原理图" Click="CircuitZoomOutClick" />
-                  <Button Classes="workshop-button workshop-icon" Content="+" Margin="6,0,0,6"
-                          ToolTip.Tip="放大原理图" AutomationProperties.Name="放大模拟电路原理图" Click="CircuitZoomInClick" />
-                  <Button x:Name="CircuitZoomText" Classes="workshop-button" Content="100%"
-                          Margin="6,0,0,6" ToolTip.Tip="适应全部元件" AutomationProperties.Name="适应全部模拟元件"
-                          Click="CircuitFitClick" />
-                  <CheckBox x:Name="CircuitSnapToggle" Content="吸附" IsChecked="True"
-                            VerticalAlignment="Center" Margin="8,0,2,6"
-                            ToolTip.Tip="移动元件和折点时吸附到网格" AutomationProperties.Name="切换原理图网格吸附" />
-                  <Button x:Name="CircuitPaletteToggleButton" Classes="workshop-button"
-                          Content="元件库" Margin="6,0,0,6" IsVisible="False"
-                          Click="CircuitPaletteToggleClick" AutomationProperties.Name="打开或关闭模拟元件库" />
-                  <Button x:Name="CircuitInspectorToggleButton" Classes="workshop-button"
-                          Content="属性" Margin="6,0,0,6" IsVisible="False"
-                          Click="CircuitInspectorToggleClick" AutomationProperties.Name="打开或关闭模拟元件属性" />
-                  <Button x:Name="CircuitAddRoutePointButton" Classes="workshop-button"
-                          Content="添加折点" Margin="6,0,0,6" IsVisible="False" IsEnabled="False"
-                          Click="CircuitAddRoutePointClick" AutomationProperties.Name="为所选网络添加布线折点" />
-                  <Button x:Name="CircuitClearRouteButton" Classes="workshop-button"
-                          Content="自动布线" Margin="6,0,0,6" IsVisible="False" IsEnabled="False"
-                          Click="CircuitClearRouteClick" AutomationProperties.Name="清除所选网络人工布线" />
+                <WrapPanel x:Name="CircuitToolbarPanel" Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,4">
+                  <Button x:Name="CircuitPaletteToggleButton" Classes="workshop-button eda-tool" Content="&#xE8F1;"
+                          Click="CircuitPaletteToggleClick" ToolTip.Tip="元件库" AutomationProperties.Name="打开或关闭模拟元件库" />
+                  <Button Classes="workshop-button eda-tool active" Content="&#xE8B0;" Tag="Select" Click="CircuitToolClick"
+                          ToolTip.Tip="选择" AutomationProperties.Name="选择原理图对象" />
+                  <Button Classes="workshop-button eda-tool" Content="&#xE8D4;" Tag="Wire" Click="CircuitToolClick"
+                          ToolTip.Tip="布线" AutomationProperties.Name="绘制导线" />
+                  <Button Classes="workshop-button eda-tool" Content="&#xE7AD;" Click="CircuitRotateClick"
+                          ToolTip.Tip="旋转 90°" AutomationProperties.Name="旋转所选元件" />
+                  <Button Classes="workshop-button eda-tool" Content="&#xE8C8;" Click="CircuitDuplicateClick"
+                          ToolTip.Tip="复制元件" AutomationProperties.Name="复制所选元件" />
+                  <Button Classes="workshop-button eda-tool" Content="&#xE74D;" Click="CircuitDeleteClick"
+                          ToolTip.Tip="删除" AutomationProperties.Name="删除原理图选择" />
+                  <Button Classes="workshop-button" Content="⏚" Tag="Ground" Click="CircuitToolClick" Width="34" Padding="0"
+                          ToolTip.Tip="接地" AutomationProperties.Name="将引脚接地" />
+                  <Button Classes="workshop-button eda-tool" Content="&#xE72A;" Tag="Input" Click="CircuitToolClick"
+                          ToolTip.Tip="连接输入端口" AutomationProperties.Name="将引脚连接输入端口" />
+                  <Button Classes="workshop-button eda-tool" Content="&#xE72B;" Tag="Output" Click="CircuitToolClick"
+                          ToolTip.Tip="连接输出端口" AutomationProperties.Name="将引脚连接输出端口" />
+                  <Button Classes="workshop-button eda-tool" Content="&#xE71F;" Click="CircuitZoomOutClick"
+                          ToolTip.Tip="缩小" AutomationProperties.Name="缩小模拟电路原理图" />
+                  <Button Classes="workshop-button eda-tool" Content="&#xE8A3;" Click="CircuitFitClick"
+                          ToolTip.Tip="适应全部" AutomationProperties.Name="适应全部模拟元件" />
+                  <Button Classes="workshop-button eda-tool" Content="&#xE8A4;" Click="CircuitZoomInClick"
+                          ToolTip.Tip="放大" AutomationProperties.Name="放大模拟电路原理图" />
+                  <Button x:Name="CircuitZoomText" Classes="workshop-button" Content="100%" Width="66" Padding="4,0"
+                          Click="CircuitFitClick" ToolTip.Tip="适应全部元件" AutomationProperties.Name="原理图缩放比例" />
+                  <CheckBox x:Name="CircuitSnapToggle" Content="网格" IsChecked="True" VerticalAlignment="Center" Margin="8,0"
+                            AutomationProperties.Name="切换原理图网格吸附" />
+                  <Button x:Name="CircuitInspectorToggleButton" Classes="workshop-button eda-tool" Content="&#xE713;"
+                          Click="CircuitInspectorToggleClick" ToolTip.Tip="属性" AutomationProperties.Name="打开或关闭模拟元件属性" />
+                  <Button Classes="workshop-button eda-tool" Content="&#xE943;" Click="ToggleAnalogEditorModeClick"
+                          ToolTip.Tip="网表 JSON" AutomationProperties.Name="编辑电路网表 JSON" />
+                  <Button x:Name="CircuitAddRoutePointButton" Classes="workshop-button eda-tool" Content="&#xE710;"
+                          IsVisible="False" IsEnabled="False" Click="CircuitAddRoutePointClick"
+                          ToolTip.Tip="添加折点" AutomationProperties.Name="为所选网络添加布线折点" />
+                  <Button x:Name="CircuitClearRouteButton" Classes="workshop-button eda-tool" Content="&#xE777;"
+                          IsVisible="False" IsEnabled="False" Click="CircuitClearRouteClick"
+                          ToolTip.Tip="恢复自动布线" AutomationProperties.Name="清除所选网络人工布线" />
+                  <ComboBox x:Name="AnalogAddTypeSelector" IsVisible="False"
+                            ItemsSource="{x:Static ui:AnalogComponentCatalog.Components}" SelectedIndex="0" />
                 </WrapPanel>
-                <Grid Grid.Row="3" x:Name="CircuitWorkspaceGrid" ColumnDefinitions="190,*,340" MinHeight="300">
+                <Grid Grid.Row="3" x:Name="CircuitWorkspaceGrid" ColumnDefinitions="190,*,280" MinHeight="160">
                   <Border x:Name="CircuitPalettePanel" Grid.Column="0" Background="{DynamicResource WorkshopPanelBrush}"
                           BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
-                          CornerRadius="4" Padding="8" Margin="0,0,12,0">
-                    <Grid RowDefinitions="Auto,*">
-                      <TextBlock Text="元件库" Classes="workshop-label" Margin="2,0,0,8" />
-                      <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+                          CornerRadius="0" Padding="8" Margin="0,0,1,0">
+                    <Grid RowDefinitions="Auto,Auto,Auto,*">
+                      <TextBlock Text="元件库" Classes="workshop-text" FontWeight="SemiBold" Margin="2,0,0,8" />
+                      <TextBox Grid.Row="1" x:Name="CircuitComponentSearch" Classes="workshop-input" Watermark="搜索元件"
+                               TextChanged="CircuitComponentSearchChanged" Margin="0,0,0,6" AutomationProperties.Name="搜索原理图元件" />
+                      <ComboBox Grid.Row="2" x:Name="CircuitCategorySelector" Classes="workshop-input"
+                                SelectionChanged="CircuitCategoryChanged" Margin="0,0,0,8" HorizontalAlignment="Stretch"
+                                AutomationProperties.Name="元件分类" />
+                      <ScrollViewer Grid.Row="3" HorizontalScrollBarVisibility="Disabled">
                         <ItemsControl x:Name="CircuitComponentPalette"
                                       ItemsSource="{x:Static ui:AnalogComponentCatalog.Components}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                              <Border Tag="{Binding}" Background="{DynamicResource WorkshopControlBrush}"
-                                      BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
-                                      CornerRadius="3" Padding="8,6" Margin="0,0,0,6" Cursor="Hand"
+                              <Border Tag="{Binding}" Background="Transparent"
+                                      BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="0,0,0,1"
+                                      Padding="2,8" Cursor="Hand" Focusable="True"
                                       PointerPressed="CircuitPaletteItemPointerPressed"
+                                      KeyDown="CircuitPaletteItemKeyDown"
                                       AutomationProperties.Name="{Binding DisplayName}">
-                                <StackPanel Spacing="1">
+                                <Grid ColumnDefinitions="42,*">
+                                  <Viewbox Width="36" Height="30" Margin="0,0,6,0">
+                                    <Canvas Width="{Binding SymbolWidth}" Height="{Binding SymbolHeight}">
+                                      <Path Data="{Binding SymbolPath, Converter={StaticResource SchematicGeometryConverter}}"
+                                            Stroke="{DynamicResource WorkshopTextBrush}" StrokeThickness="4" />
+                                    </Canvas>
+                                  </Viewbox>
+                                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                   <TextBlock Text="{Binding DisplayName}" Classes="workshop-text" FontSize="11"
                                              TextTrimming="CharacterEllipsis" />
-                                  <TextBlock Text="{Binding Category}" Classes="workshop-muted" FontSize="9"
+                                  <TextBlock Text="{Binding Type}" Classes="workshop-muted" FontSize="9"
                                              TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
+                                </Grid>
                               </Border>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>
@@ -622,19 +653,21 @@
                   </Border>
                   <Border x:Name="CircuitCanvasSurface" Grid.Column="1"
                           Background="{DynamicResource WorkshopCanvasBrush}" BorderBrush="{DynamicResource WorkshopBorderBrush}"
-                          BorderThickness="1" CornerRadius="4" ClipToBounds="True"
+                          BorderThickness="0" CornerRadius="0" ClipToBounds="True"
                           Focusable="True" AutomationProperties.Name="模拟电路原理图画布"
                           KeyDown="CircuitCanvasKeyDown"
                           PointerPressed="CircuitCanvasPointerPressed"
                           PointerMoved="CircuitCanvasPointerMoved"
+                          PointerExited="CircuitCanvasPointerExited"
                           PointerReleased="CircuitCanvasPointerReleased"
                           PointerWheelChanged="CircuitCanvasPointerWheelChanged">
                     <Grid ClipToBounds="True">
-                      <Canvas x:Name="CircuitGridLayer" Width="2400" Height="1600" IsHitTestVisible="False" />
-                      <Canvas x:Name="CircuitWireLayer" Width="2400" Height="1600" />
-                      <Canvas x:Name="CircuitCrossingLayer" Width="2400" Height="1600" IsHitTestVisible="False" />
-                      <Canvas x:Name="CircuitJunctionLayer" Width="2400" Height="1600" />
+                      <Canvas x:Name="CircuitGridLayer" Width="2400" Height="1600" HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False" />
+                      <Canvas x:Name="CircuitWireLayer" Width="2400" Height="1600" HorizontalAlignment="Left" VerticalAlignment="Top" />
+                      <Canvas x:Name="CircuitCrossingLayer" Width="2400" Height="1600" HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False" />
+                      <Canvas x:Name="CircuitJunctionLayer" Width="2400" Height="1600" HorizontalAlignment="Left" VerticalAlignment="Top" />
                       <ItemsControl x:Name="CircuitNodeLayer" Width="2400" Height="1600"
+                                    HorizontalAlignment="Left" VerticalAlignment="Top"
                                     ItemsSource="{Binding AnalogCircuit.Components}">
                         <ItemsControl.ItemsPanel>
                           <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
@@ -647,26 +680,31 @@
                         </ItemsControl.Styles>
                         <ItemsControl.ItemTemplate>
                           <DataTemplate>
-                            <Border Width="{Binding Descriptor.SymbolWidth}" Height="{Binding Descriptor.SymbolHeight}"
+                            <Border Width="{Binding VisualWidth}" Height="{Binding VisualHeight}" Classes="eda-symbol"
                                     Tag="{Binding}" ToolTip.Tip="{Binding Descriptor.DisplayName}"
                                     Focusable="True" IsTabStop="True"
                                     AutomationProperties.Name="{Binding Id}"
                                     AutomationProperties.HelpText="{Binding Descriptor.DisplayName}"
-                                    Background="{DynamicResource WorkshopControlBrush}"
-                                    BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
-                                    CornerRadius="3" PointerPressed="CircuitComponentPointerPressed"
+                                    PointerPressed="CircuitComponentPointerPressed"
                                     KeyDown="CircuitComponentKeyDown">
-                              <Canvas Width="{Binding Descriptor.SymbolWidth}" Height="{Binding Descriptor.SymbolHeight}"
+                              <Canvas Width="{Binding VisualWidth}" Height="{Binding VisualHeight}"
                                       ClipToBounds="False">
-                                <TextBlock Canvas.Left="8" Canvas.Top="4" MaxWidth="112"
-                                           Text="{Binding Id}" Classes="workshop-text" FontSize="10"
+                                <TextBlock Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}" MaxWidth="120"
+                                           Text="{Binding Id}" Classes="workshop-text" FontSize="12"
                                            FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                <Path Data="{Binding Descriptor.SymbolPath, Converter={StaticResource SchematicGeometryConverter}}"
-                                      Stroke="{DynamicResource WorkshopTextBrush}" StrokeThickness="2"
-                                      StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent"
-                                      IsHitTestVisible="False" />
-                                <ItemsControl Width="{Binding Descriptor.SymbolWidth}" Height="{Binding Descriptor.SymbolHeight}"
-                                              ItemsSource="{Binding Pins}">
+                                <TextBlock Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding ValueLabelY}" MaxWidth="144"
+                                           Text="{Binding ValueLabel}" Classes="workshop-muted" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                <Grid Width="{Binding VisualWidth}" Height="{Binding VisualHeight}" IsHitTestVisible="False">
+                                  <Canvas Width="{Binding Descriptor.SymbolWidth}" Height="{Binding Descriptor.SymbolHeight}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="50%,50%">
+                                    <Canvas.RenderTransform><RotateTransform Angle="{Binding Rotation}" /></Canvas.RenderTransform>
+                                    <Path Data="{Binding Descriptor.SymbolPath, Converter={StaticResource SchematicGeometryConverter}}"
+                                          Stroke="{DynamicResource WorkshopTextBrush}" StrokeThickness="2"
+                                          StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent" />
+                                  </Canvas>
+                                </Grid>
+                                <ItemsControl Width="{Binding VisualWidth}" Height="{Binding VisualHeight}"
+                                              ItemsSource="{Binding Pins}" ClipToBounds="False">
                                   <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
                                   </ItemsControl.ItemsPanel>
@@ -711,11 +749,19 @@
                                  Stroke="{DynamicResource WorkshopAccentBrush}" StrokeThickness="3" />
                         <Border x:Name="CircuitPaletteDragPreview" IsVisible="False"
                                 Width="150" Height="54" IsHitTestVisible="False"
-                                Background="{DynamicResource WorkshopControlBrush}"
-                                BorderBrush="{DynamicResource WorkshopAccentBrush}" BorderThickness="2"
-                                CornerRadius="4" Opacity="0.9" Padding="8">
-                          <TextBlock x:Name="CircuitPaletteDragPreviewText" Classes="workshop-text"
-                                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                Background="Transparent" Opacity="0.65">
+                          <Grid>
+                            <Viewbox Stretch="Uniform">
+                              <Grid x:Name="CircuitPlacementBounds" Width="128" Height="96">
+                              <Canvas x:Name="CircuitPlacementCanvas" Width="128" Height="96"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="50%,50%">
+                                <Path x:Name="CircuitPlacementSymbol" Stroke="{DynamicResource WorkshopTextBrush}" StrokeThickness="2" />
+                              </Canvas>
+                              </Grid>
+                            </Viewbox>
+                            <TextBlock x:Name="CircuitPaletteDragPreviewText" Classes="workshop-text" FontSize="11"
+                                       VerticalAlignment="Top" Margin="0,-18,0,0" />
+                          </Grid>
                         </Border>
                       </Canvas>
                     </Grid>
@@ -727,15 +773,11 @@
                                 Padding="8" Margin="12,0,0,0">
                   <Grid MinHeight="180">
                     <Border x:Name="CircuitInspectorEmptyState"
-                            Background="{DynamicResource WorkshopControlBrush}"
-                            BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
-                            CornerRadius="4" Padding="16"
+                            Padding="12"
                             AutomationProperties.Name="原理图检查器未选择状态">
                       <StackPanel Spacing="5" VerticalAlignment="Center" HorizontalAlignment="Center">
                         <TextBlock Text="未选择元件" Classes="workshop-text" FontSize="14"
                                    FontWeight="SemiBold" HorizontalAlignment="Center" />
-                        <TextBlock Text="元件属性将在此处显示" Classes="workshop-muted" FontSize="10"
-                                   HorizontalAlignment="Center" />
                       </StackPanel>
                     </Border>
                     <Border x:Name="CircuitInspectorNetworkState" IsVisible="False"
@@ -764,30 +806,22 @@
                     <ItemsControl x:Name="AnalogComponentList" IsVisible="False">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
-                        <Border Background="{DynamicResource WorkshopControlBrush}"
-                                BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="1"
-                                CornerRadius="4" Padding="10" Margin="0,0,0,10">
+                        <Border Padding="6" Margin="0,0,0,10">
                           <StackPanel Spacing="10">
-                            <Grid ColumnDefinitions="*,120,42">
+                            <TextBlock Text="{Binding Descriptor.DisplayName}" Classes="workshop-text" FontSize="13" FontWeight="SemiBold" />
+                            <Grid ColumnDefinitions="*,34">
                               <TextBox Grid.Column="0" Classes="workshop-input" Text="{Binding Id, Mode=TwoWay}"
-                                       Watermark="元件 ID" Margin="0,0,8,0" />
-                              <ComboBox Grid.Column="1" Classes="workshop-input"
-                                        ItemsSource="{x:Static ui:AnalogComponentCatalog.Components}"
-                                        SelectedItem="{Binding SelectedDescriptor, Mode=TwoWay}" Margin="0,0,8,0">
-                                <ComboBox.ItemTemplate>
-                                  <DataTemplate><TextBlock Text="{Binding DisplayName}" /></DataTemplate>
-                                </ComboBox.ItemTemplate>
-                              </ComboBox>
-                              <Button Grid.Column="2" Classes="workshop-button workshop-icon" Content="×" Tag="{Binding}"
+                                       Watermark="元件 ID" Margin="0,0,8,0" AutomationProperties.Name="元件 ID" />
+                              <Button Grid.Column="1" Classes="workshop-button workshop-icon" Content="×" Tag="{Binding}"
                                       ToolTip.Tip="删除模拟元件" AutomationProperties.Name="删除模拟元件"
                                       Click="RemoveAnalogComponentClick" />
                             </Grid>
                             <ItemsControl ItemsSource="{Binding Pins}">
                               <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                  <Grid ColumnDefinitions="96,*" Margin="0,0,0,6">
+                                  <Grid ColumnDefinitions="72,*" Margin="0,0,0,6">
                                     <TextBlock Text="{Binding DisplayName}" Classes="workshop-label"
-                                               VerticalAlignment="Center" />
+                                               VerticalAlignment="Center" TextWrapping="Wrap" />
                                     <TextBox Grid.Column="1" Classes="workshop-input" Text="{Binding Node, Mode=TwoWay}"
                                              Watermark="节点 ID" AutomationProperties.Name="模拟元件引脚节点" />
                                   </Grid>
@@ -797,39 +831,40 @@
                             <ItemsControl ItemsSource="{Binding Properties}">
                               <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                  <Grid ColumnDefinitions="96,*" Margin="0,0,0,6">
-                                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                      <TextBlock Text="{Binding DisplayName}" Classes="workshop-label" />
+                                  <Grid RowDefinitions="Auto,Auto" Margin="0,0,0,8">
+                                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,0,4">
+                                      <TextBlock Text="{Binding DisplayName}" Classes="workshop-label" TextWrapping="Wrap" />
                                       <TextBlock Text="{Binding Unit}" Classes="workshop-muted" FontSize="9" />
                                     </StackPanel>
-                                    <NumericUpDown Grid.Column="1" Classes="workshop-input"
+                                    <NumericUpDown Grid.Row="1" Classes="workshop-input"
                                                    IsVisible="{Binding IsNumber}"
                                                    Value="{Binding NumberValue, Mode=TwoWay}"
                                                    Minimum="{Binding NumberMinimum}" Maximum="{Binding NumberMaximum}"
                                                    Increment="{Binding NumberIncrement}"
                                                    AutomationProperties.Name="模拟元件数值属性" />
-                                    <TextBox Grid.Column="1" Classes="workshop-input" IsVisible="{Binding IsText}"
+                                    <TextBox Grid.Row="1" Classes="workshop-input" IsVisible="{Binding IsText}"
                                              Text="{Binding TextValue, Mode=TwoWay}"
                                              AutomationProperties.Name="模拟元件文本属性" />
-                                    <Grid Grid.Column="1" ColumnDefinitions="*,*" IsVisible="{Binding IsModel}">
+                                    <Grid Grid.Row="1" RowDefinitions="Auto,Auto" IsVisible="{Binding IsModel}">
                                       <ComboBox Classes="workshop-input" ItemsSource="{Binding Options}"
-                                                SelectedItem="{Binding TextValue, Mode=TwoWay}" Margin="0,0,6,0"
+                                                SelectedItem="{Binding TextValue, Mode=TwoWay}" Margin="0,0,0,4"
+                                                HorizontalAlignment="Stretch"
                                                 ToolTip.Tip="选择已登记的审计模型 ID"
                                                 AutomationProperties.Name="模拟元件审计模型选择" />
-                                      <TextBox Grid.Column="1" Classes="workshop-input"
+                                      <TextBox Grid.Row="1" Classes="workshop-input"
                                                Text="{Binding TextValue, Mode=TwoWay}"
                                                ToolTip.Tip="审计模型引用需要运行时模型数据库授权"
                                                AutomationProperties.Name="模拟元件模型 ID" />
                                     </Grid>
-                                    <CheckBox Grid.Column="1" IsVisible="{Binding IsBoolean}"
+                                    <CheckBox Grid.Row="1" IsVisible="{Binding IsBoolean}"
                                               IsChecked="{Binding BooleanValue, Mode=TwoWay}"
                                               Foreground="{DynamicResource WorkshopTextBrush}"
                                               AutomationProperties.Name="模拟元件布尔属性" />
-                                    <StackPanel Grid.Column="1" IsVisible="{Binding IsJson}" Spacing="5">
+                                    <StackPanel Grid.Row="1" IsVisible="{Binding IsJson}" Spacing="5">
                                       <ItemsControl ItemsSource="{Binding JsonFields}">
                                         <ItemsControl.ItemTemplate>
                                           <DataTemplate>
-                                            <Grid ColumnDefinitions="96,*" Margin="0,0,0,4">
+                                            <Grid ColumnDefinitions="88,*" Margin="0,0,0,4">
                                               <TextBlock Text="{Binding Name}" Classes="workshop-muted" FontSize="9"
                                                          VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                               <NumericUpDown Grid.Column="1" Classes="workshop-input"
@@ -1448,7 +1483,8 @@
               BorderBrush="{DynamicResource WorkshopBorderBrush}" BorderThickness="0,1,0,0" Padding="18,8">
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Grid.Column="0" Text="{Binding ValidationSummary}" Classes="workshop-muted" FontSize="10" />
-          <TextBlock Grid.Column="1" Text="M26 · MODULE AUTHORING" Classes="workshop-muted" FontSize="9" />
+          <TextBlock Grid.Column="1" x:Name="CircuitSelectionText" Text="未选择" Classes="workshop-muted" FontSize="10"
+                     MaxWidth="420" TextTrimming="CharacterEllipsis" />
         </Grid>
       </Border>
     </Grid>
